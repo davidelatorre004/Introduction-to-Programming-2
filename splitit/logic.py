@@ -2,6 +2,8 @@
 
 import db
 
+CATEGORIES = ["rent", "groceries", "fun", "transport", "other"]
+
 
 def get_groups():
     """Return every group as a list of dicts."""
@@ -51,7 +53,7 @@ def add_member(group_id, name):
     return member["id"]
 
 
-def add_expense(group_id, payer_id, description, amount, date):
+def add_expense(group_id, payer_id, description, amount, date, category="other"):
     """Save a new expense, paid by one member for the whole group, and return its id."""
     expense = {
         "id": db.next_id("expenses"),
@@ -60,9 +62,19 @@ def add_expense(group_id, payer_id, description, amount, date):
         "description": description.strip(),
         "amount": amount,
         "date": date,
+        "category": category,
     }
     db.append_row("expenses", expense)
     return expense["id"]
+
+
+def category_totals(group_id):
+    """Return the total spent per category in one group, skipping empty categories."""
+    totals = {}
+    for expense in get_group_expenses(group_id):
+        category = expense["category"]
+        totals[category] = totals.get(category, 0.0) + float(expense["amount"])
+    return totals
 
 
 def remove_member(member_id):
