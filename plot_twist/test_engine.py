@@ -4,6 +4,8 @@ Each test name starts with the id of what it demonstrates: test_a1_... for the
 scenarios, test_pt01_... for the required capabilities, test_r1_... for the
 business rules, test_story_... for the story data. The tests check events and
 states, never the wording, so the texts in story.py can be rewritten freely.
+
+The tests that save the game write to a temporary folder (see conftest.py).
 """
 
 import copy
@@ -12,6 +14,7 @@ import json
 import pytest
 
 import engine
+import save
 import story
 
 
@@ -107,6 +110,39 @@ def offered(state, target):
     return [(action["verb"], action["item"]) for action in engine.actions_for(state, target)]
 
 
+def assert_same_routes(resumed, played):
+    """The resumed game offers exactly the doors and the actions of the game that was played."""
+    for door in story.DOORS:
+        assert engine.door_status(resumed, door) == engine.door_status(played, door)
+    for thing in engine.things_here(played):
+        assert engine.actions_for(resumed, thing["id"]) == engine.actions_for(played, thing["id"])
+
+
+# --- The save file, used the way main.py uses it --------------------------------
+
+
+def save_if_accepted(result):
+    """main.py's rule: after an action or a new game, save if it was accepted, and only then."""
+    state, outcome = result
+    if outcome["ok"]:
+        save.save_game(state)
+    return state, outcome
+
+
+def play_saving(steps):
+    """Start a new game and play the steps the way the app does, saving after each one."""
+    state, _ = save_if_accepted(engine.start_new_game(None))
+    for step in steps:
+        state, outcome = save_if_accepted(engine.perform(state, step))
+        assert outcome["ok"], f"{step} was refused: {outcome}"
+    return state
+
+
+def resume():
+    """What the app does when it opens: read the save file and check it. None if there is nothing to resume."""
+    return engine.restore_state(save.load_game())
+
+
 # --- Acceptance scenarios A1-A6 ------------------------------------------------
 
 
@@ -158,7 +194,7 @@ def test_a3_revisited_cabin_offers_no_second_key():
 def test_a4_resume_restores_scene_items_and_choice():
     """A4: collect items, make the choice, close and reopen: the same game, with the same routes.
 
-    Here the game goes through JSON; M2 repeats this through the real save file.
+    Here the game only goes through JSON in memory; the next test uses the real save file.
     """
     state = play(GET_KEY + [OPEN_CRAB])
     resumed = reopen(state)
@@ -166,11 +202,19 @@ def test_a4_resume_restores_scene_items_and_choice():
     assert resumed["room"] == "deck"
     assert resumed["inventory"] == ["wand", "key"]
     assert resumed["flags"]["chosen_door"] == "deck_to_crab"
-    for door in story.DOORS:
-        assert engine.door_status(resumed, door) == engine.door_status(state, door)
-    for thing in engine.things_here(state):
-        assert engine.actions_for(resumed, thing["id"]) == engine.actions_for(state, thing["id"])
     assert engine.door_status(resumed, "deck_to_angel") == "sealed"
+    assert_same_routes(resumed, state)
+
+
+def test_a4_resume_through_the_save_file():
+    """A4 with the real file: every accepted action is saved, and reopening the app reads only the file."""
+    played = play_saving(GET_KEY + [OPEN_CRAB, TO_CRAB])
+    resumed = resume()
+    assert resumed == played
+    assert resumed["room"] == "crab_room"
+    assert resumed["inventory"] == ["wand", "key"]
+    assert resumed["flags"]["chosen_door"] == "deck_to_crab"
+    assert_same_routes(resumed, played)
 
 
 @pytest.mark.parametrize("steps, ending", [
@@ -215,6 +259,22 @@ def test_a6_confirmed_restart_restores_the_opening():
     assert fresh["inventory"] == []
     assert fresh["flags"] == story.FLAGS
     assert fresh["ending"] is None
+
+
+def test_a6_restart_through_the_save_file(save_file):
+    """A6 with the real file: cancelling leaves the save as it was; confirming replaces it with a new game."""
+    play_saving(GET_KEY + [OPEN_CRAB])
+    saved_bytes = save_file.read_bytes()
+    progress = resume()
+
+    _, outcome = save_if_accepted(engine.start_new_game(progress))
+    assert outcome["event"] == "needs_confirmation"
+    assert save_file.read_bytes() == saved_bytes
+    assert resume() == progress
+
+    _, outcome = save_if_accepted(engine.start_new_game(progress, confirmed=True))
+    assert outcome["ok"]
+    assert resume() == engine.new_game()
 
 
 # --- PT01-PT05: required capabilities -----------------------------------------
@@ -321,6 +381,15 @@ def test_pt05_after_an_ending_nothing_is_offered():
         assert engine.actions_for(finished, thing["id"]) == []
 
 
+def test_pt05_finished_game_resumes_on_its_ending():
+    """The outcome can be reviewed after reopening the app: the save remembers the ending."""
+    play_saving(CRAB_ENDING)
+    resumed = resume()
+    assert engine.is_over(resumed)
+    assert resumed["ending"] == "saved"
+    assert engine.menu_options(resumed) == ["new_game", "resume"]
+
+
 # --- R1-R4: business rules -----------------------------------------------------
 
 
@@ -411,7 +480,38 @@ def test_r4_every_ending_is_reachable_from_a_new_game():
     assert reached == set(story.ENDINGS)
 
 
-# --- Saving: the state is plain data --------------------------------------------
+# --- Saving and resuming -----------------------------------------------------------
+
+
+def test_persistence_every_accepted_action_survives_a_restart():
+    """Progress is saved after each accepted action: reopening at any moment gives back the game in play."""
+    for state in sample_states():
+        for action in every_action():
+            new_state, outcome = save_if_accepted(engine.perform(state, action))
+            if outcome["ok"]:
+                assert resume() == new_state, f"{action} was not saved"
+
+
+def test_persistence_refused_actions_leave_the_file_untouched(save_file):
+    """Rejected actions leave existing data unchanged, and the game on screen still matches the file."""
+    state = play_saving(GET_KEY + [OPEN_CRAB])
+    saved_bytes = save_file.read_bytes()
+    for action in (TO_ANGEL, OPEN_ANGEL, TAKE_WAND, SOLVE_HOLD, GIVE_TO_CRAB):
+        state, outcome = save_if_accepted(engine.perform(state, action))
+        assert not outcome["ok"]
+        assert save_file.read_bytes() == saved_bytes
+        assert resume() == state
+
+
+def test_persistence_resume_needs_a_usable_save(save_file):
+    """No file, a broken file or an impossible game: the menu offers only a new game."""
+    assert engine.menu_options(resume()) == ["new_game"]
+    save_file.write_text("{ not json", encoding="utf-8")
+    assert engine.menu_options(resume()) == ["new_game"]
+    save_file.write_text(json.dumps({"version": save.VERSION, "state": {"room": "bridge"}}), encoding="utf-8")
+    assert engine.menu_options(resume()) == ["new_game"]
+    play_saving([TAKE_WAND])
+    assert engine.menu_options(resume()) == ["new_game", "resume"]
 
 
 def test_save_state_survives_json_unchanged():

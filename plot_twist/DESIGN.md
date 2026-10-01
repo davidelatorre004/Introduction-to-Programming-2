@@ -64,7 +64,8 @@ Cosa chiede il brief per la prima versione, e dove si trova nel gioco:
 | `save.py` | Scrive e legge il salvataggio JSON | `json`, `os` |
 | `main.py` | pygame: finestra, input, disegno, scene | `engine`, `save`, `story` |
 | `test_engine.py` | Scenari A1–A6 e requisiti del brief | `engine`, `story`; da M2 anche `save` |
-| `test_save.py` | Comportamento di `save.py` (oppure in fondo a `test_engine.py`) | `save` |
+| `test_save.py` | Comportamento di `save.py` | `save`, `engine` |
+| `conftest.py` | Preparazione comune dei test: sposta il salvataggio in una cartella temporanea | `save` |
 
 La cartella `plot_twist/` sta accanto a `splitit/` ed è organizzata allo stesso modo:
 - un `pyproject.toml` per uv, con Python 3.12 e pytest (pygame si aggiunge in M3);
@@ -234,11 +235,12 @@ Funzioni private di supporto:
 
 ## 7. `save.py`: il salvataggio
 
-- **Funzioni:** `save_game(state, path)` e `load_game(path)`. Il percorso è un parametro, così i test usano `tmp_path` e non toccano mai il salvataggio vero.
+- **Funzioni:** `save_game(state, path)` e `load_game(path)`. Il percorso è facoltativo: se manca si usa `SAVE_PATH`, cioè `savegame.json` accanto al gioco. `SAVE_PATH` si legge a ogni chiamata, così `conftest.py` può spostarlo in una cartella temporanea per ogni test e nessun test tocca il salvataggio vero.
 - **Formato:** il file contiene un numero di `version` più lo stato.
 - **Scrittura atomica:** prima un file temporaneo, poi la rinomina. Si salva dopo ogni azione, quindi un crash a metà scrittura non deve corrompere la partita.
-- **Errori:** un file mancante, un JSON rotto o una versione diversa danno `None`, mai un'eccezione. Il contenuto lo valida `restore_state`.
-- **Repo:** il file di salvataggio è nel `.gitignore`.
+- **Errori in lettura:** un file mancante, un JSON rotto o una versione diversa danno `None`, mai un'eccezione. Il contenuto lo valida `restore_state`.
+- **Errori in scrittura:** non si nascondono, ma si sollevano. Sarà `main.py` (M3) a mostrare un messaggio se il salvataggio non riesce.
+- **Repo:** il file di salvataggio e la sua copia temporanea sono nel `.gitignore`.
 
 ## 8. `main.py`: l'interfaccia pygame
 
@@ -369,7 +371,9 @@ Per chiudere del tutto A4 e A6 già in M1 basta anticipare `save.py`, che è pic
 
 ### M2 — Salvataggio
 
-File: `save.py` e `test_save.py`. In più si completano la parte su file di A4 e A6 e i test di persistenza.
+**Stato: fatta.** 83 test verdi in tutto, compresi A4 e A6 con il file vero. In più, 9 bug inseriti apposta in `save.py` vengono tutti scoperti dai test.
+
+File: `save.py`, `test_save.py`, `conftest.py`. In più si completano la parte su file di A4 e A6 e i test di persistenza.
 
 *Fatto quando*:
 - salvi a metà partita, ricarichi, e ritrovi stanza, inventario, flag e porta sigillata identici;

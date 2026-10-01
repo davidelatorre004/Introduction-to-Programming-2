@@ -2,5 +2,6 @@ __pycache__/
 .venv/
 .pytest_cache/
 .DS_Store
-# The player's save file (written by save.py, from M2 on).
+# The player's save file (written by save.py), and its temporary copy while saving.
 savegame.json
+savegame.json.tmp
