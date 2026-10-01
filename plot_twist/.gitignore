@@ -1,0 +1,6 @@
+__pycache__/
+.venv/
+.pytest_cache/
+.DS_Store
+# The player's save file (written by save.py, from M2 on).
+savegame.json

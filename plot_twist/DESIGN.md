@@ -84,11 +84,11 @@ Convenzioni:
 | `FLAGS` | Nome del flag → valore iniziale | `cabin_solved: False`, `crab_truthful: False`, `chosen_door: None` |
 | `ROOMS` | Le 5 stanze | `name`, `description`, `outdoor` (il ponte è all'aperto: serve al disegno) |
 | `ITEMS` | `wand`, `key` | `name`, `description`, `room`, `appears_if` (flag che lo fa comparire, o `None`), `pickup_text` |
-| `DOORS` | 8 porte, una per verso | `room`, `to`, `requires` (oggetto o `None`), `choice_flag` (flag o `None`), `locked_text`, `sealed_text` |
+| `DOORS` | 8 porte, una per verso | `room`, `to`, `requires` (oggetto o `None`), `choice_flag` (flag o `None`), `locked_text`, `sealed_text`, `open_text` (i tre testi solo per le porte chiuse a chiave) |
 | `OBJECTS` | 2 enigmi e 2 personaggi | `kind` (`puzzle` o `character`), `name`, `room`, `look_text`, `done_text` (obbligatorio per gli enigmi), `reactions` (oggetto usato → reazione) |
 | `ENDINGS` | `saved`, `explosion` | `title`, `text` (righe della schermata finale), `good` |
 | `CLUES` | Flag → testo mostrato nell'inventario | `crab_truthful` → "Il granchio dice sempre la verità." |
-| `MESSAGES` | Testi generici | Scena d'apertura, domanda di conferma per ricominciare, spiegazioni dei rifiuti ("non succede niente", "non è qui", …) |
+| `MESSAGES` | Testi generici | Scena d'apertura, domanda di conferma per ricominciare, spiegazioni dei rifiuti ("non succede niente", "non è qui", …), testo di una porta aperta, etichette delle azioni del tasto E |
 
 ### Porte
 
@@ -107,7 +107,7 @@ Ogni collegamento ha due porte e ognuna sta in una sola stanza, quindi il motore
 
 ### Reazioni
 
-Una reazione è `set_flag` (nome e valore) oppure `ending` (id), più un `text`.
+Una reazione imposta un flag (`set_flag` con il nome e `value` con il valore) oppure chiude la partita (`ending` con l'id del finale). In entrambi i casi ha un `text`.
 
 | Bersaglio | Oggetto usato | Effetto |
 |---|---|---|
@@ -343,6 +343,8 @@ Convenzioni:
 ## 12. Milestone
 
 ### M1 — Il gioco senza grafica
+
+**Stato: fatta.** 60 test verdi. In più, 23 bug inseriti apposta nel motore vengono tutti scoperti dai test.
 
 File: `story.py`, `engine.py`, `test_engine.py`.
 
