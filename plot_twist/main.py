@@ -3,8 +3,9 @@
 Run it with:  uv run python main.py
 
 Everything is drawn on a small 256 x 224 screen, then blown up three times
-without smoothing, which gives the 8-bit look. Until the sprites arrive (M6),
-everything is a colored rectangle.
+without smoothing, which gives the 8-bit look. The pictures come from sprites.py
+and the letters from pixel_font.py; a thing without a picture is drawn as a
+colored rectangle.
 
 The rules are not here: main.py asks engine.py what happens, and saves through
 save.py after every accepted action. The interface keeps its own small state in
@@ -16,7 +17,9 @@ import pygame
 
 import engine
 import save
+import sprites
 import story
+from pixel_font import PixelFont
 
 # --- Sizes -----------------------------------------------------------------------
 
@@ -35,6 +38,13 @@ BANNER_FRAMES = 2 * FPS    # how long the room name stays up after entering a ro
 DIALOG_LINES = 4           # lines of text per page of the text box
 DIALOG_PADDING = 8
 DIALOG_TEXT_WIDTH = WIDTH - 4 * DIALOG_PADDING  # margin and padding on both sides of the box
+FADE_FRAMES = FPS // 4     # how long a room takes to come out of the dark after a door
+WALK_STEP_FRAMES = 8       # frames per step of the walking animation
+WAVE_FRAMES = FPS // 2     # frames between the two pictures of the sea
+ENDING_SCENE_HEIGHT = 64   # the picture at the top of the ending screen
+ENDING_HORIZON = 40        # where the sea starts in that picture
+ENDING_MENU_TOP = 186
+EXPLOSION_DELAY = 12       # frames before the ship blows up in the bad ending
 
 # Where the opening of a door is on each wall: first tile (column, row), then width and height in tiles.
 DOOR_OPENINGS = {
@@ -74,6 +84,10 @@ COLORS = {
     "seal": (110, 230, 255),
     "good_ending": (24, 50, 90),
     "bad_ending": (80, 20, 20),
+    "dawn": (250, 180, 120),
+    "dawn_light": (252, 214, 160),
+    "land": (52, 128, 80),
+    "night": (40, 24, 40),
 }
 
 # Floor and wall color of each room.
@@ -394,6 +408,11 @@ def new_app(fonts):
         "question": "",          # what the confirm scene asks
         "confirming": "new_game",  # what "Sì" does: start a new game, or the action waiting for it
         "confirm_back": "menu",  # the scene to go back to if the answer is no
+        "frame": 0,              # frames since the game started, for everything that moves on screen
+        "scene_frames": 0,       # frames since the current scene started
+        "walk": 0,               # frames the player has spent walking, for the walking animation
+        "moving": False,         # whether the player moved in the last frame
+        "fade": 0,               # frames left before the room is out of the dark
     }
     open_main_menu(app)
     return app
@@ -402,6 +421,7 @@ def new_app(fonts):
 def set_scene(app, scene, menu_index=0):
     app["scene"] = scene
     app["menu_index"] = menu_index
+    app["scene_frames"] = 0
 
 
 def open_main_menu(app):
@@ -501,6 +521,7 @@ def begin_game(app, state, opening_text):
     app["state"] = state
     app["dialog"] = []
     place_at_entry(app)
+    app["fade"] = FADE_FRAMES
     say(app, opening_text)
     save_progress(app)
     set_scene(app, "play")
@@ -514,6 +535,7 @@ def resume_game(app):
         set_scene(app, "ending")
         return
     place_at_entry(app)
+    app["fade"] = FADE_FRAMES
     show_banner(app, story.ROOMS[app["state"]["room"]]["name"])
     set_scene(app, "play")
 
@@ -563,6 +585,7 @@ def go_through(app, door):
     app["state"] = state
     save_progress(app)
     place_after_door(app, came_from)
+    app["fade"] = FADE_FRAMES
     show_banner(app, outcome["text"])
 
 
@@ -663,8 +686,13 @@ def held_direction(pressed):
 
 def update(app, dx, dy):
     """Move the game on by one frame. (dx, dy) is the direction held on the keyboard."""
+    app["frame"] += 1
+    app["scene_frames"] += 1
+    app["moving"] = False
     if app["banner_frames"] > 0:
         app["banner_frames"] -= 1
+    if app["fade"] > 0:
+        app["fade"] -= 1
     if app["scene"] != "play" or app["dialog"]:
         return
     if engine.is_over(app["state"]):
@@ -677,7 +705,11 @@ def update(app, dx, dy):
     speed = PLAYER_SPEED
     if dx != 0 and dy != 0:
         speed = PLAYER_SPEED * 0.7071  # the same speed on diagonals
+    before = app["player"]
     app["player"] = move(app["player"], dx * speed, dy * speed, solid_rects(app["state"]))
+    if app["player"] != before:
+        app["moving"] = True
+        app["walk"] += 1
     door = door_touched(app["state"]["room"], app["player"], dx, dy)
     if door is None:
         app["touching"] = None
@@ -688,15 +720,21 @@ def update(app, dx, dy):
 
 # --- Drawing -------------------------------------------------------------------------
 
+# The door pictures are drawn for the north wall: quarter turns (counterclockwise) for each wall.
+DOOR_TURNS = {"N": 0, "W": 1, "S": 2, "E": 3}
+
 
 def load_fonts():
-    """The two fonts of the game: pygame's built-in one, at two sizes."""
-    return {"text": pygame.font.Font(None, 16), "title": pygame.font.Font(None, 32)}
+    """The pixel font of the game at three sizes: for text, for titles, and for the big title."""
+    return {"text": PixelFont(1), "title": PixelFont(2), "big": PixelFont(3)}
 
 
-def draw_text(screen, font, text, color, position, align="left"):
-    """Write one line of text. `position` is its top-left, top-middle or top-right corner, as `align` says."""
-    image = font.render(text, False, color)  # False: no smoothing, the pixels stay sharp
+def draw_text(screen, font, text, color, position, align="left", shadow=False):
+    """Write one line of text. `position` is its top-left, top-middle or top-right corner, as `align` says.
+
+    With `shadow`, a dark copy just below and to the right keeps it readable over pictures.
+    """
+    image = font.render(text, False, color)
     rect = image.get_rect()
     if align == "center":
         rect.midtop = position
@@ -704,23 +742,28 @@ def draw_text(screen, font, text, color, position, align="left"):
         rect.topright = position
     else:
         rect.topleft = position
+    if shadow:
+        screen.blit(font.render(text, False, COLORS["black"]), rect.move(font.scale, font.scale))
     screen.blit(image, rect)
 
 
-def darker(color):
-    return (color[0] * 4 // 5, color[1] * 4 // 5, color[2] * 4 // 5)
+def shade(screen, area, alpha):
+    """Darken an area of the screen: alpha 0 changes nothing, 255 makes it black."""
+    veil = pygame.Surface(area.size, pygame.SRCALPHA)
+    veil.fill((0, 0, 0, alpha))
+    screen.blit(veil, area.topleft)
 
 
 def dim(screen):
     """Darken whatever is on screen, to put a menu or a question on top of it."""
-    shade = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-    shade.fill((0, 0, 0, 150))
-    screen.blit(shade, (0, 0))
+    shade(screen, screen.get_rect(), 150)
 
 
 def draw_box(screen, rect):
+    """A box for text, with a double border like old console games."""
     pygame.draw.rect(screen, COLORS["box"], rect)
     pygame.draw.rect(screen, COLORS["text"], rect, 1)
+    pygame.draw.rect(screen, COLORS["dim_text"], rect.inflate(-4, -4), 1)
 
 
 def draw_menu(app, screen, top):
@@ -731,27 +774,55 @@ def draw_menu(app, screen, top):
         if index == app["menu_index"]:
             label = "> " + label + " <"
             color = COLORS["highlight"]
-        draw_text(screen, font, label, color, (WIDTH // 2, top + index * (font.get_linesize() + 4)), "center")
+        position = (WIDTH // 2, top + index * (font.get_linesize() + 4))
+        draw_text(screen, font, label, color, position, "center", shadow=True)
+
+
+def wave_frame(app):
+    """Which of the two frames of the moving tiles (the sea) to show now."""
+    return (app["frame"] // WAVE_FRAMES) % 2
+
+
+def draw_sea(app, screen, area):
+    """Fill an area with moving sea."""
+    tile = sprites.image("wall_deck_" + str(wave_frame(app)))
+    if tile is None:
+        pygame.draw.rect(screen, COLORS["sea"], area)
+        return
+    for x in range(area.left, area.right, TILE):
+        for y in range(area.top, area.bottom, TILE):
+            part = pygame.Rect(0, 0, min(TILE, area.right - x), min(TILE, area.bottom - y))
+            screen.blit(tile, (x, y), part)
+
+
+def bob(app):
+    """How far a floating ship sways: 0 or 1 pixel, back and forth."""
+    return (app["frame"] // 20) % 2
 
 
 def draw_title_screen(app, screen):
-    screen.fill(COLORS["sea"])
-    for row in range(7):  # waves everywhere but the bottom, where the controls are written
-        for col in range(9):
-            x = col * 32 + (row % 2) * 16
-            y = 12 + row * 28
-            pygame.draw.line(screen, COLORS["foam"], (x, y), (x + 8, y))
+    draw_sea(app, screen, screen.get_rect())
+    ship = sprites.image("ship")
+    if ship is not None:
+        screen.blit(ship, ship.get_rect(center=(WIDTH // 2, 104 + bob(app))))
     font = app["fonts"]["text"]
-    draw_text(screen, app["fonts"]["title"], story.MESSAGES["title"], COLORS["text"], (WIDTH // 2, 48), "center")
-    draw_text(screen, font, story.MESSAGES["subtitle"], COLORS["foam"], (WIDTH // 2, 80), "center")
-    lines = wrap(story.MESSAGES["controls"], WIDTH - 32, text_width(font))
+    draw_text(screen, app["fonts"]["big"], story.MESSAGES["title"], COLORS["text"], (WIDTH // 2, 32), "center", True)
+    draw_text(screen, font, story.MESSAGES["subtitle"], COLORS["foam"], (WIDTH // 2, 68), "center", True)
+    lines = []
+    for key in ("controls_1", "controls_2"):
+        lines.extend(wrap(story.MESSAGES[key], WIDTH - 16, text_width(font)))
     for index, line in enumerate(lines):
-        y = HEIGHT - 8 - (len(lines) - index) * font.get_linesize()
-        draw_text(screen, font, line, COLORS["foam"], (WIDTH // 2, y), "center")
+        y = HEIGHT - 6 - (len(lines) - index) * font.get_linesize()
+        draw_text(screen, font, line, COLORS["foam"], (WIDTH // 2, y), "center", True)
 
 
 def draw_door(screen, door, status):
     rect = door_rect(door)
+    picture = sprites.image("door_" + status, turns=DOOR_TURNS[story.DOORS[door]["side"]])
+    if picture is not None:
+        screen.blit(picture, rect)
+        return
+    # No picture: colored rectangles.
     if status == "open":
         pygame.draw.rect(screen, COLORS["black"], rect)
     elif status == "locked":
@@ -765,9 +836,21 @@ def draw_door(screen, door, status):
         pygame.draw.line(screen, COLORS["black"], rect.topright, rect.bottomleft, 2)
 
 
+def thing_picture(thing):
+    """The sprite of an item, puzzle or character as it is now ("cabin_puzzle_solved"), or just by its id."""
+    picture = sprites.image(thing["id"] + "_" + thing["status"])
+    if picture is None:
+        picture = sprites.image(thing["id"])
+    return picture
+
+
 def draw_thing(screen, thing):
-    """An item, a puzzle or a character, as colored rectangles."""
+    """An item, a puzzle or a character: its sprite, or colored rectangles if it has none."""
     rect = thing_rect(thing["id"])
+    picture = thing_picture(thing)
+    if picture is not None:
+        screen.blit(picture, rect)
+        return
     color = THING_COLORS.get(thing["id"], MISSING_COLOR)
     if thing["kind"] == "item":
         pygame.draw.rect(screen, color, rect.inflate(-8, -8))  # small: it lies on the floor
@@ -782,34 +865,85 @@ def draw_thing(screen, thing):
             pygame.draw.rect(screen, COLORS["black"], eye)
 
 
+def player_picture(app):
+    """The player's sprite for the direction they face, standing (0) or in one of the two walking steps."""
+    fx, fy = app["facing"]
+    if fy > 0:
+        direction = "down"
+    elif fy < 0:
+        direction = "up"
+    else:
+        direction = "right"  # left is right, mirrored
+    step = 0
+    if app["moving"]:
+        step = 1 + (app["walk"] // WALK_STEP_FRAMES) % 2
+    return sprites.image("player_" + direction + "_" + str(step), flip=fx < 0)
+
+
 def draw_player(app, screen):
-    rect = player_rect(app["player"])
-    pygame.draw.rect(screen, COLORS["player"], rect)
+    body = player_rect(app["player"])
+    picture = player_picture(app)
+    if picture is not None:
+        # The sprite is taller than the body: it stands on it, feet on the bottom edge.
+        screen.blit(picture, picture.get_rect(midbottom=(body.centerx, body.bottom + 1)))
+        return
+    pygame.draw.rect(screen, COLORS["player"], body)
     fx, fy = app["facing"]
     for side in (-1, 1):
         # Two eyes side by side, on the side the player is looking at.
         eye = pygame.Rect(0, 0, 2, 2)
-        eye.center = (rect.centerx + fx * 3 + side * 3 * abs(fy), rect.centery + fy * 3 + side * 3 * abs(fx))
+        eye.center = (body.centerx + fx * 3 + side * 3 * abs(fy), body.centery + fy * 3 + side * 3 * abs(fx))
         pygame.draw.rect(screen, COLORS["black"], eye)
 
 
+def draw_railing(screen):
+    """The ship's wooden railing around the deck, with a post on every tile."""
+    rail = tile_rect(1, 1, COLUMNS - 2, ROWS - 2).inflate(4, 4)
+    pygame.draw.rect(screen, COLORS["railing"], rail, 2)
+    for x in range(rail.left + TILE - 1, rail.right - 2, TILE):
+        pygame.draw.rect(screen, COLORS["railing"], (x, rail.top - 2, 2, 4))
+        pygame.draw.rect(screen, COLORS["railing"], (x, rail.bottom - 2, 2, 4))
+    for y in range(rail.top + TILE - 1, rail.bottom - 2, TILE):
+        pygame.draw.rect(screen, COLORS["railing"], (rail.left - 2, y, 4, 2))
+        pygame.draw.rect(screen, COLORS["railing"], (rail.right - 2, y, 4, 2))
+
+
 def draw_room(app, screen):
-    room = app["state"]["room"]
-    floor, wall = ROOM_COLORS.get(room, DEFAULT_ROOM_COLORS)
+    state = app["state"]
+    room = state["room"]
+    floor_color, wall_color = ROOM_COLORS.get(room, DEFAULT_ROOM_COLORS)
+    floor = sprites.image("floor_" + room)
+    wall = sprites.image("wall_" + room + "_" + str(wave_frame(app)))
+    if wall is None:
+        wall = sprites.image("wall_" + room)
     screen.fill(COLORS["black"])
-    pygame.draw.rect(screen, wall, tile_rect(0, 0, COLUMNS, ROWS))
-    inside = tile_rect(1, 1, COLUMNS - 2, ROWS - 2)
-    pygame.draw.rect(screen, floor, inside)
-    for y in range(inside.top + TILE // 2, inside.bottom, TILE // 2):
-        pygame.draw.line(screen, darker(floor), (inside.left, y), (inside.right - 1, y))  # planks
+    for col in range(COLUMNS):
+        for row in range(ROWS):
+            inside = 1 <= col <= COLUMNS - 2 and 1 <= row <= ROWS - 2
+            picture = floor if inside else wall
+            if picture is None:
+                pygame.draw.rect(screen, floor_color if inside else wall_color, tile_rect(col, row))
+            else:
+                screen.blit(picture, tile_rect(col, row))
     if story.ROOMS[room]["outdoor"]:
-        pygame.draw.rect(screen, COLORS["railing"], inside.inflate(4, 4), 2)
-    for thing in engine.things_here(app["state"]):
+        draw_railing(screen)
+    standing = []
+    for thing in engine.things_here(state):
         if thing["kind"] == "door":
             draw_door(screen, thing["id"], thing["status"])
+        elif thing["kind"] == "item":
+            draw_thing(screen, thing)
         else:
+            standing.append(thing)
+    # From the back of the room to the front: what stands lower on screen covers the rest.
+    feet = player_rect(app["player"]).bottom
+    for thing in standing:
+        if thing_rect(thing["id"]).bottom <= feet:
             draw_thing(screen, thing)
     draw_player(app, screen)
+    for thing in standing:
+        if thing_rect(thing["id"]).bottom > feet:
+            draw_thing(screen, thing)
 
 
 def draw_hud(app, screen):
@@ -817,23 +951,28 @@ def draw_hud(app, screen):
     font = app["fonts"]["text"]
     state = app["state"]
     pygame.draw.rect(screen, COLORS["hud"], (0, 0, WIDTH, HUD_HEIGHT))
-    draw_text(screen, font, story.ROOMS[state["room"]]["name"], COLORS["text"], (8, 3))
-    draw_text(screen, font, story.MESSAGES["hint_inventory"], COLORS["dim_text"], (WIDTH - 8, 3), "right")
+    pygame.draw.line(screen, COLORS["dim_text"], (0, HUD_HEIGHT - 1), (WIDTH, HUD_HEIGHT - 1))
+    draw_text(screen, font, story.ROOMS[state["room"]]["name"], COLORS["text"], (8, 4))
+    draw_text(screen, font, story.MESSAGES["hint_inventory"], COLORS["dim_text"], (WIDTH - 8, 4), "right")
     if app["scene"] == "play" and not app["dialog"]:
         hint = prompt(state, app["player"])
         if hint:
-            draw_text(screen, font, hint, COLORS["highlight"], (8, 17))
-    x = WIDTH - 8
+            draw_text(screen, font, hint, COLORS["highlight"], (8, 18))
+    x = WIDTH - 4
     for item in reversed(state["inventory"]):
-        x -= 10
-        pygame.draw.rect(screen, THING_COLORS.get(item, MISSING_COLOR), (x, 19, 8, 8))
+        x -= 18
+        picture = sprites.image(item)
+        if picture is None:
+            pygame.draw.rect(screen, THING_COLORS.get(item, MISSING_COLOR), (x + 4, 19, 8, 8))
+        else:
+            screen.blit(picture, (x, 14))
 
 
 def draw_banner(app, screen):
     if app["banner_frames"] <= 0:
         return
     image = app["fonts"]["text"].render(app["banner"], False, COLORS["text"])
-    box = image.get_rect(center=(WIDTH // 2, HUD_HEIGHT + 28)).inflate(16, 8)
+    box = image.get_rect(center=(WIDTH // 2, HUD_HEIGHT + 28)).inflate(20, 12)
     draw_box(screen, box)
     screen.blit(image, image.get_rect(center=box.center))
 
@@ -849,14 +988,17 @@ def draw_dialog(app, screen):
     for index, line in enumerate(app["dialog"][0]):
         position = (box.left + DIALOG_PADDING, box.top + DIALOG_PADDING + index * line_height)
         draw_text(screen, font, line, COLORS["text"], position)
-    if pygame.time.get_ticks() // 400 % 2 == 0:
+    if (app["frame"] // 24) % 2 == 0:
         # A blinking arrow: press E to go on.
-        x, y = box.right - 10, box.bottom - 6
+        x, y = box.right - 12, box.bottom - 7
         pygame.draw.polygon(screen, COLORS["highlight"], [(x - 3, y - 4), (x + 3, y - 4), (x, y - 1)])
 
 
 def draw_play_screen(app, screen):
     draw_room(app, screen)
+    if app["fade"] > 0:
+        # Just through a door: the room comes out of the dark.
+        shade(screen, tile_rect(0, 0, COLUMNS, ROWS), 255 * app["fade"] // FADE_FRAMES)
     draw_hud(app, screen)
 
 
@@ -877,15 +1019,67 @@ def draw_inventory(app, screen):
     colors = {"name": COLORS["highlight"], "text": COLORS["text"], "heading": COLORS["dim_text"]}
     box = pygame.Rect(16, HUD_HEIGHT + 8, WIDTH - 32, HEIGHT - HUD_HEIGHT - 24)
     draw_box(screen, box)
-    draw_text(screen, font, story.MESSAGES["inventory"], COLORS["dim_text"], (WIDTH // 2, box.top + 6), "center")
+    draw_text(screen, font, story.MESSAGES["inventory"], COLORS["dim_text"], (WIDTH // 2, box.top + 8), "center")
     y = box.top + 24
     for style, text in inventory_lines(app["state"]):
         if style != "text":
             y += 4  # a little space before each item and before the clues
-        for line in wrap(text, box.width - 16, text_width(font)):
-            draw_text(screen, font, line, colors[style], (box.left + 8, y))
+        for line in wrap(text, box.width - 20, text_width(font)):
+            draw_text(screen, font, line, colors[style], (box.left + 10, y))
             y += font.get_linesize()
-    draw_text(screen, font, story.MESSAGES["close_hint"], COLORS["dim_text"], (WIDTH // 2, box.bottom - 16), "center")
+    draw_text(screen, font, story.MESSAGES["close_hint"], COLORS["dim_text"], (WIDTH // 2, box.bottom - 18), "center")
+
+
+def draw_rescue(app, scene, time):
+    """The good ending: dawn, a coast on the horizon, the ship sailing towards it."""
+    horizon = ENDING_HORIZON
+    scene.fill(COLORS["dawn"])
+    pygame.draw.rect(scene, COLORS["dawn_light"], (0, horizon - 12, WIDTH, 12))
+    sun_y = horizon + 4 - min(time, 180) // 9  # the sun rises
+    pygame.draw.circle(scene, COLORS["highlight"], (196, sun_y), 9)
+    coast = [(160, horizon), (184, horizon - 6), (210, horizon - 9), (236, horizon - 5), (WIDTH, horizon - 7),
+             (WIDTH, horizon)]
+    pygame.draw.polygon(scene, COLORS["land"], coast)
+    draw_sea(app, scene, pygame.Rect(0, horizon, WIDTH, ENDING_SCENE_HEIGHT - horizon))
+    ship = sprites.image("ship")
+    if ship is not None:
+        x = 40 + min(time, 320) // 4  # sailing towards the coast
+        scene.blit(ship, ship.get_rect(midbottom=(x, horizon + 6 + bob(app))))
+
+
+def draw_explosion(app, scene, time):
+    """The bad ending: the ship blows up, then only smoke is left on the water."""
+    horizon = ENDING_HORIZON
+    scene.fill(COLORS["night"])
+    draw_sea(app, scene, pygame.Rect(0, horizon, WIDTH, ENDING_SCENE_HEIGHT - horizon))
+    center = (WIDTH // 2, horizon - 2)
+    ship = sprites.image("ship")
+    if time < EXPLOSION_DELAY:
+        if ship is not None:
+            scene.blit(ship, ship.get_rect(midbottom=(center[0], horizon + 6)))
+        return
+    blast = time - EXPLOSION_DELAY
+    # Smoke rising from where the ship was: each puff grows, then stays, in a column.
+    for puff in range(4):
+        age = min(blast - puff * 15, 90 - puff * 15)
+        if age > 0:
+            radius = 3 + age // 10
+            pygame.draw.circle(scene, sprites.PALETTE["d"], (center[0] - 3 + (puff % 2) * 6, horizon - age // 3), radius)
+    # Rings of fire growing out of the ship.
+    for index, letter in enumerate("yor"):
+        radius = blast * 2 - index * 6
+        if 0 < radius < 70:
+            pygame.draw.circle(scene, sprites.PALETTE[letter], center, radius, 3)
+    # Pieces of the ship flying away and falling back.
+    for piece in range(12):
+        x = center[0] + (piece - 5.5) * 0.6 * blast
+        y = center[1] - (2.2 + (piece % 4) * 0.4) * blast + 0.06 * blast * blast
+        if y < ENDING_SCENE_HEIGHT:
+            pygame.draw.rect(scene, sprites.PALETTE["n"], (round(x), round(y), 2, 2))
+    if blast < 16:
+        flash = pygame.Surface(scene.get_size(), pygame.SRCALPHA)
+        flash.fill((255, 255, 255, 255 - blast * 16))  # the blast lights everything up
+        scene.blit(flash, (0, 0))
 
 
 def draw_ending_screen(app, screen):
@@ -893,13 +1087,27 @@ def draw_ending_screen(app, screen):
     ending = story.ENDINGS[ending_id]
     font = app["fonts"]["text"]
     screen.fill(COLORS["good_ending"] if ending["good"] else COLORS["bad_ending"])
+    # How long the ending has been on screen. Behind a question, show how it ends.
+    time = app["scene_frames"] if app["scene"] == "ending" else 10 ** 6
+    scene = pygame.Surface((WIDTH, ENDING_SCENE_HEIGHT))
+    if ending["good"]:
+        draw_rescue(app, scene, time)
+        screen.blit(scene, (0, 0))
+    else:
+        draw_explosion(app, scene, time)
+        shake = (0, 0)
+        if EXPLOSION_DELAY <= time < EXPLOSION_DELAY + 45:
+            shake = ((time * 7) % 5 - 2, (time * 3) % 5 - 2)  # the screen trembles
+        screen.blit(scene, shake)
+    pygame.draw.line(screen, COLORS["text"], (0, ENDING_SCENE_HEIGHT), (WIDTH, ENDING_SCENE_HEIGHT))
     number = list(story.ENDINGS).index(ending_id) + 1
     label = story.MESSAGES["ending_number"].format(number=number, total=len(story.ENDINGS))
-    draw_text(screen, font, label, COLORS["dim_text"], (WIDTH // 2, 20), "center")
-    draw_text(screen, app["fonts"]["title"], ending["title"], COLORS["highlight"], (WIDTH // 2, 36), "center")
-    y = 76
+    draw_text(screen, font, label, COLORS["dim_text"], (WIDTH // 2, ENDING_SCENE_HEIGHT + 6), "center")
+    title_position = (WIDTH // 2, ENDING_SCENE_HEIGHT + 18)
+    draw_text(screen, app["fonts"]["title"], ending["title"], COLORS["highlight"], title_position, "center", True)
+    y = ENDING_SCENE_HEIGHT + 42
     for paragraph in ending["text"]:
-        for line in wrap(paragraph, WIDTH - 32, text_width(font)):
+        for line in wrap(paragraph, WIDTH - 24, text_width(font)):
             draw_text(screen, font, line, COLORS["text"], (WIDTH // 2, y), "center")
             y += font.get_linesize()
 
@@ -938,11 +1146,11 @@ def draw(app, screen):
         dim(screen)
         box = pygame.Rect(WIDTH // 2 - 64, 60, 128, 92)
         draw_box(screen, box)
-        draw_text(screen, app["fonts"]["text"], story.MESSAGES["pause"], COLORS["dim_text"], (WIDTH // 2, box.top + 8), "center")
+        draw_text(screen, app["fonts"]["text"], story.MESSAGES["pause"], COLORS["dim_text"], (WIDTH // 2, box.top + 9), "center")
         draw_menu(app, screen, box.top + 28)
     elif scene == "ending":
         draw_ending_screen(app, screen)
-        draw_menu(app, screen, 172)
+        draw_menu(app, screen, ENDING_MENU_TOP)
     elif scene == "confirm":
         back = app["confirm_back"]
         if back == "menu":

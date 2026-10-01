@@ -67,6 +67,9 @@ Cosa chiede il brief per la prima versione, e dove si trova nel gioco:
 | `test_save.py` | Comportamento di `save.py` | `save`, `engine` |
 | `conftest.py` | Preparazione comune dei test: sposta il salvataggio in una cartella temporanea | `save` |
 | `test_main.py` | Layout, muri e porte, movimento, menu e salvataggio visti dall'interfaccia, senza aprire finestre | `main`, `engine`, `save`, `story`, `pygame` |
+| `sprites.py` | Gli sprite e le piastrelle in pixel art, scritti come testo (una lettera per pixel) | `pygame` |
+| `pixel_font.py` | Il font pixel, scritto come testo; si usa come `pygame.font.Font` | `pygame` |
+| `test_graphics.py` | Sprite, font e animazioni (M6) | `main`, `sprites`, `pixel_font`, `engine`, `story`, `pygame` |
 
 La cartella `plot_twist/` sta accanto a `splitit/` ed è organizzata allo stesso modo:
 - un `pyproject.toml` per uv, con Python 3.12, pygame e pytest;
@@ -249,8 +252,19 @@ Funzioni private di supporto:
 
 - **Risoluzione:** tutto si disegna su una Surface 256×224, poi la si scala ×3 (768×672) con `scale`, che è nearest, mai con `smoothscale`. Il gioco gira a 60 fps.
 - **Griglia:** con tile da 16 px la griglia è 16×14: 2 righe di HUD e una stanza 16×12 con i muri. Le porte stanno a metà parete, come in Isaac.
-- **Testi:** senza antialias; in M6 si passa a un font pixel.
-- **Grafica:** fino a M6 tutto è fatto di rettangoli colorati.
+- **Testi:** con il font pixel di `pixel_font.py`, a tre misure: testo, titoli, titolo grande.
+- **Grafica:** sprite 16×16 e piastrelle da `sprites.py`.
+  - Le porte sono disegnate per la parete nord e girate per le altre.
+  - Il giocatore guardando a sinistra è lo sprite di destra specchiato.
+  - Chi sta più in basso sullo schermo copre ciò che sta dietro.
+  - Se manca uno sprite si disegna il rettangolo colorato.
+- **Animazioni:** contano i frame in `app["frame"]`, non il tempo reale, così i test le possono riprodurre. Sono:
+  - due passi alternati quando il giocatore cammina;
+  - due immagini di mare;
+  - la nave che dondola;
+  - la freccia lampeggiante del testo;
+  - la stanza che esce dal buio dopo una porta;
+  - l'alba o l'esplosione nei finali.
 
 ### Scene
 
@@ -437,6 +451,14 @@ Due cose previste per M4 sono arrivate già qui:
 *Fatto quando*: i test sono verdi con gli enigmi veri, e chi non conosce la soluzione finisce in circa 10 minuti.
 
 ### M6 — Grafica 8-bit
+
+**Stato: fatta.**
+- **Test:** 137 verdi. I file di test di M1–M4 non sono cambiati; i test nuovi sono in `test_graphics.py`.
+- **Bug inseriti apposta:** gli 11 nella grafica vengono tutti scoperti, e così quelli di M3 (15) e M4 (13).
+- **Velocità:** circa 1 ms per frame, misurato senza schermo, contro i 16,7 ms che bastano per i 60 fps.
+- **Suoni:** non ci sono, erano facoltativi.
+
+Gli sprite e il font sono originali, disegnati come testo: si modificano cambiando le lettere in `sprites.py` e `pixel_font.py`.
 
 - **Sprite 16×16:** il giocatore in 4 direzioni, con animazione del passo; granchio e angelo; porte aperte, chiuse e sigillate ben distinguibili.
 - **Grafica e testi:** un tileset per stanza e un font pixel.

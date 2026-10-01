@@ -276,7 +276,9 @@ MESSAGES = {
     "menu_no": "No",
     "pause": "Pausa",
     "hint_inventory": "I: inventario",
-    "controls": "Frecce o WASD: muoviti · E: interagisci · I: inventario · Esc: menu",
+    # The controls, at the bottom of the title screen: one line each.
+    "controls_1": "Frecce o WASD: muoviti · E: interagisci",
+    "controls_2": "I: inventario · Esc: menu",
     "ending_number": "Finale {number} di {total}",
     # What E does here, shown in the bar at the top.
     "prompt": "E: {action}",
