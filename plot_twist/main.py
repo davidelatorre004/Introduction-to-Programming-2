@@ -30,6 +30,7 @@ COLUMNS, ROWS = 16, 12     # a room in tiles, walls included
 PLAYER_SIZE = 12
 PLAYER_SPEED = 1.5         # pixels per frame
 SPAWN_GAP = 4              # how far from a door the player appears after walking through it
+REACH = 8                  # how close the player must be to a thing to act on it with E
 BANNER_FRAMES = 2 * FPS    # how long the room name stays up after entering a room
 DIALOG_LINES = 4           # lines of text per page of the text box
 DIALOG_PADDING = 8
@@ -262,6 +263,78 @@ def return_door(room, came_from):
     return None
 
 
+# --- What the player can act on with E -----------------------------------------------
+
+
+def reach_rect(thing):
+    """Where a thing is, to tell whether the player can reach it: its tile, or the opening of a door."""
+    if thing in story.DOORS:
+        return door_rect(thing)
+    return thing_rect(thing)
+
+
+def nearest_target(state, position):
+    """The thing within reach of the player that is closest to them, or None."""
+    body = player_rect(position)
+    reach = body.inflate(2 * REACH, 2 * REACH)
+    nearest = None
+    nearest_distance = 0
+    for thing in engine.things_here(state):
+        rect = reach_rect(thing["id"])
+        if not reach.colliderect(rect):
+            continue
+        distance = (rect.centerx - body.centerx) ** 2 + (rect.centery - body.centery) ** 2
+        if nearest is None or distance < nearest_distance:
+            nearest = thing["id"]
+            nearest_distance = distance
+    return nearest
+
+
+def target_and_actions(state, position):
+    """What E would act on, and the actions it offers: the nearest thing, or else the room itself."""
+    target = nearest_target(state, position)
+    if target is None:
+        target = state["room"]
+    return target, engine.actions_for(state, target)
+
+
+def target_name(target):
+    """The name of a thing as the player sees it."""
+    if target in story.ITEMS:
+        return story.ITEMS[target]["name"]
+    if target in story.OBJECTS:
+        return story.OBJECTS[target]["name"]
+    if target in story.DOORS:
+        return story.MESSAGES["door"]
+    return story.ROOMS[target]["name"]
+
+
+def prompt(state, position):
+    """The hint at the top of the screen: what E does here. With several actions, the thing's name."""
+    target, actions = target_and_actions(state, position)
+    if not actions:
+        return ""
+    if len(actions) == 1:
+        return story.MESSAGES["prompt"].format(action=actions[0]["label"])
+    return story.MESSAGES["prompt"].format(action=target_name(target))
+
+
+def inventory_lines(state):
+    """What the inventory screen lists, as (style, text) pairs: the items and their descriptions, then the clues."""
+    lines = []
+    if not state["inventory"]:
+        lines.append(("text", story.MESSAGES["inventory_empty"]))
+    for item in state["inventory"]:
+        lines.append(("name", story.ITEMS[item]["name"]))
+        lines.append(("text", story.ITEMS[item]["description"]))
+    found = engine.clues(state)
+    if found:
+        lines.append(("heading", story.MESSAGES["clues"]))
+        for clue in found:
+            lines.append(("text", clue))
+    return lines
+
+
 # --- Text ----------------------------------------------------------------------------
 
 
@@ -306,7 +379,7 @@ def new_app(fonts):
     app = {
         "running": True,
         "fonts": fonts,
-        "scene": "menu",         # "menu", "confirm", "play", "pause" or "ending"
+        "scene": "menu",         # "menu", "confirm", "play", "actions", "inventory", "pause" or "ending"
         "menu_index": 0,         # the highlighted entry of the menu on screen
         "existing": None,        # the saved game found when the main menu opened, or None
         "state": None,           # the game being played (the engine's state), or None in the main menu
@@ -316,7 +389,10 @@ def new_app(fonts):
         "dialog": [],            # pages of text waiting to be read; the player cannot move meanwhile
         "banner": "",            # room name shown for a moment after entering a room
         "banner_frames": 0,
+        "actions": [],           # what the E menu offers (the "actions" scene)
+        "actions_title": "",     # the name of the thing the E menu is about
         "question": "",          # what the confirm scene asks
+        "confirming": "new_game",  # what "Sì" does: start a new game, or the action waiting for it
         "confirm_back": "menu",  # the scene to go back to if the answer is no
     }
     open_main_menu(app)
@@ -338,7 +414,7 @@ def open_main_menu(app):
 
 
 def menu_entries(app):
-    """The entries of the menu showing in the current scene."""
+    """The entries of the menu showing in the current scene: ids, or the actions of the E menu."""
     scene = app["scene"]
     if scene == "menu":
         return engine.menu_options(app["existing"]) + ["quit"]
@@ -348,12 +424,23 @@ def menu_entries(app):
         return ["yes", "no"]
     if scene == "ending":
         return ["new_game", "main_menu"]
+    if scene == "actions":
+        return app["actions"]
     return []
+
+
+def menu_labels(app):
+    """What the entries of the current menu say on screen."""
+    if app["scene"] == "actions":
+        return [action["label"] for action in app["actions"]]
+    return [story.MESSAGES["menu_" + entry] for entry in menu_entries(app)]
 
 
 def choose(app, entry):
     """Do what a menu entry says."""
-    if entry == "new_game" or entry == "restart":
+    if app["scene"] == "actions":
+        choose_action(app, entry)
+    elif entry == "new_game" or entry == "restart":
         request_new_game(app)
     elif entry == "resume":
         resume_game(app)
@@ -364,7 +451,11 @@ def choose(app, entry):
     elif entry == "quit":
         app["running"] = False
     elif entry == "yes":
-        confirm_new_game(app)
+        if app["confirming"] == "new_game":
+            confirm_new_game(app)
+        else:
+            set_scene(app, "play")
+            do_action(app, app["confirming"])
     elif entry == "no":
         set_scene(app, app["confirm_back"])
 
@@ -372,7 +463,7 @@ def choose(app, entry):
 def go_back(app):
     """What Esc does in a menu."""
     scene = app["scene"]
-    if scene == "pause":
+    if scene == "pause" or scene == "actions":
         set_scene(app, "play")
     elif scene == "confirm":
         set_scene(app, app["confirm_back"])
@@ -392,6 +483,7 @@ def request_new_game(app):
     state, outcome = engine.start_new_game(progress(app))
     if outcome["event"] == "needs_confirmation":
         app["question"] = outcome["text"]
+        app["confirming"] = "new_game"
         app["confirm_back"] = app["scene"]
         set_scene(app, "confirm", menu_index=1)  # "No" is highlighted: the safe answer
     else:
@@ -474,14 +566,68 @@ def go_through(app, door):
     show_banner(app, outcome["text"])
 
 
+def interact(app):
+    """E: act on the nearest thing, or look around. Several possible actions open a small menu."""
+    target, actions = target_and_actions(app["state"], app["player"])
+    if len(actions) == 1:
+        choose_action(app, actions[0])
+    elif actions:
+        app["actions"] = actions
+        app["actions_title"] = target_name(target)
+        set_scene(app, "actions")
+
+
+def choose_action(app, action):
+    """Carry out an action, but ask first if it cannot be undone."""
+    if action["irreversible"]:
+        app["question"] = story.MESSAGES["confirm_choice"].format(action=action["label"])
+        app["confirming"] = action
+        app["confirm_back"] = "play"
+        set_scene(app, "confirm", menu_index=1)  # "No" is highlighted: the safe answer
+        return
+    set_scene(app, "play")
+    do_action(app, action)
+
+
+def do_action(app, action):
+    """Ask the engine to do an action and show what happens. An accepted action is saved at once."""
+    if action["verb"] == "enter":
+        go_through(app, action["target"])
+        return
+    state, outcome = engine.perform(app["state"], action)
+    say(app, outcome["text"])
+    if outcome["ok"]:
+        app["state"] = state
+        save_progress(app)
+
+
 def handle_key(app, key):
     """React to one key press."""
-    if app["scene"] == "play":
-        if key == pygame.K_ESCAPE:
-            set_scene(app, "pause")
-        elif key in CONFIRM_KEYS and app["dialog"]:
+    scene = app["scene"]
+    if scene == "play":
+        handle_play_key(app, key)
+    elif scene == "inventory":
+        if key == pygame.K_i or key == pygame.K_ESCAPE or key in CONFIRM_KEYS:
+            set_scene(app, "play")
+    else:
+        handle_menu_key(app, key)
+
+
+def handle_play_key(app, key):
+    """Keys while playing: E acts (or turns the page of the text box), I opens the inventory, Esc pauses."""
+    if key == pygame.K_ESCAPE:
+        set_scene(app, "pause")
+    elif app["dialog"]:
+        if key in CONFIRM_KEYS:
             app["dialog"].pop(0)
-        return
+    elif key == pygame.K_e:
+        interact(app)
+    elif key == pygame.K_i:
+        set_scene(app, "inventory")
+
+
+def handle_menu_key(app, key):
+    """Keys in a menu: up and down to move, E or Enter to choose, Esc to go back."""
     entries = menu_entries(app)
     if key in UP_KEYS:
         app["menu_index"] = (app["menu_index"] - 1) % len(entries)
@@ -520,6 +666,9 @@ def update(app, dx, dy):
     if app["banner_frames"] > 0:
         app["banner_frames"] -= 1
     if app["scene"] != "play" or app["dialog"]:
+        return
+    if engine.is_over(app["state"]):
+        set_scene(app, "ending")  # the last text has been read: on to the ending
         return
     if dy != 0:
         app["facing"] = (0, dy)
@@ -577,8 +726,7 @@ def draw_box(screen, rect):
 def draw_menu(app, screen, top):
     """The entries of the current menu, one per line from `top`, the highlighted one in color."""
     font = app["fonts"]["text"]
-    for index, entry in enumerate(menu_entries(app)):
-        label = story.MESSAGES["menu_" + entry]
+    for index, label in enumerate(menu_labels(app)):
         color = COLORS["text"]
         if index == app["menu_index"]:
             label = "> " + label + " <"
@@ -588,13 +736,18 @@ def draw_menu(app, screen, top):
 
 def draw_title_screen(app, screen):
     screen.fill(COLORS["sea"])
-    for row in range(8):
+    for row in range(7):  # waves everywhere but the bottom, where the controls are written
         for col in range(9):
             x = col * 32 + (row % 2) * 16
             y = 12 + row * 28
             pygame.draw.line(screen, COLORS["foam"], (x, y), (x + 8, y))
+    font = app["fonts"]["text"]
     draw_text(screen, app["fonts"]["title"], story.MESSAGES["title"], COLORS["text"], (WIDTH // 2, 48), "center")
-    draw_text(screen, app["fonts"]["text"], story.MESSAGES["subtitle"], COLORS["foam"], (WIDTH // 2, 80), "center")
+    draw_text(screen, font, story.MESSAGES["subtitle"], COLORS["foam"], (WIDTH // 2, 80), "center")
+    lines = wrap(story.MESSAGES["controls"], WIDTH - 32, text_width(font))
+    for index, line in enumerate(lines):
+        y = HEIGHT - 8 - (len(lines) - index) * font.get_linesize()
+        draw_text(screen, font, line, COLORS["foam"], (WIDTH // 2, y), "center")
 
 
 def draw_door(screen, door, status):
@@ -660,11 +813,20 @@ def draw_room(app, screen):
 
 
 def draw_hud(app, screen):
+    """The bar at the top: the room and the inventory key, then what E does here and the items carried."""
     font = app["fonts"]["text"]
+    state = app["state"]
     pygame.draw.rect(screen, COLORS["hud"], (0, 0, WIDTH, HUD_HEIGHT))
-    room_name = story.ROOMS[app["state"]["room"]]["name"]
-    draw_text(screen, font, room_name, COLORS["text"], (8, 10))
-    draw_text(screen, font, story.MESSAGES["hint_menu"], COLORS["dim_text"], (WIDTH - 8, 10), "right")
+    draw_text(screen, font, story.ROOMS[state["room"]]["name"], COLORS["text"], (8, 3))
+    draw_text(screen, font, story.MESSAGES["hint_inventory"], COLORS["dim_text"], (WIDTH - 8, 3), "right")
+    if app["scene"] == "play" and not app["dialog"]:
+        hint = prompt(state, app["player"])
+        if hint:
+            draw_text(screen, font, hint, COLORS["highlight"], (8, 17))
+    x = WIDTH - 8
+    for item in reversed(state["inventory"]):
+        x -= 10
+        pygame.draw.rect(screen, THING_COLORS.get(item, MISSING_COLOR), (x, 19, 8, 8))
 
 
 def draw_banner(app, screen):
@@ -696,6 +858,34 @@ def draw_dialog(app, screen):
 def draw_play_screen(app, screen):
     draw_room(app, screen)
     draw_hud(app, screen)
+
+
+def draw_actions(app, screen):
+    """The small menu E opens when a thing offers several actions."""
+    font = app["fonts"]["text"]
+    line_height = font.get_linesize() + 4
+    height = (len(app["actions"]) + 1) * line_height + 2 * DIALOG_PADDING
+    box = pygame.Rect(DIALOG_PADDING, HEIGHT - DIALOG_PADDING - height, WIDTH - 2 * DIALOG_PADDING, height)
+    draw_box(screen, box)
+    draw_text(screen, font, app["actions_title"], COLORS["dim_text"], (WIDTH // 2, box.top + DIALOG_PADDING), "center")
+    draw_menu(app, screen, box.top + DIALOG_PADDING + line_height)
+
+
+def draw_inventory(app, screen):
+    """The inventory screen: the items carried, what they look like, and the clues found."""
+    font = app["fonts"]["text"]
+    colors = {"name": COLORS["highlight"], "text": COLORS["text"], "heading": COLORS["dim_text"]}
+    box = pygame.Rect(16, HUD_HEIGHT + 8, WIDTH - 32, HEIGHT - HUD_HEIGHT - 24)
+    draw_box(screen, box)
+    draw_text(screen, font, story.MESSAGES["inventory"], COLORS["dim_text"], (WIDTH // 2, box.top + 6), "center")
+    y = box.top + 24
+    for style, text in inventory_lines(app["state"]):
+        if style != "text":
+            y += 4  # a little space before each item and before the clues
+        for line in wrap(text, box.width - 16, text_width(font)):
+            draw_text(screen, font, line, colors[style], (box.left + 8, y))
+            y += font.get_linesize()
+    draw_text(screen, font, story.MESSAGES["close_hint"], COLORS["dim_text"], (WIDTH // 2, box.bottom - 16), "center")
 
 
 def draw_ending_screen(app, screen):
@@ -736,6 +926,13 @@ def draw(app, screen):
         draw_play_screen(app, screen)
         draw_banner(app, screen)
         draw_dialog(app, screen)
+    elif scene == "actions":
+        draw_play_screen(app, screen)
+        draw_actions(app, screen)
+    elif scene == "inventory":
+        draw_play_screen(app, screen)
+        dim(screen)
+        draw_inventory(app, screen)
     elif scene == "pause":
         draw_play_screen(app, screen)
         dim(screen)

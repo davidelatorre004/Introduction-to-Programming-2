@@ -275,8 +275,20 @@ MESSAGES = {
     "menu_yes": "Sì",
     "menu_no": "No",
     "pause": "Pausa",
-    "hint_menu": "Esc: menu",
+    "hint_inventory": "I: inventario",
+    "controls": "Frecce o WASD: muoviti · E: interagisci · I: inventario · Esc: menu",
     "ending_number": "Finale {number} di {total}",
+    # What E does here, shown in the bar at the top.
+    "prompt": "E: {action}",
+    # How a door is called in that hint.
+    "door": "Porta",
+    # Asked before an action that cannot be undone.
+    "confirm_choice": "«{action}»: sei sicuro? Non si potrà tornare indietro.",
+    # The inventory screen.
+    "inventory": "Inventario",
+    "inventory_empty": "Non hai ancora raccolto niente.",
+    "clues": "Indizi",
+    "close_hint": "I o Esc per chiudere",
     # Shown if the save file cannot be written (for example, the disk is full).
     "save_failed": "Non riesco a salvare la partita: i progressi da qui in poi potrebbero andare persi.",
 }

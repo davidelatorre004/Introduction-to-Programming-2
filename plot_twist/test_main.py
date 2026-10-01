@@ -48,9 +48,12 @@ def press(app, *keys):
 
 
 def read_all(app):
-    """Close every page of the text box, like the player pressing E."""
-    while app["dialog"]:
+    """Close every page of the text box, like the player pressing E. Fails instead of looping forever."""
+    for _ in range(50):
+        if not app["dialog"]:
+            return
         main.handle_key(app, pygame.K_e)
+    assert not app["dialog"], "E does not close the text box"
 
 
 def dialog_text(app):
@@ -65,6 +68,27 @@ def start_new_game(app):
     """Choose "Nuova partita" on a menu without saves, and read the opening scene."""
     press(app, pygame.K_RETURN)
     read_all(app)
+
+
+def stand_next_to(app, thing):
+    """Put the player within reach of a thing: on it if it is an item on the floor, else just below it."""
+    rect = main.thing_rect(thing)
+    body = pygame.Rect(0, 0, main.PLAYER_SIZE, main.PLAYER_SIZE)
+    if thing in story.ITEMS:
+        body.center = rect.center
+    else:
+        body.midtop = (rect.centerx, rect.bottom + 2)
+    app["player"] = (body.x, body.y)
+    app["touching"] = None
+
+
+def choose_in_menu(app, verb, item=None):
+    """In the menu opened by E, go down to the action with this verb and item, and choose it."""
+    for index, action in enumerate(app["actions"]):
+        if action["verb"] == verb and action["item"] == item:
+            press(app, *([pygame.K_DOWN] * index), pygame.K_RETURN)
+            return
+    raise AssertionError(f"no {verb} {item} among {app['actions']}")
 
 
 def walk_into(app, door, frames=30):
@@ -349,6 +373,155 @@ def test_a_failed_save_is_reported_not_fatal(app, monkeypatch):
     assert story.MESSAGES["save_failed"] in dialog_text(app)
 
 
+# --- Acting with E, the inventory and the endings (M4) -----------------------------------
+
+
+def test_prompt_says_what_e_does_here():
+    """PT02: the bar at the top shows the action E would do, or the name of the thing if there are several."""
+    def hint(action):
+        return story.MESSAGES["prompt"].format(action=action)
+
+    state = engine.new_game()
+    assert main.prompt(state, main.spawn_at_entry("deck")) == hint(story.MESSAGES["label_look_around"])
+    wand = main.thing_rect("wand")
+    on_the_wand = (wand.centerx - main.PLAYER_SIZE // 2, wand.centery - main.PLAYER_SIZE // 2)
+    pick_up_label = story.MESSAGES["label_pick_up"].format(item=story.ITEMS["wand"]["name"])
+    assert main.prompt(state, on_the_wand) == hint(pick_up_label)
+    with_wand_in_cabin = play(TO_THE_CRAB_ENDING[:2])
+    drawer = main.thing_rect("cabin_puzzle")
+    below_drawer = (drawer.centerx - main.PLAYER_SIZE // 2, drawer.bottom + 2)
+    assert main.prompt(with_wand_in_cabin, below_drawer) == hint(story.OBJECTS["cabin_puzzle"]["name"])
+
+
+def test_the_nearest_thing_is_the_one_e_acts_on(app):
+    """With the open drawer and the key side by side, E picks whichever is closer."""
+    state = play(TO_THE_CRAB_ENDING[:3])  # in the cabin, drawer open, key on the floor
+    app["state"] = state
+    stand_next_to(app, "cabin_puzzle")
+    assert main.nearest_target(state, app["player"]) == "cabin_puzzle"
+    stand_next_to(app, "key")
+    assert main.nearest_target(state, app["player"]) == "key"
+
+
+def test_e_with_nothing_near_describes_the_room(app):
+    start_new_game(app)
+    press(app, pygame.K_e)
+    assert dialog_text(app) == story.ROOMS["deck"]["description"]
+
+
+def test_e_picks_up_an_item_at_once_and_saves(app):
+    start_new_game(app)
+    stand_next_to(app, "wand")
+    press(app, pygame.K_e)
+    assert app["scene"] == "play"
+    assert dialog_text(app) == story.ITEMS["wand"]["pickup_text"]
+    assert engine.restore_state(save.load_game())["inventory"] == ["wand"]
+    read_all(app)
+    assert [thing["id"] for thing in engine.things_here(app["state"])].count("wand") == 0
+
+
+def test_e_menu_offers_every_action_and_esc_closes_it(app):
+    start_new_game(app)
+    stand_next_to(app, "wand")
+    press(app, pygame.K_e)
+    read_all(app)
+    walk_into(app, "deck_to_cabin")
+    stand_next_to(app, "cabin_puzzle")
+    press(app, pygame.K_e)
+    assert app["scene"] == "actions"
+    use_wand = story.MESSAGES["label_use"].format(item=story.ITEMS["wand"]["name"])
+    assert main.menu_labels(app) == [story.MESSAGES["label_examine"], use_wand]
+    press(app, pygame.K_ESCAPE)
+    assert app["scene"] == "play"
+    assert app["dialog"] == []
+
+
+def test_a_choice_that_cannot_be_undone_asks_first(app):
+    """Opening a final door asks for confirmation; "No" changes nothing, not even the save."""
+    app["state"] = play(TO_THE_CRAB_ENDING[:5])  # back on the deck with the key
+    main.set_scene(app, "play")
+    save.save_game(app["state"])
+    saved = save.load_game()
+    app["player"] = main.spawn_in_front_of("deck_to_crab")
+    press(app, pygame.K_e)
+    choose_in_menu(app, "use_item", "key")
+    assert app["scene"] == "confirm"
+    assert main.menu_entries(app)[app["menu_index"]] == "no"
+    press(app, pygame.K_RETURN)  # "No"
+    assert app["scene"] == "play"
+    assert engine.door_status(app["state"], "deck_to_crab") == "locked"
+    assert save.load_game() == saved
+
+
+def test_the_sealed_door_explains_itself(app):
+    """PT04 on screen: after choosing the crab, the angel's door refuses even the key, and says why."""
+    app["state"] = play(TO_THE_CRAB_ENDING[:6])  # the crab's door just opened
+    main.set_scene(app, "play")
+    app["player"] = main.spawn_in_front_of("deck_to_angel")
+    press(app, pygame.K_e)
+    choose_in_menu(app, "use_item", "key")
+    assert dialog_text(app) == story.DOORS["deck_to_angel"]["sealed_text"]
+    read_all(app)
+    walk_into(app, "deck_to_angel")
+    assert app["state"]["room"] == "deck"
+    assert dialog_text(app) == story.DOORS["deck_to_angel"]["sealed_text"]
+
+
+def test_inventory_shows_items_and_clues(app):
+    """PT03: I opens the inventory with the items and their descriptions, and the clues found."""
+    start_new_game(app)
+    press(app, pygame.K_i)
+    assert app["scene"] == "inventory"
+    assert main.inventory_lines(app["state"]) == [("text", story.MESSAGES["inventory_empty"])]
+    press(app, pygame.K_i)
+    assert app["scene"] == "play"
+    found_clue = play([TO_THE_CRAB_ENDING[0], {"verb": "enter", "target": "deck_to_hold"},
+                       {"verb": "use_item", "target": "hold_puzzle", "item": "wand"}])
+    assert main.inventory_lines(found_clue) == [
+        ("name", story.ITEMS["wand"]["name"]),
+        ("text", story.ITEMS["wand"]["description"]),
+        ("heading", story.MESSAGES["clues"]),
+        ("text", story.CLUES["crab_truthful"]),
+    ]
+
+
+@pytest.mark.parametrize("door, character, ending", [
+    ("deck_to_crab", "crab", "saved"),
+    ("deck_to_angel", "angel", "explosion"),
+])
+def test_a_whole_game_on_screen(app, door, character, ending):
+    """A5 on screen: from the main menu to an ending with the keys of the game, saving all the way."""
+    start_new_game(app)
+    stand_next_to(app, "wand")
+    press(app, pygame.K_e)
+    read_all(app)
+    walk_into(app, "deck_to_cabin")
+    stand_next_to(app, "cabin_puzzle")
+    press(app, pygame.K_e)
+    choose_in_menu(app, "use_item", "wand")
+    read_all(app)
+    stand_next_to(app, "key")
+    press(app, pygame.K_e)
+    read_all(app)
+    walk_into(app, "cabin_to_deck")
+    app["player"] = main.spawn_in_front_of(door)
+    press(app, pygame.K_e)
+    choose_in_menu(app, "use_item", "key")
+    press(app, pygame.K_UP, pygame.K_RETURN)  # "Sì"
+    read_all(app)
+    walk_into(app, door)
+    stand_next_to(app, character)
+    press(app, pygame.K_e)
+    choose_in_menu(app, "use_item", "wand")
+    press(app, pygame.K_UP, pygame.K_RETURN)  # "Sì"
+    assert app["scene"] == "play"  # first the text of what happens...
+    read_all(app)
+    main.update(app, 0, 0)
+    assert app["scene"] == "ending"  # ...then the ending
+    assert app["state"]["ending"] == ending
+    assert engine.restore_state(save.load_game()) == app["state"]
+
+
 # --- Drawing ------------------------------------------------------------------------
 
 
@@ -365,9 +538,13 @@ def test_every_scene_and_room_can_be_drawn(app):
         app["player"] = main.spawn_at_entry(state["room"])
         main.show_banner(app, "banner")
         main.say(app, story.MESSAGES["intro"])
-        for scene in ("play", "pause", "confirm"):
+        app["actions"] = engine.actions_for(state, state["room"])
+        for scene in ("play", "pause", "confirm", "actions", "inventory"):
             main.set_scene(app, scene)
             main.draw(app, screen)
+        app["dialog"] = []
+        main.set_scene(app, "play")
+        main.draw(app, screen)  # with the hint of what E does
     for ending_path in (TO_THE_CRAB_ENDING, TO_THE_CRAB_ENDING[:5] + [
             {"verb": "use_item", "target": "deck_to_angel", "item": "key"},
             {"verb": "enter", "target": "deck_to_angel"},

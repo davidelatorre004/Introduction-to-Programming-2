@@ -274,8 +274,11 @@ La sequenza è menu → conferma → gioco → finale. Sopra il gioco possono ap
 
 ### Interazione
 
-- **HUD:** il bersaglio più vicino entro un certo raggio fa comparire "E: <azione>". In un gioco top-down è così che si mostrano le azioni disponibili (PT02).
-- **E:** chiama `actions_for`. Se c'è un'azione sola la esegue subito, se sono di più apre un mini-menu. Le azioni `irreversible` chiedono conferma. Se vicino non c'è niente, E descrive la stanza.
+- **HUD:** due righe.
+  - Prima riga: il nome della stanza e "I: inventario".
+  - Seconda riga: "E: <azione>" e le icone degli oggetti raccolti. Il bersaglio è la cosa più vicina entro `REACH` pixel; se nessuna cosa è a portata, l'indicatore mostra "Guarda intorno". In un gioco top-down è così che si mostrano le azioni disponibili (PT02). Se le azioni sono più d'una, l'indicatore mostra il nome della cosa.
+  - La lista completa dei comandi è in fondo alla schermata del titolo.
+- **E:** chiama `actions_for`. Se c'è un'azione sola la esegue subito, se sono di più apre un mini-menu. Le azioni `irreversible` chiedono conferma, con "No" evidenziato. Se vicino non c'è niente, E descrive la stanza. Solo E fa agire: Invio e Spazio servono a chiudere i testi e a scegliere nei menu.
 - **I:** mostra l'inventario, con descrizioni e indizi (`clues`).
 - **Esc:** apre la pausa, con Continua, Ricomincia, Menu principale ed Esci. Non c'è "Salva", perché si salva già dopo ogni azione.
 
@@ -312,7 +315,21 @@ La schermata dice chiaramente quale finale è ("Finale 1 di 2 — Tutti salvi").
 | **A5** Two outcomes | Due partite nuove, una per finale | Si ottengono `saved` ed `explosion`. Dopo il finale ogni azione è rifiutata e lo stato non cambia, anche dopo aver ricaricato | M1 |
 | **A6** Restart safely | Con progressi salvati, `start_new_game` prima senza conferma, poi con conferma | Senza conferma: stato identico e file intatto. Con conferma: ponte, inventario vuoto, flag iniziali, nessun finale, file sovrascritto | M1 e M2 |
 
-Ogni scenario si dimostra due volte: con il test automatico (da `test_a1_*` a `test_a6_*`) e con la checklist manuale di M4 nel gioco vero.
+Ogni scenario si dimostra due volte: con il test automatico (da `test_a1_*` a `test_a6_*`) e con la checklist manuale qui sotto, nel gioco vero.
+
+### Checklist manuale
+
+Avvia il gioco con `uv run python main.py` dentro `plot_twist/`. Per partire da zero cancella `savegame.json`.
+
+| Scenario | Cosa fare | Cosa deve succedere |
+|---|---|---|
+| **A1** | Nuova partita. Cammina contro la porta a est (chela) e poi contro quella a ovest (ala). | Compare "È chiusa a chiave". Resti sul ponte e la seconda riga dell'HUD non mostra icone di oggetti. |
+| **A2** | Raccogli la bacchetta (E). In cabina: E sul cassetto, poi "Usa: Bacchetta magica". Raccogli la chiave. Sul ponte: E sulla porta della chela, poi "Usa: Chiave d'ottone" e "Sì". Entra. | Sei nella stanza del granchio e la chiave è ancora nell'inventario (I). |
+| **A3** | Torna in cabina dopo aver preso la chiave. Prova E vicino al cassetto. | Non c'è una seconda chiave. "Usa: Bacchetta magica" risponde "L'hai già fatto". Nell'inventario c'è una sola chiave. |
+| **A4** | A metà partita, dopo aver aperto una porta finale, chiudi la finestra. Riapri e scegli "Riprendi". | Ricompari all'ingresso della stessa stanza, con gli stessi oggetti. La porta scelta è ancora aperta e l'altra ancora sigillata. |
+| **A5** | Gioca fino a dare la bacchetta al granchio. Poi, da una partita nuova, all'angelo. | Prima il testo dell'azione, poi la schermata finale ("Finale 1 di 2 — Tutti salvi" o "Finale 2 di 2 — La nave esplode"). Riprendendo la partita torni sulla schermata finale, e non si può più giocare. |
+| **A6** | A metà partita, Esc e poi "Ricomincia". Rispondi "No". Rifallo e rispondi "Sì". | Con "No" la partita resta com'era. Con "Sì" sei sul ponte all'inizio, senza oggetti, con la scena d'apertura. |
+| **PT04** | Dopo aver aperto la porta della chela, prova la porta dell'ala, sia camminandoci contro sia con "Usa: Chiave d'ottone". | Compare "si è fusa. Non si aprirà mai più". |
 
 ## 11. Altri test
 
@@ -398,6 +415,8 @@ Due cose previste per M4 sono arrivate già qui:
 - chiudi il gioco e riprendi dall'ingresso della stanza giusta.
 
 ### M4 — Gioco completo, ancora a rettangoli
+
+**Stato: fatta nel codice.** 119 test verdi. Tra i test ci sono due partite complete giocate solo con i tasti, una per finale. In più, 13 bug inseriti apposta nelle parti nuove di `main.py` vengono tutti scoperti dai test. Manca la checklist manuale (§10), da fare sul gioco vero con una finestra.
 
 - "E: <azione>" nell'HUD; E con mini-menu e conferme; riquadro di dialogo.
 - Inventario con indizi.
