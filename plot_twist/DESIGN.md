@@ -66,9 +66,10 @@ Cosa chiede il brief per la prima versione, e dove si trova nel gioco:
 | `test_engine.py` | Scenari A1–A6 e requisiti del brief | `engine`, `story`; da M2 anche `save` |
 | `test_save.py` | Comportamento di `save.py` | `save`, `engine` |
 | `conftest.py` | Preparazione comune dei test: sposta il salvataggio in una cartella temporanea | `save` |
+| `test_main.py` | Layout, muri e porte, movimento, menu e salvataggio visti dall'interfaccia, senza aprire finestre | `main`, `engine`, `save`, `story`, `pygame` |
 
 La cartella `plot_twist/` sta accanto a `splitit/` ed è organizzata allo stesso modo:
-- un `pyproject.toml` per uv, con Python 3.12 e pytest (pygame si aggiunge in M3);
+- un `pyproject.toml` per uv, con Python 3.12, pygame e pytest;
 - un `.gitignore` che esclude il file di salvataggio.
 
 ## 4. `story.py`: i dati
@@ -267,7 +268,7 @@ La sequenza è menu → conferma → gioco → finale. Sopra il gioco possono ap
 
 ### Movimento e porte
 
-- **Movimento:** con frecce o WASD. Il giocatore si ferma contro muri, porte chiuse, oggetti e personaggi.
+- **Movimento:** con frecce o WASD. Il giocatore si ferma contro muri, porte chiuse, enigmi e personaggi. Gli oggetti a terra invece si possono calpestare.
 - **Porte:** camminare dentro una porta chiama `enter` **una volta per contatto**. Se la porta è aperta si cambia stanza, altrimenti compare il testo del rifiuto (A1, PT04).
 - **Arrivo:** entrando da una porta si compare davanti a quella che riporta indietro.
 
@@ -381,6 +382,12 @@ File: `save.py`, `test_save.py`, `conftest.py`. In più si completano la parte s
 
 ### M3 — Finestra, menu e movimento, a rettangoli
 
+**Stato: fatta.** 109 test verdi. In più, 15 bug inseriti apposta in `main.py` vengono tutti scoperti dai test.
+
+Due cose previste per M4 sono arrivate già qui:
+- **Schermata finale:** serve per riprendere una partita già finita.
+- **"Ricomincia" nella pausa:** usa la stessa conferma della "Nuova partita".
+
 - **Scene e menu:** disegno 256×224 ×3; il menu usa `menu_options` e `start_new_game`, conferma compresa.
 - **Stanze:** il layout entra in `story.py`; movimento e collisioni.
 - **Porte:** `enter` una volta per contatto. Si compare davanti alla porta di ritorno, oppure in `entry` quando si riprende una partita.
@@ -393,7 +400,8 @@ File: `save.py`, `test_save.py`, `conftest.py`. In più si completano la parte s
 ### M4 — Gioco completo, ancora a rettangoli
 
 - "E: <azione>" nell'HUD; E con mini-menu e conferme; riquadro di dialogo.
-- Inventario con indizi; schermata finale; pausa con "Ricomincia".
+- Inventario con indizi.
+- Dopo il finale si passa alla schermata finale, che esiste già da M3.
 
 *Fatto quando* la checklist manuale A1–A6 passa nel gioco vero:
 - una partita completa per ciascun finale;
