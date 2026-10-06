@@ -1,6 +1,6 @@
 # Plot Twist — come giocare
 
-Un breve gioco 8-bit: ti svegli sul ponte di una nave alla deriva, con una bacchetta magica a terra lì vicino. Esplori la nave, risolvi due enigmi per rimettere insieme una chiave e alla fine scegli a chi affidare la bacchetta. Ci sono due finali.
+Un breve gioco 8-bit, in inglese: ti svegli sul ponte di una nave alla deriva, con una bacchetta magica a terra lì vicino. Esplori la nave, risolvi due enigmi per rimettere insieme una chiave e alla fine scegli a chi affidare la bacchetta. Ci sono due finali.
 
 Il gioco ha qualche effetto sonoro: tieni l'audio acceso.
 
@@ -59,14 +59,14 @@ La prima volta uv installa pygame: ci vuole qualche secondo. Poi si apre la fine
 | Frecce o WASD | Muoverti |
 | E | Interagire con ciò che hai vicino. Nei riquadri di testo, andare avanti |
 | I | Aprire e chiudere l'inventario |
-| Esc | Il menu di pausa: Continua, Ricomincia, Menu principale, Esci |
+| Esc | Il menu di pausa: Continue, Restart, Main menu, Quit |
 | Su, giù e Invio (o E) | Scegliere nei menu |
 
 Qualche aiuto:
-- **Cosa fa E:** te lo dice la barra in alto, sulla seconda riga, per esempio "E: Raccogli: Bacchetta magica". Se vicino non c'è niente, E descrive la stanza.
-- **Più azioni possibili:** E apre un piccolo menu, per esempio Esamina, "Usa: …", "Dai: …".
+- **Cosa fa E:** te lo dice la barra in alto, sulla seconda riga, per esempio "E: Pick up: Magic wand". Se vicino non c'è niente, E descrive la stanza.
+- **Più azioni possibili:** E apre un piccolo menu, per esempio Examine, "Use: …", "Give: …".
 - **Porte:** per passare basta camminarci contro. Se una porta è chiusa, te lo dice.
-- **Scelte definitive:** il gioco chiede conferma, con "No" già selezionato. Per confermare scegli "Sì".
+- **Scelte definitive:** il gioco chiede conferma, con "No" già selezionato. Per confermare scegli "Yes".
 
 ## 5. Lo scopo (senza spoiler)
 
@@ -82,8 +82,8 @@ Qualche aiuto:
 ## 6. Il salvataggio
 
 - **Automatico:** il gioco salva da solo dopo ogni azione, quindi puoi chiudere la finestra quando vuoi.
-- **Riprendi:** dal menu iniziale torni all'ingresso della stanza dove eri, con gli stessi oggetti e le stesse scelte.
-- **Nuova partita:** se c'è già una partita salvata, chiede conferma prima di cancellarla.
+- **Resume:** dal menu iniziale torni all'ingresso della stanza dove eri, con gli stessi oggetti e le stesse scelte.
+- **New game:** se c'è già una partita salvata, chiede conferma prima di cancellarla.
 - **Ripartire da zero:** in alternativa puoi cancellare il file `plot_twist/savegame.json`.
 
 ## 7. Se qualcosa non va
@@ -110,20 +110,20 @@ uv run pytest
 2. Entra in cabina, dalla porta in alto.
    - Ogni generatore, quando lo attivi, inverte sé stesso e i due vicini lungo i lati del quadrato.
    - Attiva **A** e poi **D**: si accendono tutti e quattro e la barriera si dissolve.
-   - Prendi la Chiave centrale dall'altare.
+   - Prendi la chiave dall'altare: è la "Central key".
 
    Se esci prima di finire, i generatori tornano come all'inizio.
 3. Con la prima metà della chiave, il cancello della stiva si apre da solo. Entra dalla porta in basso.
    - Facoltativo: usa la bacchetta sul barile. Scopri un indizio, che poi rileggi nell'inventario.
    - Cammina sulle piastrelle, passando dalle corsie della grata per saltare quelle che non servono:
-     - **L'Onda:** 1, 2, 3, 4, 5;
-     - **Il Ritorno**, partendo dalla 5 su cui sei: 3, 1;
-     - **Il Cortocircuito**, partendo dalla 1 su cui sei: 5, 2, 4, 3.
-   - La barriera sparisce: prendi la Seconda chiave dall'incudine.
-   - Vicino all'incudine premi E e scegli "Usa: Chiave centrale" (o la seconda): le due metà diventano la Chiave fusa.
-4. Torna sul ponte. Vicino alla porta a destra, quella con la chela, premi E e scegli "Usa: Chiave fusa". Entra.
-5. Vicino al granchio premi E, scegli "Dai: Bacchetta magica" e poi "Sì": **Finale 1 di 2 — Tutti salvi**.
+     - **The Wave:** 1, 2, 3, 4, 5;
+     - **The Return**, partendo dalla 5 su cui sei: 3, 1;
+     - **The Short Circuit**, partendo dalla 1 su cui sei: 5, 2, 4, 3.
+   - La barriera sparisce: prendi la "Second key" dall'incudine.
+   - Vicino all'incudine premi E e scegli "Use: Central key" (o la seconda): le due metà diventano la "Fused key".
+4. Torna sul ponte. Vicino alla porta a destra, quella con la chela, premi E e scegli "Use: Fused key". Entra.
+5. Vicino al granchio premi E, scegli "Give: Magic wand" e poi "Yes": **Ending 1 of 2 — Everyone saved**.
 
-Per l'altro finale apri anche la porta a sinistra, quella con l'ala (la chiave fusa apre tutte e due), e dai la bacchetta all'angelo: **Finale 2 di 2 — La nave esplode**.
+Per l'altro finale apri anche la porta a sinistra, quella con l'ala (la chiave fusa apre tutte e due), e dai la bacchetta all'angelo: **Ending 2 of 2 — The ship explodes**.
 
 </details>

@@ -475,7 +475,7 @@ def new_app(fonts):
         "actions": [],           # what the E menu offers (the "actions" scene)
         "actions_title": "",     # the name of the thing the E menu is about
         "question": "",          # what the confirm scene asks
-        "confirming": "new_game",  # what "Sì" does: start a new game, or the action waiting for it
+        "confirming": "new_game",  # what "Yes" does: start a new game, or the action waiting for it
         "confirm_back": "menu",  # the scene to go back to if the answer is no
         "frame": 0,              # frames since the game started, for everything that moves on screen
         "scene_frames": 0,       # frames since the current scene started

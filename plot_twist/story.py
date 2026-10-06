@@ -1,7 +1,7 @@
 """The story of Plot Twist: every room, item, door, object, ending and text of the game.
 
 This file is only data. The rules that read it are in engine.py, and nothing here
-changes while the game runs. Ids are English; what the player reads is Italian.
+changes while the game runs. Ids and texts are in English.
 """
 
 # Where every new game starts.
@@ -38,43 +38,43 @@ FLAGS = {
 # A room is 16 x 12 tiles, walls included: the floor goes from (1, 1) to (14, 10).
 ROOMS = {
     "deck": {
-        "name": "Ponte",
+        "name": "Deck",
         "description": (
-            "Il ponte di una nave alla deriva. Tutto intorno, solo oceano. "
-            "Una porta dà sulla cabina del capitano e una sulla stiva; "
-            "altre due hanno una serratura."
+            "The deck of a ship adrift. All around, nothing but ocean. "
+            "One door leads to the captain's cabin and one to the hold; "
+            "two more have a lock."
         ),
         "outdoor": True,
         "entry": (6, 5),
     },
     "cabin": {
-        "name": "Cabina del capitano",
+        "name": "Captain's cabin",
         "description": (
-            "Carte nautiche sparse a terra e quattro generatori che ronzano ai lati di un quadrato, "
-            "collegati da cavi. In fondo, una barriera di energia protegge un piccolo altare."
+            "Sea charts scattered on the floor, and four generators humming at the corners of a square, "
+            "joined by cables. At the back, an energy barrier guards a small altar."
         ),
         "outdoor": False,
         "entry": (7, 9),
     },
     "hold": {
-        "name": "Stiva",
+        "name": "Hold",
         "description": (
-            "Buio, casse rovesciate e odore di salsedine. Nel pavimento brillano cinque piastrelle "
-            "numerate, dall'1 al 5. In fondo, un'incudine avvolta da una barriera; "
-            "in un angolo, un barile coperto di simboli."
+            "Dark, overturned crates and the smell of brine. Five numbered tiles shine in the floor, "
+            "from 1 to 5. At the back, an anvil wrapped in a barrier; "
+            "in a corner, a barrel covered in symbols."
         ),
         "outdoor": False,
         "entry": (7, 2),
     },
     "crab_room": {
-        "name": "Stanza del granchio",
-        "description": "Una stanza umida, piena di conchiglie. Un granchio enorme ti osserva in silenzio.",
+        "name": "Crab's room",
+        "description": "A damp room full of shells. A huge crab watches you in silence.",
         "outdoor": False,
         "entry": (2, 5),
     },
     "angel_room": {
-        "name": "Stanza dell'angelo",
-        "description": "Una stanza inondata di luce bianca. Al centro, un angelo ti sorride.",
+        "name": "Angel's room",
+        "description": "A room flooded with white light. In the middle, an angel smiles at you.",
         "outdoor": False,
         "entry": (13, 5),
     },
@@ -88,46 +88,46 @@ ROOMS = {
 # item that only comes from fusing has no room and no "pos".
 ITEMS = {
     "wand": {
-        "name": "Bacchetta magica",
-        "description": "Una bacchetta di legno scuro, tiepida al tatto. Sembra reagire a qualcosa di magico.",
+        "name": "Magic wand",
+        "description": "A wand of dark wood, warm to the touch. It seems to answer to something magic.",
         "room": "deck",
         "pos": (8, 6),
         "appears_if": None,
         "part_of": None,
         "free_if": None,
-        "pickup_text": "Raccogli la bacchetta magica. Una scintilla ti corre lungo il braccio.",
+        "pickup_text": "You pick up the magic wand. A spark runs up your arm.",
     },
     # The two halves of the key that opens the final doors.
     "key": {
-        "name": "Chiave centrale",
-        "description": "Metà di una chiave d'ottone, con l'impugnatura a forma di onda. Da sola non apre niente.",
+        "name": "Central key",
+        "description": "Half of a brass key, with a wave-shaped bow. On its own it opens nothing.",
         "room": "cabin",
         "pos": (7, 1),  # on the altar, behind the barrier
         "appears_if": None,
         "part_of": "fused_key",
         "free_if": "cabin_solved",
         "pickup_text": (
-            "Prendi la chiave centrale dall'altare: è solo metà di una chiave. "
-            "Sotto coperta, il cancello della stiva cigola e si apre."
+            "You take the central key from the altar: it is only half a key. "
+            "Below deck, the gate of the hold creaks open."
         ),
     },
     "second_key": {
-        "name": "Seconda chiave",
-        "description": "L'altra metà della chiave d'ottone. Combacia con la chiave centrale.",
+        "name": "Second key",
+        "description": "The other half of the brass key. It matches the central key.",
         "room": "hold",
         "pos": (7, 10),  # on the anvil, behind the barrier
         "appears_if": None,
         "part_of": "fused_key",
         "free_if": "hold_solved",
         "pickup_text": (
-            "Prendi la seconda chiave dall'incudine. Combacia con la chiave centrale: "
-            "sull'incudine si possono fondere insieme."
+            "You take the second key from the anvil. It matches the central key: "
+            "on the anvil the two can be fused together."
         ),
     },
     # The two halves fused at the anvil: the key of the final doors.
     "fused_key": {
-        "name": "Chiave fusa",
-        "description": "Le due metà della chiave d'ottone, fuse in un pezzo solo. Apre le porte del granchio e dell'angelo.",
+        "name": "Fused key",
+        "description": "The two halves of the brass key, fused into one piece. It opens the doors of the crab and of the angel.",
         "room": None,
         "pos": None,
         "appears_if": None,
@@ -156,22 +156,22 @@ DOORS = {
         "room": "deck", "to": "hold", "side": "S",
         "requires": [], "choice_flag": None, "opens_with": "key",
         "locked_text": None, "sealed_text": None, "open_text": None,
-        "barred_text": "Un cancello di ferro sbarra la porta della stiva. Al centro c'è un incavo a forma di mezza chiave.",
+        "barred_text": "An iron gate bars the door of the hold. In its middle, a hollow shaped like half a key.",
     },
     "deck_to_crab": {
         "room": "deck", "to": "crab_room", "side": "E",
         "requires": ["fused_key"], "choice_flag": "crab_door", "opens_with": None,
-        "locked_text": "Una porta con una chela incisa nel legno. È chiusa a chiave.",
+        "locked_text": "A door with a claw carved in the wood. It is locked.",
         "sealed_text": None,
-        "open_text": "La chiave fusa gira senza sforzo e la porta con la chela si apre.",
+        "open_text": "The fused key turns easily, and the door with the claw opens.",
         "barred_text": None,
     },
     "deck_to_angel": {
         "room": "deck", "to": "angel_room", "side": "W",
         "requires": ["fused_key"], "choice_flag": "angel_door", "opens_with": None,
-        "locked_text": "Una porta con un'ala incisa nel legno. È chiusa a chiave.",
+        "locked_text": "A door with a wing carved in the wood. It is locked.",
         "sealed_text": None,
-        "open_text": "La chiave fusa gira senza sforzo e la porta con l'ala si apre.",
+        "open_text": "The fused key turns easily, and the door with the wing opens.",
         "barred_text": None,
     },
     "cabin_to_deck": {
@@ -218,74 +218,74 @@ OBJECTS = {
     # it along the sides of the square, never to the one across.
     "generator_a": {
         "kind": "switch",
-        "name": "Generatore A",
+        "name": "Generator A",
         "label": "A",
         "room": "cabin",
         "pos": (4, 4),
         "flag": "generator_a",
         "toggles": ["generator_a", "generator_b", "generator_c"],
-        "toggle_text": "Clic! A, B e C cambiano stato.",
-        "look_text": "Un generatore con una grossa leva. La targhetta dice «A».",
+        "toggle_text": "Click! A, B and C switch over.",
+        "look_text": "A generator with a big lever. Its plate says \"A\".",
         "done_text": None,
         "reactions": {},
     },
     "generator_b": {
         "kind": "switch",
-        "name": "Generatore B",
+        "name": "Generator B",
         "label": "B",
         "room": "cabin",
         "pos": (11, 4),
         "flag": "generator_b",
         "toggles": ["generator_b", "generator_a", "generator_d"],
-        "toggle_text": "Clic! B, A e D cambiano stato.",
-        "look_text": "Un generatore con una grossa leva. La targhetta dice «B».",
+        "toggle_text": "Click! B, A and D switch over.",
+        "look_text": "A generator with a big lever. Its plate says \"B\".",
         "done_text": None,
         "reactions": {},
     },
     "generator_c": {
         "kind": "switch",
-        "name": "Generatore C",
+        "name": "Generator C",
         "label": "C",
         "room": "cabin",
         "pos": (4, 7),
         "flag": "generator_c",
         "toggles": ["generator_c", "generator_a", "generator_d"],
-        "toggle_text": "Clic! C, A e D cambiano stato.",
-        "look_text": "Un generatore con una grossa leva. La targhetta dice «C».",
+        "toggle_text": "Click! C, A and D switch over.",
+        "look_text": "A generator with a big lever. Its plate says \"C\".",
         "done_text": None,
         "reactions": {},
     },
     "generator_d": {
         "kind": "switch",
-        "name": "Generatore D",
+        "name": "Generator D",
         "label": "D",
         "room": "cabin",
         "pos": (11, 7),
         "flag": "generator_d",
         "toggles": ["generator_d", "generator_b", "generator_c"],
-        "toggle_text": "Clic! D, B e C cambiano stato.",
-        "look_text": "Un generatore con una grossa leva. La targhetta dice «D».",
+        "toggle_text": "Click! D, B and C switch over.",
+        "look_text": "A generator with a big lever. Its plate says \"D\".",
         "done_text": None,
         "reactions": {},
     },
     # The barrier fed by the generators, in front of the altar and around it.
     "barrier": {
         "kind": "barrier",
-        "name": "Barriera di energia",
+        "name": "Energy barrier",
         "room": "cabin",
         "pos": (6, 1),
         "size": (3, 2),
         "open_if": "cabin_solved",
-        "look_text": "Una barriera di energia crepita intorno all'altare. Sembra alimentata dai generatori.",
+        "look_text": "An energy barrier crackles around the altar. It seems powered by the generators.",
         "done_text": None,
         "reactions": {},
     },
     "altar": {
         "kind": "altar",
-        "name": "Altare",
+        "name": "Altar",
         "room": "cabin",
         "pos": (7, 1),
-        "look_text": "Un piccolo altare di pietra, contro la parete in fondo alla cabina.",
+        "look_text": "A small stone altar, against the back wall of the cabin.",
         "done_text": None,
         "reactions": {},
     },
@@ -293,124 +293,124 @@ OBJECTS = {
     # the player can walk around them, inside the zone, to skip from one to another.
     "tile_1": {
         "kind": "tile",
-        "name": "Piastrella 1",
+        "name": "Tile 1",
         "label": "1",
         "room": "hold",
         "pos": (3, 5),
-        "look_text": "Una piastrella di metallo con inciso il numero 1.",
+        "look_text": "A metal tile with the number 1 carved in it.",
         "done_text": None,
         "reactions": {},
     },
     "tile_2": {
         "kind": "tile",
-        "name": "Piastrella 2",
+        "name": "Tile 2",
         "label": "2",
         "room": "hold",
         "pos": (5, 5),
-        "look_text": "Una piastrella di metallo con inciso il numero 2.",
+        "look_text": "A metal tile with the number 2 carved in it.",
         "done_text": None,
         "reactions": {},
     },
     "tile_3": {
         "kind": "tile",
-        "name": "Piastrella 3",
+        "name": "Tile 3",
         "label": "3",
         "room": "hold",
         "pos": (7, 5),
-        "look_text": "Una piastrella di metallo con inciso il numero 3.",
+        "look_text": "A metal tile with the number 3 carved in it.",
         "done_text": None,
         "reactions": {},
     },
     "tile_4": {
         "kind": "tile",
-        "name": "Piastrella 4",
+        "name": "Tile 4",
         "label": "4",
         "room": "hold",
         "pos": (9, 5),
-        "look_text": "Una piastrella di metallo con inciso il numero 4.",
+        "look_text": "A metal tile with the number 4 carved in it.",
         "done_text": None,
         "reactions": {},
     },
     "tile_5": {
         "kind": "tile",
-        "name": "Piastrella 5",
+        "name": "Tile 5",
         "label": "5",
         "room": "hold",
         "pos": (11, 5),
-        "look_text": "Una piastrella di metallo con inciso il numero 5.",
+        "look_text": "A metal tile with the number 5 carved in it.",
         "done_text": None,
         "reactions": {},
     },
     # The barrier fed by the tiles, around the anvil against the bottom wall.
     "hold_barrier": {
         "kind": "barrier",
-        "name": "Barriera di energia",
+        "name": "Energy barrier",
         "room": "hold",
         "pos": (6, 9),
         "size": (3, 2),
         "open_if": "hold_solved",
         "look_text": (
-            "Una barriera di energia avvolge l'incudine. Sul suo ceppo si legge: "
-            "«L'Onda, Il Ritorno, Il Cortocircuito.»"
+            "An energy barrier wraps the anvil. Carved in its block: "
+            "\"The Wave, The Return, The Short Circuit.\""
         ),
         "done_text": None,
         "reactions": {},
     },
     "anvil": {
         "kind": "anvil",
-        "name": "Incudine",
+        "name": "Anvil",
         "room": "hold",
         "pos": (7, 10),
-        "look_text": "Un'incudine nera, ancora tiepida. Qui due metà di qualcosa potrebbero tornare una cosa sola.",
+        "look_text": "A black anvil, still warm. Here two halves of something could become one again.",
         "fuse_text": (
-            "Appoggi le due metà sull'incudine e le batti con forza: l'ottone si salda. "
-            "Ora hai una chiave sola, intera: la chiave fusa."
+            "You lay the two halves on the anvil and strike them hard: the brass welds. "
+            "Now you have a single, whole key: the fused key."
         ),
         "done_text": None,
         "reactions": {},
     },
     "hold_puzzle": {
         "kind": "puzzle",
-        "name": "Barile coperto di simboli",
+        "name": "Barrel covered in symbols",
         "room": "hold",
         "pos": (12, 9),
-        "look_text": "I simboli sul barile pulsano piano, come se aspettassero qualcosa.",
-        "done_text": "I simboli sul barile formano una frase: «Il granchio non mente mai.»",
+        "look_text": "The symbols on the barrel pulse slowly, as if waiting for something.",
+        "done_text": "The symbols on the barrel spell a sentence: \"The crab never lies.\"",
         "reactions": {
             "wand": {
                 "set_flag": "crab_truthful",
                 "value": True,
-                "text": "Tocchi il barile con la bacchetta e i simboli si ricompongono: «Il granchio non mente mai.»",
+                "text": "You touch the barrel with the wand and the symbols rearrange: \"The crab never lies.\"",
             },
         },
     },
     "crab": {
         "kind": "character",
-        "name": "Granchio",
+        "name": "Crab",
         "room": "crab_room",
         "pos": (10, 5),
         "size": (2, 2),
-        "look_text": "«Dammi la bacchetta e porterò questa nave in salvo. Tutti quanti.»",
+        "look_text": "\"Give me the wand and I will bring this ship to safety. Everyone on it.\"",
         "done_text": None,
         "reactions": {
             "wand": {
                 "ending": "saved",
-                "text": "Porgi la bacchetta al granchio, che la stringe tra le chele.",
+                "text": "You hand the wand to the crab, who grips it in its claws.",
             },
         },
     },
     "angel": {
         "kind": "character",
-        "name": "Angelo",
+        "name": "Angel",
         "room": "angel_room",
         "pos": (5, 5),
         "size": (1, 2),
-        "look_text": "«Affidami la bacchetta. Con me sarete tutti al sicuro.»",
+        "look_text": "\"Trust me with the wand. With me, you will all be safe.\"",
         "done_text": None,
         "reactions": {
             "wand": {
                 "ending": "explosion",
-                "text": "Porgi la bacchetta all'angelo. Il suo sorriso si allarga.",
+                "text": "You hand the wand to the angel. Its smile widens.",
             },
         },
     },
@@ -425,7 +425,7 @@ CIRCUITS = {
         "room": "cabin",
         "switches": ["generator_a", "generator_b", "generator_c", "generator_d"],
         "solved_flag": "cabin_solved",
-        "solved_text": "Il flusso elettrico è completo! La barriera si è dissolta!",
+        "solved_text": "The electric flow is complete! The barrier has dissolved!",
     },
 }
 
@@ -446,39 +446,39 @@ FLOOR_PUZZLES = {
         "room": "hold",
         "zone": (2, 4, 11, 3),
         "phases": [
-            {"name": "L'Onda", "steps": ["tile_1", "tile_2", "tile_3", "tile_4", "tile_5"]},
-            {"name": "Il Ritorno", "steps": ["tile_5", "tile_3", "tile_1"]},
-            {"name": "Il Cortocircuito", "steps": ["tile_1", "tile_5", "tile_2", "tile_4", "tile_3"]},
+            {"name": "The Wave", "steps": ["tile_1", "tile_2", "tile_3", "tile_4", "tile_5"]},
+            {"name": "The Return", "steps": ["tile_5", "tile_3", "tile_1"]},
+            {"name": "The Short Circuit", "steps": ["tile_1", "tile_5", "tile_2", "tile_4", "tile_3"]},
         ],
         "phase_flag": "hold_phase",
         "step_flag": "hold_step",
         "solved_flag": "hold_solved",
         # Short texts: they show in the banner while the player keeps walking.
-        "lit_text": "Clic! Piastrella {label} accesa.",
-        "phase_text": "Ding! Fase {number}: {name}.",
-        "wrong_text": "BZZZ! Piastrella sbagliata.",
-        "left_text": "BZZZ! Sei uscito dalle piastrelle.",
-        "solved_text": "Il sistema della stiva si sblocca! La barriera si è dissolta!",
+        "lit_text": "Click! Tile {label} lit.",
+        "phase_text": "Ding! Phase {number}: {name}.",
+        "wrong_text": "BZZZ! Wrong tile.",
+        "left_text": "BZZZ! You left the tiles.",
+        "solved_text": "The hold's system unlocks! The barrier has dissolved!",
     },
 }
 
 # The endings. "good" lets the final screen pick its colors.
 ENDINGS = {
     "saved": {
-        "title": "Tutti salvi",
+        "title": "Everyone saved",
         "text": [
-            "Il granchio batte la bacchetta sul ponte e il mare si calma.",
-            "All'alba, all'orizzonte, compare una costa.",
-            "La nave attracca: tutti a bordo sono salvi.",
+            "The crab taps the wand on the deck, and the sea grows calm.",
+            "At dawn, a coast appears on the horizon.",
+            "The ship docks: everyone on board is safe.",
         ],
         "good": True,
     },
     "explosion": {
-        "title": "La nave esplode",
+        "title": "The ship explodes",
         "text": [
-            "L'angelo spezza la bacchetta in due.",
-            "Una luce accecante, poi un boato.",
-            "Della nave resta solo fumo sull'acqua.",
+            "The angel snaps the wand in two.",
+            "A blinding light, then a roar.",
+            "Of the ship, only smoke on the water remains.",
         ],
         "good": False,
     },
@@ -486,71 +486,71 @@ ENDINGS = {
 
 # Clues shown in the inventory once their flag is true.
 CLUES = {
-    "crab_truthful": "Il granchio non mente mai.",
+    "crab_truthful": "The crab never lies.",
 }
 
 # Texts that do not belong to a single room, item, door or object.
 MESSAGES = {
     # The opening scene, shown when a new game starts.
     "intro": (
-        "Ti svegli sul ponte di una nave alla deriva. Non ricordi come ci sei arrivato. "
-        "Accanto a te, a terra, brilla una bacchetta."
+        "You wake up on the deck of a ship adrift. You do not remember how you got here. "
+        "Next to you, on the floor, a wand is shining."
     ),
     # The question asked before a new game replaces existing progress.
-    "confirm_restart": "C'è già una partita salvata. Vuoi ricominciare da capo? I progressi andranno persi.",
+    "confirm_restart": "There is already a saved game. Do you want to start over? Your progress will be lost.",
     # Explanations of refused actions.
-    "game_over": "La storia è finita: puoi rivedere il finale o iniziare una nuova partita.",
-    "not_here": "Non è qui.",
-    "already_have": "È già nel tuo inventario.",
-    "no_item": "Non hai quell'oggetto.",
-    "already_open": "È già aperta.",
-    "already_done": "L'hai già fatto.",
-    "nothing_happens": "Non succede niente.",
-    "guarded": "La barriera ti impedisce di prenderla.",
-    "circuit_done": "Il circuito è completo: i generatori restano accesi.",
-    "missing_item": "Da sola non serve: a questa metà manca l'altra.",
-    "not_fused": "È solo metà della chiave, e da sola non gira: va fusa con l'altra metà sull'incudine della stiva.",
-    "already_lit": "La piastrella è già accesa.",
-    "tiles_done": "Le piastrelle restano accese: il sistema della stiva è sbloccato.",
+    "game_over": "The story is over: you can watch the ending again or start a new game.",
+    "not_here": "It is not here.",
+    "already_have": "It is already in your inventory.",
+    "no_item": "You do not have that item.",
+    "already_open": "It is already open.",
+    "already_done": "You have already done that.",
+    "nothing_happens": "Nothing happens.",
+    "guarded": "The barrier keeps you from taking it.",
+    "circuit_done": "The circuit is complete: the generators stay on.",
+    "missing_item": "On its own it is no use: this half needs the other one.",
+    "not_fused": "It is only half of the key, and it does not turn on its own: fuse it with the other half on the anvil in the hold.",
+    "already_lit": "The tile is already lit.",
+    "tiles_done": "The tiles stay lit: the hold's system is unlocked.",
     # What an open door shows when examined.
-    "door_open": "Una porta aperta verso: {room}.",
+    "door_open": "An open door to: {room}.",
     # Labels of the actions offered by the E key.
-    "label_pick_up": "Raccogli: {item}",
-    "label_enter": "Entra: {room}",
-    "label_look_around": "Guarda intorno",
-    "label_examine": "Esamina",
-    "label_talk": "Parla",
-    "label_use": "Usa: {item}",
-    "label_give": "Dai: {item}",
-    "label_activate": "Attiva: {name}",
+    "label_pick_up": "Pick up: {item}",
+    "label_enter": "Enter: {room}",
+    "label_look_around": "Look around",
+    "label_examine": "Examine",
+    "label_talk": "Talk",
+    "label_use": "Use: {item}",
+    "label_give": "Give: {item}",
+    "label_activate": "Activate: {name}",
     # The window title and the menus.
     "title": "Plot Twist",
-    "subtitle": "Un mistero in mezzo al mare",
-    "menu_new_game": "Nuova partita",
-    "menu_resume": "Riprendi",
-    "menu_quit": "Esci",
-    "menu_continue": "Continua",
-    "menu_restart": "Ricomincia",
-    "menu_main_menu": "Menu principale",
-    "menu_yes": "Sì",
+    "subtitle": "A mystery in the middle of the sea",
+    "menu_new_game": "New game",
+    "menu_resume": "Resume",
+    "menu_quit": "Quit",
+    "menu_continue": "Continue",
+    "menu_restart": "Restart",
+    "menu_main_menu": "Main menu",
+    "menu_yes": "Yes",
     "menu_no": "No",
-    "pause": "Pausa",
-    "hint_inventory": "I: inventario",
+    "pause": "Paused",
+    "hint_inventory": "I: inventory",
     # The controls, at the bottom of the title screen: one line each.
-    "controls_1": "Frecce o WASD: muoviti · E: interagisci",
-    "controls_2": "I: inventario · Esc: menu",
-    "ending_number": "Finale {number} di {total}",
+    "controls_1": "Arrows or WASD: move · E: interact",
+    "controls_2": "I: inventory · Esc: menu",
+    "ending_number": "Ending {number} of {total}",
     # What E does here, shown in the bar at the top.
     "prompt": "E: {action}",
     # How a door is called in that hint.
-    "door": "Porta",
+    "door": "Door",
     # Asked before an action that cannot be undone.
-    "confirm_choice": "«{action}»: sei sicuro? Non si potrà tornare indietro.",
+    "confirm_choice": "\"{action}\": are you sure? There is no going back.",
     # The inventory screen.
-    "inventory": "Inventario",
-    "inventory_empty": "Non hai ancora raccolto niente.",
-    "clues": "Indizi",
-    "close_hint": "I o Esc per chiudere",
+    "inventory": "Inventory",
+    "inventory_empty": "You have not picked up anything yet.",
+    "clues": "Clues",
+    "close_hint": "I or Esc to close",
     # Shown if the save file cannot be written (for example, the disk is full).
-    "save_failed": "Non riesco a salvare la partita: i progressi da qui in poi potrebbero andare persi.",
+    "save_failed": "The game cannot be saved: progress from here on could be lost.",
 }
