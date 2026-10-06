@@ -8,15 +8,19 @@ and the letters from pixel_font.py; a thing without a picture is drawn as a
 colored rectangle.
 
 The rules are not here: main.py asks engine.py what happens, and saves through
-save.py after every accepted action. The interface keeps its own small state in
-a dict called `app`: which scene is showing, where the player stands, what the
-text box says. The game itself is app["state"], the engine's state.
+save.py after every accepted action. Most actions start from the E key; the
+floor puzzles start from the player's feet, with the movement triggers checked
+after each step (see floor_triggers). The sound effects come from sounds.py.
+The interface keeps its own small state in a dict called `app`: which scene is
+showing, where the player stands, what the text box says. The game itself is
+app["state"], the engine's state.
 """
 
 import pygame
 
 import engine
 import save
+import sounds
 import sprites
 import story
 from pixel_font import PixelFont
@@ -42,6 +46,8 @@ FADE_FRAMES = FPS // 4     # how long a room takes to come out of the dark after
 WALK_STEP_FRAMES = 8       # frames per step of the walking animation
 WAVE_FRAMES = FPS // 2     # frames between the two pictures of the sea
 BARRIER_FRAMES = 6         # frames between the two pictures of a barrier's energy
+FLASH_FRAMES = FPS // 2    # how long the tiles blink red after a mistake, before going dark
+FLASH_BLINK = 6            # frames between two blinks
 ALTAR_LIFT = 5             # how much higher an item lying on an altar is drawn
 ENDING_SCENE_HEIGHT = 64   # the picture at the top of the ending screen
 ENDING_HORIZON = 40        # where the sea starts in that picture
@@ -91,6 +97,18 @@ COLORS = {
     "land": (52, 128, 80),
     "night": (40, 24, 40),
     "cable": (60, 60, 72),
+    "error": (214, 64, 52),
+}
+
+# The fallback colors of the numbered tiles, if they have no picture.
+TILE_COLORS = {"lit": COLORS["highlight"], "dark": COLORS["cable"], "error": COLORS["error"]}
+
+# The sound each outcome of a floor puzzle plays (see sounds.py).
+EVENT_SOUNDS = {
+    "tile_lit": "blip",
+    "phase_complete": "ding",
+    "tiles_complete": "fanfare",
+    "tiles_reset": "buzz",
 }
 
 # Floor and wall color of each room.
@@ -110,8 +128,11 @@ DEFAULT_ROOM_COLORS = ((100, 100, 100), (50, 50, 50))
 THING_COLORS = {
     "wand": (180, 110, 255),
     "key": (250, 210, 70),
+    "second_key": (250, 210, 70),
     "barrier": (110, 230, 255),
+    "hold_barrier": (110, 230, 255),
     "altar": (176, 176, 190),
+    "chest": (140, 90, 50),
     "hold_puzzle": (110, 75, 45),
     "crab": (230, 90, 55),
     "angel": (250, 250, 235),
@@ -181,16 +202,16 @@ def wall_rects(room):
 def solid_rects(state):
     """Everything the player cannot walk through right now: walls, closed doors and whatever stands in the room.
 
-    That is puzzles, characters, generators, altars, and the barrier until it dissolves.
+    That is puzzles, characters, generators, altars, and a barrier until it dissolves.
 
-    Items on the floor are not solid: the player can walk over them.
+    Items on the floor and the numbered tiles are not solid: the player walks over them.
     """
     solids = wall_rects(state["room"])
     for thing in engine.things_here(state):
         if thing["kind"] == "door":
             if thing["status"] != "open":
                 solids.append(door_rect(thing["id"]))
-        elif thing["kind"] != "item":
+        elif thing["kind"] not in ("item", "tile"):
             solids.append(thing_rect(thing["id"]))
     return solids
 
@@ -287,6 +308,35 @@ def return_door(room, came_from):
     return None
 
 
+# --- The floor puzzles: numbered tiles, and the zone around them -----------------------
+
+
+def floor_puzzles_in(room):
+    """The ids of the floor puzzles of a room."""
+    return [puzzle for puzzle, info in story.FLOOR_PUZZLES.items() if info["room"] == room]
+
+
+def zone_rect(puzzle):
+    """The zone around a floor puzzle's tiles: walking out of it starts the phase over."""
+    col, row, width, height = story.FLOOR_PUZZLES[puzzle]["zone"]
+    return tile_rect(col, row, width, height)
+
+
+def tile_under(state, position):
+    """The numbered tile the player stands on, the one under the middle of their body, or None."""
+    middle = player_rect(position).center
+    for thing in engine.things_here(state):
+        if thing["kind"] == "tile" and thing_rect(thing["id"]).collidepoint(middle):
+            return thing["id"]
+    return None
+
+
+def zones_around(state, position):
+    """The floor puzzles of the room whose zone has the middle of the player's body in it."""
+    middle = player_rect(position).center
+    return {puzzle for puzzle in floor_puzzles_in(state["room"]) if zone_rect(puzzle).collidepoint(middle)}
+
+
 # --- What the player can act on with E -----------------------------------------------
 
 
@@ -298,12 +348,17 @@ def reach_rect(thing):
 
 
 def nearest_target(state, position):
-    """The thing within reach of the player that is closest to them, or None."""
+    """The thing within reach of the player that is closest to them, or None.
+
+    The numbered tiles do not count: they are part of the floor, and the feet act on them.
+    """
     body = player_rect(position)
     reach = body.inflate(2 * REACH, 2 * REACH)
     nearest = None
     nearest_distance = 0
     for thing in engine.things_here(state):
+        if thing["kind"] == "tile":
+            continue
         rect = reach_rect(thing["id"])
         if not reach.colliderect(rect):
             continue
@@ -423,6 +478,9 @@ def new_app(fonts):
         "walk": 0,               # frames the player has spent walking, for the walking animation
         "moving": False,         # whether the player moved in the last frame
         "fade": 0,               # frames left before the room is out of the dark
+        "on_tile": None,         # the numbered tile the player stood on in the last frame
+        "zones": set(),          # the floor puzzles whose zone the player was in, in the last frame
+        "flash_frames": 0,       # frames left of the tiles blinking red after a mistake
     }
     open_main_menu(app)
     return app
@@ -572,6 +630,7 @@ def show_banner(app, text):
 def place_at_entry(app):
     app["player"] = spawn_at_entry(app["state"]["room"])
     app["touching"] = None
+    settle_on_floor(app)
 
 
 def place_after_door(app, came_from):
@@ -583,6 +642,13 @@ def place_after_door(app, came_from):
     else:
         app["player"] = spawn_in_front_of(door)
     app["touching"] = None
+    settle_on_floor(app)
+
+
+def settle_on_floor(app):
+    """Appearing somewhere is not walking there: where the player appears fires no movement trigger."""
+    app["on_tile"] = tile_under(app["state"], app["player"])
+    app["zones"] = zones_around(app["state"], app["player"])
 
 
 def go_through(app, door):
@@ -597,6 +663,48 @@ def go_through(app, door):
     place_after_door(app, came_from)
     app["fade"] = FADE_FRAMES
     show_banner(app, outcome["text"])
+
+
+def floor_triggers(app):
+    """The movement triggers of the room, checked in every frame after the player moves.
+
+    Walking onto a numbered tile steps on it, and walking out of the zone around
+    the tiles leaves it. Each one fires once, when it happens: standing still on
+    a tile does not step on it again. The engine decides what it means.
+    """
+    state = app["state"]
+    tile = tile_under(state, app["player"])
+    zones = zones_around(state, app["player"])
+    stepped_on = tile if tile is not None and tile != app["on_tile"] else None
+    left = sorted(app["zones"] - zones)
+    app["on_tile"] = tile
+    app["zones"] = zones
+    for puzzle in left:
+        floor_action(app, {"verb": "leave_zone", "target": puzzle})
+    if stepped_on is not None:
+        floor_action(app, {"verb": "step_on", "target": stepped_on})
+
+
+def floor_action(app, action):
+    """Tell the engine what the player's feet did, then play and show what happens, without stopping them.
+
+    Refusals stay silent: walking around is not a request. The other outcomes
+    play their sound and show in the banner, except the solved puzzle, which
+    opens the text box. A mistake also makes the tiles blink red.
+    """
+    state, outcome = engine.perform(app["state"], action)
+    if not outcome["ok"]:
+        return
+    sounds.play(EVENT_SOUNDS.get(outcome["event"]))
+    if outcome["event"] == "tiles_reset":
+        app["flash_frames"] = FLASH_FRAMES
+    if outcome["event"] == "tiles_complete":
+        app["banner_frames"] = 0
+        say(app, outcome["text"])
+    else:
+        show_banner(app, outcome["text"])
+    app["state"] = state
+    save_progress(app)
 
 
 def interact(app):
@@ -707,6 +815,8 @@ def update(app, dx, dy):
         app["banner_frames"] -= 1
     if app["fade"] > 0:
         app["fade"] -= 1
+    if app["flash_frames"] > 0:
+        app["flash_frames"] -= 1
     if app["scene"] != "play" or app["dialog"]:
         return
     if engine.is_over(app["state"]):
@@ -730,6 +840,7 @@ def update(app, dx, dy):
     elif door != app["touching"]:
         app["touching"] = door
         go_through(app, door)
+    floor_triggers(app)
 
 
 # --- Drawing -------------------------------------------------------------------------
@@ -839,6 +950,13 @@ def draw_door(screen, door, status):
     # No picture: colored rectangles.
     if status == "open":
         pygame.draw.rect(screen, COLORS["black"], rect)
+    elif status == "barred":
+        pygame.draw.rect(screen, COLORS["black"], rect)
+        for offset in range(3, max(rect.width, rect.height), 6):  # iron bars across the opening
+            if rect.width > rect.height:
+                pygame.draw.line(screen, COLORS["dim_text"], (rect.left + offset, rect.top), (rect.left + offset, rect.bottom - 1))
+            else:
+                pygame.draw.line(screen, COLORS["dim_text"], (rect.left, rect.top + offset), (rect.right - 1, rect.top + offset))
     elif status == "locked":
         pygame.draw.rect(screen, COLORS["door_locked"], rect)
         keyhole = pygame.Rect(0, 0, 4, 4)
@@ -966,6 +1084,36 @@ def draw_cables(screen, state):
             pygame.draw.line(screen, color, thing_rect(switch).center, thing_rect(other).center, 2)
 
 
+def draw_floor_puzzles(app, screen, things):
+    """The zones of the room's floor puzzles, then their numbered tiles: lit, dark, or blinking red after a mistake."""
+    plate = sprites.image("zone")
+    for puzzle in floor_puzzles_in(app["state"]["room"]):
+        area = zone_rect(puzzle)
+        if plate is None:
+            pygame.draw.rect(screen, COLORS["cable"], area, 1)
+            continue
+        for x in range(area.left, area.right, TILE):
+            for y in range(area.top, area.bottom, TILE):
+                screen.blit(plate, (x, y))
+    font = app["fonts"]["text"]
+    for thing in things:
+        if thing["kind"] != "tile":
+            continue
+        status = thing["status"]
+        if app["flash_frames"] > 0:
+            blinked = (FLASH_FRAMES - app["flash_frames"]) // FLASH_BLINK  # red first, then dark, then red...
+            status = "error" if blinked % 2 == 0 else "dark"
+        rect = thing_rect(thing["id"])
+        picture = sprites.image("tile_" + status)
+        if picture is None:
+            pygame.draw.rect(screen, TILE_COLORS[status], rect.inflate(-2, -2))
+        else:
+            screen.blit(picture, rect)
+        label = story.OBJECTS[thing["id"]]["label"]
+        color = COLORS["black"] if status == "lit" else COLORS["text"]
+        draw_text(screen, font, label, color, (rect.centerx, rect.centery - font.size(label)[1] // 2), "center")
+
+
 def on_an_altar(state, item):
     """True if an item lies on the tile of an altar of its room."""
     for thing, info in story.OBJECTS.items():
@@ -994,6 +1142,7 @@ def draw_room(app, screen):
     if story.ROOMS[room]["outdoor"]:
         draw_railing(screen)
     things = engine.things_here(state)
+    draw_floor_puzzles(app, screen, things)
     draw_cables(screen, state)
     standing = []
     for thing in things:
@@ -1001,7 +1150,7 @@ def draw_room(app, screen):
             draw_door(screen, thing["id"], thing["status"])
         elif thing["kind"] == "altar":
             draw_thing(screen, thing)  # low furniture, drawn before what lies on it
-        elif thing["kind"] != "item":
+        elif thing["kind"] not in ("item", "tile"):
             standing.append(thing)
     for thing in things:
         if thing["kind"] == "item":
@@ -1253,6 +1402,7 @@ def draw(app, screen):
 
 def main():
     pygame.init()
+    sounds.load()  # silent if the computer has no audio
     window = pygame.display.set_mode((WIDTH * SCALE, HEIGHT * SCALE))
     pygame.display.set_caption(story.MESSAGES["title"])
     screen = pygame.Surface((WIDTH, HEIGHT))

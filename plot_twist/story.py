@@ -19,6 +19,12 @@ FLAGS = {
     "generator_d": False,
     # All four generators were on at once: the barrier in the cabin has dissolved.
     "cabin_solved": False,
+    # The numbered tiles of the hold: the phase being played (1, 2 or 3) and how
+    # many tiles of its sequence are lit. Then all three phases are done: the
+    # barrier around the chest has dissolved.
+    "hold_phase": 1,
+    "hold_step": 0,
+    "hold_solved": False,
     # The hold puzzle is solved: the player has learned that the crab tells the truth.
     "crab_truthful": False,
     # Id of the final door the player opened. From then on the other one is sealed.
@@ -33,8 +39,8 @@ ROOMS = {
         "name": "Ponte",
         "description": (
             "Il ponte di una nave alla deriva. Tutto intorno, solo oceano. "
-            "Da qui si va nella cabina del capitano e nella stiva; "
-            "altre due porte sono chiuse a chiave."
+            "Una porta dà sulla cabina del capitano e una sulla stiva; "
+            "altre due hanno una serratura."
         ),
         "outdoor": True,
         "entry": (6, 5),
@@ -51,8 +57,9 @@ ROOMS = {
     "hold": {
         "name": "Stiva",
         "description": (
-            "Buio, casse rovesciate e odore di salsedine. "
-            "In un angolo, un barile coperto di simboli."
+            "Buio, casse rovesciate e odore di salsedine. Nel pavimento brillano cinque piastrelle "
+            "numerate, dall'1 al 5. In fondo, uno scrigno avvolto da una barriera; "
+            "in un angolo, un barile coperto di simboli."
         ),
         "outdoor": False,
         "entry": (7, 2),
@@ -84,87 +91,111 @@ ITEMS = {
         "free_if": None,
         "pickup_text": "Raccogli la bacchetta magica. Una scintilla ti corre lungo il braccio.",
     },
+    # The two halves of the key that opens the final doors.
     "key": {
         "name": "Chiave centrale",
-        "description": "Una chiave d'ottone con l'impugnatura a forma di onda. Era custodita sull'altare della cabina.",
+        "description": "Metà di una chiave d'ottone, con l'impugnatura a forma di onda. Da sola non apre niente.",
         "room": "cabin",
         "pos": (7, 1),  # on the altar, behind the barrier
         "appears_if": None,
         "free_if": "cabin_solved",
-        "pickup_text": "Prendi la chiave centrale dall'altare.",
+        "pickup_text": (
+            "Prendi la chiave centrale dall'altare: è solo metà di una chiave. "
+            "Sotto coperta, il cancello della stiva cigola e si apre."
+        ),
+    },
+    "second_key": {
+        "name": "Seconda chiave",
+        "description": "L'altra metà della chiave d'ottone. Combacia con la chiave centrale.",
+        "room": "hold",
+        "pos": (7, 10),  # in the chest, behind the barrier
+        "appears_if": None,
+        "free_if": "hold_solved",
+        "pickup_text": (
+            "Prendi la seconda chiave dallo scrigno. Combacia con la chiave centrale: "
+            "insieme formano una chiave intera."
+        ),
     },
 }
 
 # Doors, one per direction: each door is in one room and leads to another, from the
 # middle of one wall ("side": N, S, E or W). The way back is on the opposite wall.
-# A door that "requires" an item stays locked until that item is used on it.
-# Opening it writes the door's id in its "choice_flag", and every other door
-# sharing that flag is sealed forever. Only locked doors use the three texts.
+# - A door that "requires" items stays locked until one of them is used on it while
+#   the player carries them all. Opening it writes the door's id in its
+#   "choice_flag", and every other door sharing that flag is sealed forever. Only
+#   locked doors use "locked_text", "sealed_text" and "open_text".
+# - A door that "opens_with" an item is barred until the player carries that item,
+#   and then it is simply open. "barred_text" says what bars it.
 DOORS = {
     "deck_to_cabin": {
         "room": "deck", "to": "cabin", "side": "N",
-        "requires": None, "choice_flag": None,
-        "locked_text": None, "sealed_text": None, "open_text": None,
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
     },
     "deck_to_hold": {
         "room": "deck", "to": "hold", "side": "S",
-        "requires": None, "choice_flag": None,
+        "requires": [], "choice_flag": None, "opens_with": "key",
         "locked_text": None, "sealed_text": None, "open_text": None,
+        "barred_text": "Un cancello di ferro sbarra la porta della stiva. Al centro c'è un incavo a forma di mezza chiave.",
     },
     "deck_to_crab": {
         "room": "deck", "to": "crab_room", "side": "E",
-        "requires": "key", "choice_flag": "chosen_door",
+        "requires": ["key", "second_key"], "choice_flag": "chosen_door", "opens_with": None,
         "locked_text": "Una porta con una chela incisa nel legno. È chiusa a chiave.",
         "sealed_text": "La serratura della porta con la chela si è fusa. Non si aprirà mai più.",
         "open_text": (
-            "La chiave gira e la porta con la chela si apre. Dall'altra parte del ponte, "
-            "la porta con l'ala si sigilla con uno schianto."
+            "Unisci le due metà della chiave: combaciano. La chiave gira e la porta con la chela si apre. "
+            "Dall'altra parte del ponte, la porta con l'ala si sigilla con uno schianto."
         ),
+        "barred_text": None,
     },
     "deck_to_angel": {
         "room": "deck", "to": "angel_room", "side": "W",
-        "requires": "key", "choice_flag": "chosen_door",
+        "requires": ["key", "second_key"], "choice_flag": "chosen_door", "opens_with": None,
         "locked_text": "Una porta con un'ala incisa nel legno. È chiusa a chiave.",
         "sealed_text": "La serratura della porta con l'ala si è fusa. Non si aprirà mai più.",
         "open_text": (
-            "La chiave gira e la porta con l'ala si apre. Dall'altra parte del ponte, "
-            "la porta con la chela si sigilla con uno schianto."
+            "Unisci le due metà della chiave: combaciano. La chiave gira e la porta con l'ala si apre. "
+            "Dall'altra parte del ponte, la porta con la chela si sigilla con uno schianto."
         ),
+        "barred_text": None,
     },
     "cabin_to_deck": {
         "room": "cabin", "to": "deck", "side": "S",
-        "requires": None, "choice_flag": None,
-        "locked_text": None, "sealed_text": None, "open_text": None,
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
     },
     "hold_to_deck": {
         "room": "hold", "to": "deck", "side": "N",
-        "requires": None, "choice_flag": None,
-        "locked_text": None, "sealed_text": None, "open_text": None,
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
     },
     "crab_to_deck": {
         "room": "crab_room", "to": "deck", "side": "W",
-        "requires": None, "choice_flag": None,
-        "locked_text": None, "sealed_text": None, "open_text": None,
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
     },
     "angel_to_deck": {
         "room": "angel_room", "to": "deck", "side": "E",
-        "requires": None, "choice_flag": None,
-        "locked_text": None, "sealed_text": None, "open_text": None,
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
     },
 }
 
 # The things that stand in the rooms. Each one stands on tile "pos" (and the
-# tiles "size" covers, if it is bigger than one) and blocks the way. "kind" says
-# what it does:
+# tiles "size" covers, if it is bigger than one) and blocks the way, except the
+# tiles of the floor. "kind" says what it does:
 # - "puzzle" and "character" react when the player uses an item on them. A
 #   reaction either sets a flag ("set_flag" and "value") or ends the game
 #   ("ending"), and always has a "text". "done_text" replaces "look_text" once a
 #   puzzle is solved.
 # - "switch" is a generator of a circuit (see CIRCUITS): activating it flips the
 #   flags in "toggles", its own included, and shows "toggle_text".
+# - "tile" is a numbered tile of a floor puzzle (see FLOOR_PUZZLES): the player
+#   walks on it, and it lights up when stepped on in the right order.
 # - "barrier" stands in the way until its "open_if" flag is true, then it is gone.
-# - "altar" is only there to be looked at, and to hold an item.
-# PLACEHOLDER: the hold puzzle only asks for the wand. Its real version is still to come.
+# - "altar" holds an item: the cabin's altar, the hold's chest.
+# The barrel of the hold is still a simple puzzle: it only asks for the wand.
 OBJECTS = {
     # The generators of the cabin, at the corners of a square: A top left, B top
     # right, C bottom left, D bottom right. Each one is wired to the two next to
@@ -242,11 +273,87 @@ OBJECTS = {
         "done_text": None,
         "reactions": {},
     },
+    # The numbered tiles of the hold, in a row across the floor, one tile apart:
+    # the player can walk around them, inside the zone, to skip from one to another.
+    "tile_1": {
+        "kind": "tile",
+        "name": "Piastrella 1",
+        "label": "1",
+        "room": "hold",
+        "pos": (3, 5),
+        "look_text": "Una piastrella di metallo con inciso il numero 1.",
+        "done_text": None,
+        "reactions": {},
+    },
+    "tile_2": {
+        "kind": "tile",
+        "name": "Piastrella 2",
+        "label": "2",
+        "room": "hold",
+        "pos": (5, 5),
+        "look_text": "Una piastrella di metallo con inciso il numero 2.",
+        "done_text": None,
+        "reactions": {},
+    },
+    "tile_3": {
+        "kind": "tile",
+        "name": "Piastrella 3",
+        "label": "3",
+        "room": "hold",
+        "pos": (7, 5),
+        "look_text": "Una piastrella di metallo con inciso il numero 3.",
+        "done_text": None,
+        "reactions": {},
+    },
+    "tile_4": {
+        "kind": "tile",
+        "name": "Piastrella 4",
+        "label": "4",
+        "room": "hold",
+        "pos": (9, 5),
+        "look_text": "Una piastrella di metallo con inciso il numero 4.",
+        "done_text": None,
+        "reactions": {},
+    },
+    "tile_5": {
+        "kind": "tile",
+        "name": "Piastrella 5",
+        "label": "5",
+        "room": "hold",
+        "pos": (11, 5),
+        "look_text": "Una piastrella di metallo con inciso il numero 5.",
+        "done_text": None,
+        "reactions": {},
+    },
+    # The barrier fed by the tiles, around the chest against the bottom wall.
+    "hold_barrier": {
+        "kind": "barrier",
+        "name": "Barriera di energia",
+        "room": "hold",
+        "pos": (6, 9),
+        "size": (3, 2),
+        "open_if": "hold_solved",
+        "look_text": (
+            "Una barriera di energia avvolge lo scrigno. Sul bordo dello scrigno si legge: "
+            "«L'Onda, Il Ritorno, Il Cortocircuito.»"
+        ),
+        "done_text": None,
+        "reactions": {},
+    },
+    "chest": {
+        "kind": "altar",
+        "name": "Scrigno",
+        "room": "hold",
+        "pos": (7, 10),
+        "look_text": "Uno scrigno di legno cerchiato di ferro.",
+        "done_text": None,
+        "reactions": {},
+    },
     "hold_puzzle": {
         "kind": "puzzle",
         "name": "Barile coperto di simboli",
         "room": "hold",
-        "pos": (11, 7),
+        "pos": (12, 9),
         "look_text": "I simboli sul barile pulsano piano, come se aspettassero qualcosa.",
         "done_text": "I simboli sul barile formano una frase: «Il granchio non mente mai.»",
         "reactions": {
@@ -300,6 +407,39 @@ CIRCUITS = {
     },
 }
 
+# Floor puzzles: numbered tiles to walk on in a given order, one phase after the
+# other. Each phase is a sequence of "steps" (tile ids):
+# - walking onto the next tile of the sequence lights it up ("lit_text");
+# - at the end of a phase, the next one starts from the tile the player stands
+#   on, which stays lit ("phase_text"); after the last one, "solved_flag" becomes
+#   true and "solved_text" is shown;
+# - walking onto any other tile ("wrong_text"), or out of the "zone" around the
+#   tiles ("left_text"), switches the lights off: the phase starts over from its
+#   first tile. Stepping back onto the tile lit last changes nothing.
+# "phase_flag" holds the phase being played, from 1; "step_flag" how many tiles
+# of its sequence are lit. The "zone" (column, row, width and height in tiles) is
+# for main.py: the engine only hears that the player walked out of it.
+FLOOR_PUZZLES = {
+    "hold_tiles": {
+        "room": "hold",
+        "zone": (2, 4, 11, 3),
+        "phases": [
+            {"name": "L'Onda", "steps": ["tile_1", "tile_2", "tile_3", "tile_4", "tile_5"]},
+            {"name": "Il Ritorno", "steps": ["tile_5", "tile_3", "tile_1"]},
+            {"name": "Il Cortocircuito", "steps": ["tile_1", "tile_5", "tile_2", "tile_4", "tile_3"]},
+        ],
+        "phase_flag": "hold_phase",
+        "step_flag": "hold_step",
+        "solved_flag": "hold_solved",
+        # Short texts: they show in the banner while the player keeps walking.
+        "lit_text": "Clic! Piastrella {label} accesa.",
+        "phase_text": "Ding! Fase {number}: {name}.",
+        "wrong_text": "BZZZ! Piastrella sbagliata.",
+        "left_text": "BZZZ! Sei uscito dalle piastrelle.",
+        "solved_text": "Il sistema della stiva si sblocca! La barriera si è dissolta!",
+    },
+}
+
 # The endings. "good" lets the final screen pick its colors.
 ENDINGS = {
     "saved": {
@@ -346,6 +486,9 @@ MESSAGES = {
     "nothing_happens": "Non succede niente.",
     "guarded": "La barriera ti impedisce di prenderla.",
     "circuit_done": "Il circuito è completo: i generatori restano accesi.",
+    "missing_item": "Da sola non gira: a questa chiave manca l'altra metà.",
+    "already_lit": "La piastrella è già accesa.",
+    "tiles_done": "Le piastrelle restano accese: il sistema della stiva è sbloccato.",
     # What an open door shows when examined.
     "door_open": "Una porta aperta verso: {room}.",
     # Labels of the actions offered by the E key.

@@ -20,7 +20,9 @@ The outcome is a dict:
     text   what to show the player; never empty
 
 The engine knows nothing about pixels, keys or files: main.py decides what is near
-the player, the engine decides whether an action is allowed and what it changes.
+the player, and tells the engine when the player steps onto a numbered tile or
+walks out of the zone around the tiles; the engine decides whether an action is
+allowed and what it changes.
 An id that does not exist is a bug in the calling code, not a player's mistake,
 so it raises ValueError instead of being refused.
 """
@@ -102,6 +104,8 @@ def restore_state(data):
     state["inventory"] = list(inventory)
     state["flags"].update(flags)
     state["ending"] = ending
+    if not _floor_puzzles_consistent(state["flags"]):
+        return None
     return state
 
 
@@ -119,15 +123,19 @@ def has_item(state, item):
 
 
 def door_status(state, door):
-    """Return "open", "locked" or "sealed".
+    """Return "open", "barred", "locked" or "sealed".
 
-    A door without a lock is always open. A locked door remembers being opened
-    in its choice flag: it is open if the flag holds this door, sealed if it
-    holds another door sharing the flag, and locked while the flag is None.
+    A barred door stays shut until the player carries the item it "opens_with";
+    then it is open. A door without a lock is always open. A locked door
+    remembers being opened in its choice flag: it is open if the flag holds this
+    door, sealed if it holds another door sharing the flag, and locked while the
+    flag is None.
     """
     _expect(door, "door")
     info = story.DOORS[door]
-    if info["requires"] is None:
+    if info["opens_with"] is not None and not has_item(state, info["opens_with"]):
+        return "barred"
+    if not info["requires"]:
         return "open"
     chosen = state["flags"][info["choice_flag"]]
     if chosen is None:
@@ -143,8 +151,8 @@ def things_here(state):
     Items are listed only while they lie on the floor, and a barrier only while
     it stands. The status is "on_floor" for items, or "guarded" if they cannot be
     picked up yet; "solved" or "unsolved" for puzzles; "on" or "off" for switches;
-    "up" for barriers; "present" for characters and altars; and "open", "locked"
-    or "sealed" for doors.
+    "lit" or "dark" for tiles; "up" for barriers; "present" for characters and
+    altars; and "open", "barred", "locked" or "sealed" for doors.
     """
     room = state["room"]
     things = []
@@ -170,8 +178,8 @@ def actions_for(state, target):
     give the solution away. After an ending nothing is offered.
     """
     kind = _kind(target)
-    if is_over(state) or not _is_here(state, target):
-        return []
+    if kind == "floor" or is_over(state) or not _is_here(state, target):
+        return []  # a floor puzzle is not for E: the player's feet act on its tiles
 
     if kind == "room":
         return [_action("examine", target, story.MESSAGES["label_look_around"])]
@@ -239,11 +247,14 @@ def enter(state, door):
     if info["room"] != state["room"]:
         return _refuse(state, "not_here", story.MESSAGES["not_here"])
     status = door_status(state, door)
+    if status == "barred":
+        return _refuse(state, "barred", info["barred_text"])
     if status == "locked":
         return _refuse(state, "locked", info["locked_text"])
     if status == "sealed":
         return _refuse(state, "sealed", info["sealed_text"])
     new = copy.deepcopy(state)
+    _leave_floor_puzzles(new)  # walking out of a room is walking out of its tile zones
     new["room"] = info["to"]
     _reset_circuits(new)
     return _accept(new, "entered", story.ROOMS[info["to"]]["name"])
@@ -275,15 +286,89 @@ def activate(state, switch):
     return _accept(new, "toggled", story.OBJECTS[switch]["toggle_text"])
 
 
+def step_on(state, tile):
+    """The player walks onto a numbered tile of a floor puzzle: main.py calls this when it happens.
+
+    The puzzle is a small state machine. Its state is two flags: the phase being
+    played (from 1) and the step, that is how many tiles of the phase's sequence
+    are already lit. Walking onto:
+    - the next tile of the sequence lights it up ("tile_lit");
+    - the last tile of the sequence completes the phase ("phase_complete"): the
+      next phase starts from this tile, which stays lit. After the last phase the
+      puzzle is solved ("tiles_complete"), and the barrier it feeds dissolves;
+    - the tile lit last changes nothing ("already_lit"): the player only stepped
+      back onto it;
+    - any other tile is a mistake ("tiles_reset"): the lights go out and the
+      phase starts over from its first tile.
+    """
+    _expect(tile, "tile")
+    if is_over(state):
+        return _refuse(state, "game_over", story.MESSAGES["game_over"])
+    if not _is_here(state, tile):
+        return _refuse(state, "not_here", story.MESSAGES["not_here"])
+    puzzle = _floor_puzzle_of(tile)
+    if state["flags"][puzzle["solved_flag"]]:
+        return _refuse(state, "already_done", story.MESSAGES["tiles_done"])
+    phase = state["flags"][puzzle["phase_flag"]]
+    step = state["flags"][puzzle["step_flag"]]
+    sequence = puzzle["phases"][phase - 1]["steps"]
+    if step > 0 and tile == sequence[step - 1]:
+        return _refuse(state, "already_lit", story.MESSAGES["already_lit"])
+
+    new = copy.deepcopy(state)
+    if tile != sequence[step]:
+        # A wrong tile: the lights go out, and the same phase starts over.
+        new["flags"][puzzle["step_flag"]] = 0
+        return _accept(new, "tiles_reset", puzzle["wrong_text"])
+    step += 1
+    new["flags"][puzzle["step_flag"]] = step
+    if step < len(sequence):
+        label = story.OBJECTS[tile]["label"]
+        return _accept(new, "tile_lit", puzzle["lit_text"].format(label=label))
+    if phase == len(puzzle["phases"]):
+        # The last tile of the last phase.
+        new["flags"][puzzle["solved_flag"]] = True
+        return _accept(new, "tiles_complete", puzzle["solved_text"])
+    # The phase is complete: the next one starts from this tile, already lit.
+    following = puzzle["phases"][phase]  # phases count from 1, the list from 0: this is the next one
+    new["flags"][puzzle["phase_flag"]] = phase + 1
+    new["flags"][puzzle["step_flag"]] = 1 if following["steps"][0] == tile else 0
+    text = puzzle["phase_text"].format(number=phase + 1, name=following["name"])
+    return _accept(new, "phase_complete", text)
+
+
+def leave_zone(state, floor_puzzle):
+    """The player walks out of the zone around a floor puzzle's tiles: main.py calls this when it happens.
+
+    It is a mistake like a wrong tile: the lights go out and the phase starts
+    over ("tiles_reset"). If no tile of the phase is lit, there is nothing to
+    start over, and nothing happens.
+    """
+    _expect(floor_puzzle, "floor")
+    if is_over(state):
+        return _refuse(state, "game_over", story.MESSAGES["game_over"])
+    puzzle = story.FLOOR_PUZZLES[floor_puzzle]
+    if puzzle["room"] != state["room"]:
+        return _refuse(state, "not_here", story.MESSAGES["not_here"])
+    if state["flags"][puzzle["solved_flag"]]:
+        return _refuse(state, "already_done", story.MESSAGES["tiles_done"])
+    if state["flags"][puzzle["step_flag"]] == 0:
+        return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
+    new = copy.deepcopy(state)
+    new["flags"][puzzle["step_flag"]] = 0
+    return _accept(new, "tiles_reset", puzzle["left_text"])
+
+
 def use_item(state, item, target):
     """Use an item from the inventory on something in the room: a door, a puzzle or a character.
 
-    On anything else (a generator, a barrier, an altar) nothing happens.
+    On anything else (a generator, a tile, a barrier, an altar) nothing happens.
 
     The item is never used up: it stays in the inventory, even after giving it away.
     """
     _expect(item, "item")
     kind = _kind(target)
+    _not_a_floor_puzzle(target)
     if is_over(state):
         return _refuse(state, "game_over", story.MESSAGES["game_over"])
     if not has_item(state, item):
@@ -303,6 +388,7 @@ def examine(state, target):
     Nothing changes, but the action is accepted: it shows new information.
     """
     kind = _kind(target)
+    _not_a_floor_puzzle(target)
     if is_over(state):
         return _refuse(state, "game_over", story.MESSAGES["game_over"])
     if not _is_here(state, target):
@@ -324,7 +410,8 @@ def perform(state, action):
     """Carry out an action given as data, such as one returned by actions_for().
 
     The action is a dict with a "verb" ("pick_up", "enter", "use_item",
-    "examine" or "activate"), a "target" and, for "use_item", an "item".
+    "examine", "activate", "step_on" or "leave_zone"), a "target" and, for
+    "use_item", an "item". The target of "leave_zone" is a floor puzzle.
     """
     verb = action["verb"]
     if verb == "pick_up":
@@ -337,6 +424,10 @@ def perform(state, action):
         return examine(state, action["target"])
     if verb == "activate":
         return activate(state, action["target"])
+    if verb == "step_on":
+        return step_on(state, action["target"])
+    if verb == "leave_zone":
+        return leave_zone(state, action["target"])
     raise ValueError(f"Unknown verb: {verb!r}")
 
 
@@ -359,13 +450,15 @@ def _action(verb, target, label, item=None, irreversible=False):
 
 
 def _kind(thing):
-    """Return what an id names: "room", "item", "door", "puzzle" or "character"."""
+    """Return what an id names: "room", "item", "door", "floor" (a floor puzzle) or the kind of an object."""
     if thing in story.ROOMS:
         return "room"
     if thing in story.ITEMS:
         return "item"
     if thing in story.DOORS:
         return "door"
+    if thing in story.FLOOR_PUZZLES:
+        return "floor"
     if thing in story.OBJECTS:
         return story.OBJECTS[thing]["kind"]
     raise ValueError(f"Unknown id: {thing!r}")
@@ -375,6 +468,12 @@ def _expect(thing, kind):
     """Raise ValueError unless the id names a thing of this kind."""
     if _kind(thing) != kind:
         raise ValueError(f"{thing!r} is not a {kind}")
+
+
+def _not_a_floor_puzzle(target):
+    """Raise ValueError if the target is a floor puzzle: one walks on its tiles, one does not look at it or use things on it."""
+    if _kind(target) == "floor":
+        raise ValueError(f"{target!r} is a floor puzzle: the player walks on its tiles")
 
 
 def _is_id(value, table):
@@ -391,6 +490,8 @@ def _is_here(state, thing):
         return _on_floor(state, thing)
     if kind == "door":
         return story.DOORS[thing]["room"] == state["room"]
+    if kind == "floor":
+        return story.FLOOR_PUZZLES[thing]["room"] == state["room"]
     return story.OBJECTS[thing]["room"] == state["room"] and _is_standing(state, thing)
 
 
@@ -424,7 +525,7 @@ def _is_free(state, item):
 
 
 def _is_standing(state, thing):
-    """True if a puzzle, character, switch, barrier or altar is in its room now. A barrier is gone once open."""
+    """True if an object is in its room now. Only a barrier can go: it is gone once open."""
     info = story.OBJECTS[thing]
     if info["kind"] == "barrier":
         return not state["flags"][info["open_if"]]
@@ -432,12 +533,14 @@ def _is_standing(state, thing):
 
 
 def _object_status(state, thing):
-    """The status of a puzzle, character, switch, barrier or altar, as things_here() lists it."""
+    """The status of an object, as things_here() lists it."""
     info = story.OBJECTS[thing]
     if info["kind"] == "puzzle":
         return "solved" if _is_solved(state, thing) else "unsolved"
     if info["kind"] == "switch":
         return "on" if state["flags"][info["flag"]] else "off"
+    if info["kind"] == "tile":
+        return "lit" if _tile_is_lit(state, thing) else "dark"
     if info["kind"] == "barrier":
         return "up"
     return "present"
@@ -471,10 +574,52 @@ def _reset_circuits(state):
                 state["flags"][flag] = story.FLAGS[flag]
 
 
+def _floor_puzzle_of(tile):
+    """The floor puzzle a tile belongs to."""
+    for puzzle in story.FLOOR_PUZZLES.values():
+        for phase in puzzle["phases"]:
+            if tile in phase["steps"]:
+                return puzzle
+    raise ValueError(f"{tile!r} is not in any floor puzzle")
+
+
+def _tile_is_lit(state, tile):
+    """True if the tile was stepped on in the phase being played, or if its puzzle is solved."""
+    puzzle = _floor_puzzle_of(tile)
+    flags = state["flags"]
+    if flags[puzzle["solved_flag"]]:
+        return True
+    sequence = puzzle["phases"][flags[puzzle["phase_flag"]] - 1]["steps"]
+    return tile in sequence[:flags[puzzle["step_flag"]]]
+
+
+def _leave_floor_puzzles(state):
+    """Switch off the lit tiles of the unsolved floor puzzles in the current room: their phase starts over.
+
+    It changes the state it is given, so it is used only on the copy an accepted action is building.
+    """
+    for puzzle in story.FLOOR_PUZZLES.values():
+        if puzzle["room"] == state["room"] and not state["flags"][puzzle["solved_flag"]]:
+            state["flags"][puzzle["step_flag"]] = 0
+
+
+def _floor_puzzles_consistent(flags):
+    """True if every unsolved floor puzzle has fewer lit tiles than the sequence of its phase."""
+    for puzzle in story.FLOOR_PUZZLES.values():
+        if flags[puzzle["solved_flag"]]:
+            continue
+        sequence = puzzle["phases"][flags[puzzle["phase_flag"]] - 1]["steps"]
+        if flags[puzzle["step_flag"]] >= len(sequence):
+            return False
+    return True
+
+
 def _door_text(state, door):
     """What the player reads when examining a door."""
     info = story.DOORS[door]
     status = door_status(state, door)
+    if status == "barred":
+        return info["barred_text"]
     if status == "locked":
         return info["locked_text"]
     if status == "sealed":
@@ -484,15 +629,22 @@ def _door_text(state, door):
 
 
 def _use_on_door(state, item, door):
-    """Open a locked door with the item it needs. Opening a choice door seals the others."""
+    """Open a locked door with the items it needs. Opening a choice door seals the others.
+
+    The item must be one the lock "requires", and the player must carry all of
+    them: half a key does not turn.
+    """
     info = story.DOORS[door]
     status = door_status(state, door)
     if status == "open":
         return _refuse(state, "already_open", story.MESSAGES["already_open"])
     if status == "sealed":
         return _refuse(state, "sealed", info["sealed_text"])
-    if item != info["requires"]:
+    if item not in info["requires"]:
         return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
+    for needed in info["requires"]:
+        if not has_item(state, needed):
+            return _refuse(state, "missing_item", story.MESSAGES["missing_item"])
     new = copy.deepcopy(state)
     new["flags"][info["choice_flag"]] = door
     return _accept(new, "door_opened", info["open_text"])
@@ -539,7 +691,7 @@ def _is_choice_door(door):
 
 def _allowed_values(flag):
     """Every value a flag can take in valid play: its starting value, and what doors, reactions,
-    switches and circuits write."""
+    switches, circuits and floor puzzles write."""
     values = [story.FLAGS[flag]]
     for door, info in story.DOORS.items():
         if info["choice_flag"] == flag:
@@ -552,6 +704,14 @@ def _allowed_values(flag):
             values += [True, False]  # a switch flips it both ways
     for circuit in story.CIRCUITS.values():
         if circuit["solved_flag"] == flag:
+            values.append(True)
+    for puzzle in story.FLOOR_PUZZLES.values():
+        if puzzle["phase_flag"] == flag:
+            values += list(range(1, len(puzzle["phases"]) + 1))
+        if puzzle["step_flag"] == flag:
+            longest = max(len(phase["steps"]) for phase in puzzle["phases"])
+            values += list(range(longest + 1))
+        if puzzle["solved_flag"] == flag:
             values.append(True)
     return values
 

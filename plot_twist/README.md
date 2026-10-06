@@ -1,8 +1,8 @@
 # Plot Twist — come giocare
 
-Un breve gioco 8-bit: ti svegli sul ponte di una nave alla deriva, con una bacchetta magica a terra lì vicino. Esplori la nave, risolvi un enigma e alla fine scegli a chi affidare la bacchetta. Ci sono due finali.
+Un breve gioco 8-bit: ti svegli sul ponte di una nave alla deriva, con una bacchetta magica a terra lì vicino. Esplori la nave, risolvi due enigmi per rimettere insieme una chiave e alla fine scegli a chi affidare la bacchetta. Ci sono due finali.
 
-È una versione provvisoria: l'enigma della stiva è ancora un segnaposto.
+Il gioco ha qualche effetto sonoro: tieni l'audio acceso.
 
 ## 1. Cosa ti serve
 
@@ -72,11 +72,12 @@ Qualche aiuto:
 
 - Dal ponte si va in quattro stanze:
   - in alto, la cabina del capitano;
-  - in basso, la stiva;
+  - in basso, la stiva, chiusa da un cancello;
   - a destra e a sinistra, due porte chiuse a chiave.
-- Esplora, raccogli quello che trovi e scopri come aprire le porte chiuse.
+- La chiave delle porte chiuse è spezzata in due metà: ogni enigma ne nasconde una.
 - Puoi aprire **una sola** delle due porte: l'altra si sigilla per sempre. Dietro ognuna c'è qualcuno che vuole la tua bacchetta, e a chi la dai decide il finale.
 - **Indizio per la cabina:** i quattro generatori sono collegati da cavi, e attivarne uno cambia anche quelli collegati. Devi accenderli tutti insieme.
+- **Indizio per la stiva:** le cinque piastrelle numerate si calpestano, in tre prove una dopo l'altra. Una piastrella sbagliata, o uscire dalla grata intorno, fa ricominciare la prova in corso: "BZZZ!". I nomi delle prove sono incisi sullo scrigno: esamina la barriera che lo avvolge.
 
 ## 6. Il salvataggio
 
@@ -112,7 +113,13 @@ uv run pytest
    - Prendi la Chiave centrale dall'altare.
 
    Se esci prima di finire, i generatori tornano come all'inizio.
-3. Facoltativo: entra nella stiva, dalla porta in basso, e usa la bacchetta sul barile. Scopri un indizio, che poi rileggi nell'inventario.
+3. Con la prima metà della chiave, il cancello della stiva si apre da solo. Entra dalla porta in basso.
+   - Facoltativo: usa la bacchetta sul barile. Scopri un indizio, che poi rileggi nell'inventario.
+   - Cammina sulle piastrelle, passando dalle corsie della grata per saltare quelle che non servono:
+     - **L'Onda:** 1, 2, 3, 4, 5;
+     - **Il Ritorno**, partendo dalla 5 su cui sei: 3, 1;
+     - **Il Cortocircuito**, partendo dalla 1 su cui sei: 5, 2, 4, 3.
+   - La barriera sparisce: prendi la Seconda chiave dallo scrigno.
 4. Torna sul ponte. Vicino alla porta a destra, quella con la chela, premi E, scegli "Usa: Chiave centrale" e poi "Sì". Entra.
 5. Vicino al granchio premi E, scegli "Dai: Bacchetta magica" e poi "Sì": **Finale 1 di 2 — Tutti salvi**.
 

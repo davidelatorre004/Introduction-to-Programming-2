@@ -28,6 +28,7 @@ def act(verb, target, item=None):
 
 TAKE_WAND = act("pick_up", "wand")
 TAKE_KEY = act("pick_up", "key")
+TAKE_SECOND_KEY = act("pick_up", "second_key")
 TO_CABIN = act("enter", "deck_to_cabin")
 TO_HOLD = act("enter", "deck_to_hold")
 TO_CRAB = act("enter", "deck_to_crab")
@@ -39,25 +40,46 @@ ACTIVATE_A = act("activate", "generator_a")
 ACTIVATE_B = act("activate", "generator_b")
 ACTIVATE_C = act("activate", "generator_c")
 ACTIVATE_D = act("activate", "generator_d")
-SOLVE_HOLD = act("use_item", "hold_puzzle", item="wand")
+WAND_ON_BARREL = act("use_item", "hold_puzzle", item="wand")
 OPEN_CRAB = act("use_item", "deck_to_crab", item="key")
 OPEN_ANGEL = act("use_item", "deck_to_angel", item="key")
 GIVE_TO_CRAB = act("use_item", "crab", item="wand")
 GIVE_TO_ANGEL = act("use_item", "angel", item="wand")
+LEAVE_TILES = act("leave_zone", "hold_tiles")
+
+
+def step(number):
+    """Walk onto the numbered tile of the hold."""
+    return act("step_on", f"tile_{number}")
+
 
 # The cabin's generators start A off, B on, C on, D off: A then D turns all four on.
 SOLVE_CABIN = [ACTIVATE_A, ACTIVATE_D]
-# Wand, cabin puzzle, key, and back on the deck.
+# The tiles of the hold. Phase 1, the wave: 1 to 5. Phase 2, the return, from 5:
+# 3, then 1. Phase 3, the short circuit, from 1: 5, 2, 4, 3. Each phase starts on
+# the tile the one before ended on, already lit.
+PHASE_1 = [step(1), step(2), step(3), step(4), step(5)]
+PHASE_2 = [step(3), step(1)]
+PHASE_3 = [step(5), step(2), step(4), step(3)]
+SOLVE_TILES = PHASE_1 + PHASE_2 + PHASE_3
+# Wand, cabin puzzle, the first half of the key, and back on the deck.
 GET_KEY = [TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK]
-# The shortest way to each ending: the hold is optional.
-CRAB_ENDING = GET_KEY + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
-ANGEL_ENDING = GET_KEY + [OPEN_ANGEL, TO_ANGEL, GIVE_TO_ANGEL]
-# The long way: read the clue in the hold first.
-CLUE_THEN_CRAB = [TAKE_WAND, TO_HOLD, SOLVE_HOLD, HOLD_TO_DECK] + GET_KEY[1:] + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
+# Then the hold, no longer barred: the tiles, the second half, and back on the deck.
+GET_BOTH_KEYS = GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY, HOLD_TO_DECK]
+# The shortest way to each ending: the barrel of the hold is optional.
+CRAB_ENDING = GET_BOTH_KEYS + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
+ANGEL_ENDING = GET_BOTH_KEYS + [OPEN_ANGEL, TO_ANGEL, GIVE_TO_ANGEL]
+# The long way: read the clue on the barrel too.
+CLUE_THEN_CRAB = (GET_KEY + [TO_HOLD, WAND_ON_BARREL] + SOLVE_TILES
+                  + [TAKE_SECOND_KEY, HOLD_TO_DECK, OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB])
 # Open a door, go in, come back and wander around without ending the game.
-CHOOSE_AND_WANDER = GET_KEY + [OPEN_CRAB, TO_CRAB, CRAB_TO_DECK, TO_CABIN]
+CHOOSE_AND_WANDER = GET_BOTH_KEYS + [OPEN_CRAB, TO_CRAB, CRAB_TO_DECK, TO_CABIN]
 # Flip some generators, walk out and back in (they start over), flip another one.
 TOGGLE_AND_LEAVE = [TAKE_WAND, TO_CABIN, ACTIVATE_B, ACTIVATE_C, CABIN_TO_DECK, TO_CABIN, ACTIVATE_C]
+# Mistakes on the tiles: a wrong tile, walking out of the zone, walking out of the
+# hold in the middle of phase 2; each time the phase starts over.
+TILE_MISTAKES = (GET_KEY + [TO_HOLD, step(1), step(2), step(4), step(1), step(2), LEAVE_TILES]
+                 + PHASE_1 + [step(3), HOLD_TO_DECK, TO_HOLD, step(5), step(3)])
 
 
 def play(steps, state=None):
@@ -88,9 +110,9 @@ def states_along(steps):
 
 
 def sample_states():
-    """A good spread of moments in a game: every step of four different paths."""
+    """A good spread of moments in a game: every step of five different paths."""
     return (states_along(CLUE_THEN_CRAB) + states_along(ANGEL_ENDING) + states_along(CHOOSE_AND_WANDER)
-            + states_along(TOGGLE_AND_LEAVE))
+            + states_along(TOGGLE_AND_LEAVE) + states_along(TILE_MISTAKES))
 
 
 def every_action():
@@ -104,6 +126,10 @@ def every_action():
     for thing, info in story.OBJECTS.items():
         if info["kind"] == "switch":
             actions.append(act("activate", thing))
+        if info["kind"] == "tile":
+            actions.append(act("step_on", thing))
+    for puzzle in story.FLOOR_PUZZLES:
+        actions.append(act("leave_zone", puzzle))
     for target in targets:
         actions.append(act("examine", target))
         for item in story.ITEMS:
@@ -175,10 +201,11 @@ def test_a1_locked_route_is_rejected_and_nothing_moves():
     (OPEN_ANGEL, TO_ANGEL, "angel_room"),
 ])
 def test_a2_key_opens_the_route_and_stays_in_inventory(open_door, go_in, room):
-    """A2: with the key, the locked route leads to its room, and the key is not used up."""
-    state = play(GET_KEY + [open_door, go_in])
+    """A2: with both halves of the key, the locked route leads to its room, and the key is not used up."""
+    state = play(GET_BOTH_KEYS + [open_door, go_in])
     assert state["room"] == room
     assert engine.has_item(state, "key")
+    assert engine.has_item(state, "second_key")
 
 
 def test_a3_wand_cannot_be_collected_twice():
@@ -202,16 +229,27 @@ def test_a3_revisited_cabin_offers_no_second_key():
     assert after["inventory"].count("key") == 1
 
 
+def test_a3_revisited_hold_offers_no_third_key():
+    """A3: back in the hold, the chest is empty and walking on the tiles again does not make another key."""
+    state = play(GET_BOTH_KEYS + [TO_HOLD])
+    assert "second_key" not in [thing["id"] for thing in engine.things_here(state)]
+    _, outcome = engine.pick_up(state, "second_key")
+    assert outcome["event"] == "already_have"
+    after, outcome = engine.step_on(state, "tile_1")
+    assert outcome["event"] == "already_done"
+    assert after["inventory"].count("second_key") == 1
+
+
 def test_a4_resume_restores_scene_items_and_choice():
     """A4: collect items, make the choice, close and reopen: the same game, with the same routes.
 
     Here the game only goes through JSON in memory; the next test uses the real save file.
     """
-    state = play(GET_KEY + [OPEN_CRAB])
+    state = play(GET_BOTH_KEYS + [OPEN_CRAB])
     resumed = reopen(state)
     assert resumed == state
     assert resumed["room"] == "deck"
-    assert resumed["inventory"] == ["wand", "key"]
+    assert resumed["inventory"] == ["wand", "key", "second_key"]
     assert resumed["flags"]["chosen_door"] == "deck_to_crab"
     assert engine.door_status(resumed, "deck_to_angel") == "sealed"
     assert_same_routes(resumed, state)
@@ -219,11 +257,11 @@ def test_a4_resume_restores_scene_items_and_choice():
 
 def test_a4_resume_through_the_save_file():
     """A4 with the real file: every accepted action is saved, and reopening the app reads only the file."""
-    played = play_saving(GET_KEY + [OPEN_CRAB, TO_CRAB])
+    played = play_saving(GET_BOTH_KEYS + [OPEN_CRAB, TO_CRAB])
     resumed = resume()
     assert resumed == played
     assert resumed["room"] == "crab_room"
-    assert resumed["inventory"] == ["wand", "key"]
+    assert resumed["inventory"] == ["wand", "key", "second_key"]
     assert resumed["flags"]["chosen_door"] == "deck_to_crab"
     assert_same_routes(resumed, played)
 
@@ -253,7 +291,7 @@ def test_a5_finished_game_cannot_change(steps):
 
 def test_a6_cancelled_restart_keeps_progress():
     """A6: without confirmation, starting over changes nothing."""
-    progress = play(GET_KEY + [OPEN_CRAB])
+    progress = play(GET_BOTH_KEYS + [OPEN_CRAB])
     after, outcome = engine.start_new_game(progress)
     assert not outcome["ok"]
     assert outcome["event"] == "needs_confirmation"
@@ -262,7 +300,7 @@ def test_a6_cancelled_restart_keeps_progress():
 
 def test_a6_confirmed_restart_restores_the_opening():
     """A6: once confirmed, the game is back to the opening scene, empty-handed, nothing decided."""
-    progress = play(GET_KEY + [OPEN_CRAB])
+    progress = play(GET_BOTH_KEYS + [OPEN_CRAB])
     fresh, outcome = engine.start_new_game(progress, confirmed=True)
     assert outcome["ok"]
     assert outcome["event"] == "started"
@@ -274,7 +312,7 @@ def test_a6_confirmed_restart_restores_the_opening():
 
 def test_a6_restart_through_the_save_file(save_file):
     """A6 with the real file: cancelling leaves the save as it was; confirming replaces it with a new game."""
-    play_saving(GET_KEY + [OPEN_CRAB])
+    play_saving(GET_BOTH_KEYS + [OPEN_CRAB])
     saved_bytes = save_file.read_bytes()
     progress = resume()
 
@@ -318,7 +356,7 @@ def test_pt02_the_scene_lists_its_things_and_their_actions():
     assert here == {
         "wand": "on_floor",
         "deck_to_cabin": "open",
-        "deck_to_hold": "open",
+        "deck_to_hold": "barred",
         "deck_to_crab": "locked",
         "deck_to_angel": "locked",
     }
@@ -337,12 +375,24 @@ def test_pt02_accepted_actions_show_a_result():
 
 
 def test_pt03_the_key_unlocks_opening_the_door():
-    """Without the key, E only lets you look at the door; with it, it offers to open it."""
+    """Without the key, E only lets you look at the door; with both halves, either one opens it."""
     assert ("use_item", "key") not in offered(play([TAKE_WAND]), "deck_to_crab")
-    with_key = play(GET_KEY)
-    assert ("use_item", "key") in offered(with_key, "deck_to_crab")
-    _, outcome = engine.use_item(with_key, "key", "deck_to_crab")
-    assert outcome["event"] == "door_opened"
+    with_both = play(GET_BOTH_KEYS)
+    for half in ("key", "second_key"):
+        assert ("use_item", half) in offered(with_both, "deck_to_crab")
+        _, outcome = engine.use_item(with_both, half, "deck_to_crab")
+        assert outcome["event"] == "door_opened"
+
+
+def test_pt03_half_a_key_does_not_turn():
+    """PT04 too: with only the first half, the lock refuses, says what is missing, and nothing changes."""
+    with_half = play(GET_KEY)
+    after, outcome = engine.use_item(with_half, "key", "deck_to_crab")
+    assert not outcome["ok"]
+    assert outcome["event"] == "missing_item"
+    assert outcome["text"] == story.MESSAGES["missing_item"]
+    assert after == with_half
+    assert engine.door_status(with_half, "deck_to_crab") == "locked"
 
 
 def test_pt04_choosing_a_door_seals_the_other_forever():
@@ -367,17 +417,25 @@ def test_pt04_refused_actions_are_explained():
 
 def test_pt04_irreversible_actions_are_flagged():
     """Opening a final door and giving the wand ask for confirmation; solving a puzzle does not."""
-    with_key = play(GET_KEY)
-    flags = {action["item"]: action["irreversible"] for action in engine.actions_for(with_key, "deck_to_crab")}
-    assert flags == {None: False, "wand": False, "key": True}
+    with_half = play(GET_KEY)
+    flags = {action["item"]: action["irreversible"] for action in engine.actions_for(with_half, "deck_to_crab")}
+    assert flags == {None: False, "wand": False, "key": False}  # half a key opens nothing
 
-    near_crab = play(GET_KEY + [OPEN_CRAB, TO_CRAB])
+    with_both = play(GET_BOTH_KEYS)
+    flags = {action["item"]: action["irreversible"] for action in engine.actions_for(with_both, "deck_to_crab")}
+    assert flags == {None: False, "wand": False, "key": True, "second_key": True}
+
+    near_crab = play(GET_BOTH_KEYS + [OPEN_CRAB, TO_CRAB])
     flags = {action["item"]: action["irreversible"] for action in engine.actions_for(near_crab, "crab")}
-    assert flags == {None: False, "wand": True, "key": False}
+    assert flags == {None: False, "wand": True, "key": False, "second_key": False}
 
     in_cabin = play([TAKE_WAND, TO_CABIN])
     for action in engine.actions_for(in_cabin, "generator_a") + engine.actions_for(in_cabin, "barrier"):
         assert not action["irreversible"]
+    in_hold = play(GET_KEY + [TO_HOLD])
+    for thing in ("tile_1", "hold_barrier", "hold_puzzle"):
+        for action in engine.actions_for(in_hold, thing):
+            assert not action["irreversible"], thing
 
 
 def test_pt05_endings_are_clearly_identified():
@@ -406,12 +464,28 @@ def test_pt05_finished_game_resumes_on_its_ending():
 
 def test_r1_actions_need_the_right_scene_and_conditions():
     on_deck = play([TAKE_WAND])
-    for action in (ACTIVATE_A, SOLVE_HOLD, GIVE_TO_CRAB, GIVE_TO_ANGEL, CABIN_TO_DECK):
+    for action in (ACTIVATE_A, WAND_ON_BARREL, GIVE_TO_CRAB, GIVE_TO_ANGEL, CABIN_TO_DECK, step(1), LEAVE_TILES):
         _, outcome = engine.perform(on_deck, action)
         assert outcome["event"] == "not_here"
-    empty_handed = play([TO_HOLD])
-    _, outcome = engine.perform(empty_handed, SOLVE_HOLD)
+    without_wand = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TO_HOLD])
+    _, outcome = engine.perform(without_wand, WAND_ON_BARREL)
     assert outcome["event"] == "no_item"
+
+
+def test_r1_the_hold_is_barred_until_the_first_half_of_the_key():
+    """The gate of the hold opens by itself as soon as the player has the first half: no action needed."""
+    for state in (engine.new_game(), play([TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [CABIN_TO_DECK])):
+        assert engine.door_status(state, "deck_to_hold") == "barred"
+        after, outcome = engine.enter(state, "deck_to_hold")
+        assert outcome["event"] == "barred"
+        assert outcome["text"] == story.DOORS["deck_to_hold"]["barred_text"]
+        assert after == state
+        assert offered(state, "deck_to_hold") == [("examine", None)] + [("use_item", item) for item in state["inventory"]]
+        _, outcome = engine.examine(state, "deck_to_hold")
+        assert outcome["text"] == story.DOORS["deck_to_hold"]["barred_text"]
+    with_half = play(GET_KEY)
+    assert engine.door_status(with_half, "deck_to_hold") == "open"
+    assert engine.enter(with_half, "deck_to_hold")[0]["room"] == "hold"
 
 
 def test_r1_refused_actions_change_nothing():
@@ -436,11 +510,16 @@ def test_r2_items_can_be_collected_only_where_the_story_puts_them():
     assert outcome["event"] == "guarded"  # the barrier still stands
     _, outcome = engine.pick_up(in_cabin, "wand")
     assert outcome["event"] == "not_here"  # the wand lies on the deck
+    _, outcome = engine.pick_up(in_cabin, "second_key")
+    assert outcome["event"] == "not_here"  # the second half is in the hold
+    in_hold = play(GET_KEY + [TO_HOLD] + PHASE_1 + PHASE_2)
+    _, outcome = engine.pick_up(in_hold, "second_key")
+    assert outcome["event"] == "guarded"  # two phases are not enough
 
 
 def test_r2_using_items_does_not_consume_them():
-    """After the cabin's circuit, opening a door and giving the wand away, both items are still there."""
-    assert play(CRAB_ENDING)["inventory"] == ["wand", "key"]
+    """After both puzzles, opening a door and giving the wand away, every item is still there."""
+    assert play(CRAB_ENDING)["inventory"] == ["wand", "key", "second_key"]
 
 
 def test_r3_revisited_cabin_remembers_the_complete_circuit():
@@ -456,7 +535,7 @@ def test_r3_revisited_cabin_remembers_the_complete_circuit():
 
 def test_r3_revisited_hold_remembers_the_solved_barrel():
     """Back in the hold: the barrel shows the solved puzzle, and using the wand again does nothing."""
-    state = play([TAKE_WAND, TO_HOLD, SOLVE_HOLD, HOLD_TO_DECK, TO_HOLD])
+    state = play(GET_KEY + [TO_HOLD, WAND_ON_BARREL, HOLD_TO_DECK, TO_HOLD])
     here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
     assert here["hold_puzzle"] == "solved"
     _, outcome = engine.examine(state, "hold_puzzle")
@@ -477,8 +556,18 @@ def test_r2_an_item_can_wait_for_a_flag_to_appear(monkeypatch):
     assert "wand" in [thing["id"] for thing in engine.things_here(state)]
 
 
+def test_r3_revisited_hold_remembers_the_solved_tiles():
+    """Back in the hold: every tile still lit, the barrier still gone, the chest empty."""
+    state = play(GET_BOTH_KEYS + [TO_HOLD])
+    here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
+    assert [here[f"tile_{number}"] for number in range(1, 6)] == ["lit"] * 5
+    assert "hold_barrier" not in here
+    assert "second_key" not in here
+    assert here["chest"] == "present"
+
+
 def test_r3_found_clue_is_remembered():
-    state = play([TAKE_WAND, TO_HOLD, SOLVE_HOLD, HOLD_TO_DECK])
+    state = play(GET_KEY + [TO_HOLD, WAND_ON_BARREL, HOLD_TO_DECK])
     assert engine.clues(state) == [story.CLUES["crab_truthful"]]
     assert engine.clues(reopen(state)) == [story.CLUES["crab_truthful"]]
     assert engine.clues(engine.new_game()) == []
@@ -486,8 +575,8 @@ def test_r3_found_clue_is_remembered():
 
 def test_r4_new_game_resets_progress_but_not_the_story():
     """Playing, resuming and restarting never change story.py."""
-    tables = [story.START_ROOM, story.FLAGS, story.ROOMS, story.ITEMS, story.DOORS,
-              story.OBJECTS, story.ENDINGS, story.CLUES, story.MESSAGES]
+    tables = [story.START_ROOM, story.FLAGS, story.ROOMS, story.ITEMS, story.DOORS, story.OBJECTS,
+              story.CIRCUITS, story.FLOOR_PUZZLES, story.ENDINGS, story.CLUES, story.MESSAGES]
     story_before = copy.deepcopy(tables)
     first_game = copy.deepcopy(engine.new_game())
     for state in sample_states():
@@ -653,6 +742,201 @@ def test_m5_a_dissolved_barrier_is_gone():
     assert offered(complete, "barrier") == []
 
 
+# --- M5: the tiles of the hold ---------------------------------------------------------
+
+TILES = ["tile_1", "tile_2", "tile_3", "tile_4", "tile_5"]
+IN_HOLD = GET_KEY + [TO_HOLD]
+
+
+def lit(state):
+    """The numbers of the lit tiles, in order: "125" is tiles 1, 2 and 5 lit."""
+    numbers = ""
+    for thing in engine.things_here(state):
+        if thing["kind"] == "tile" and thing["status"] == "lit":
+            numbers += story.OBJECTS[thing["id"]]["label"]
+    return numbers
+
+
+def phase_and_step(state):
+    return state["flags"]["hold_phase"], state["flags"]["hold_step"]
+
+
+def test_m5_the_tiles_start_dark_with_the_barrier_up():
+    in_hold = play(IN_HOLD)
+    assert phase_and_step(in_hold) == (1, 0)
+    assert lit(in_hold) == ""
+    here = {thing["id"]: thing["status"] for thing in engine.things_here(in_hold)}
+    assert here["hold_barrier"] == "up"
+    assert here["second_key"] == "guarded"
+
+
+def test_m5_phase_1_lights_the_wave_one_tile_at_a_time():
+    """1, 2, 3, 4, 5: each tile lights up; the fifth completes the phase, and only it stays lit for phase 2."""
+    state = play(IN_HOLD)
+    for number in range(1, 5):
+        state, outcome = engine.perform(state, step(number))
+        assert outcome["event"] == "tile_lit"
+        assert lit(state) == "1234"[:number]
+    state, outcome = engine.perform(state, step(5))
+    assert outcome["event"] == "phase_complete"
+    puzzle = story.FLOOR_PUZZLES["hold_tiles"]
+    assert outcome["text"] == puzzle["phase_text"].format(number=2, name=puzzle["phases"][1]["name"])
+    assert phase_and_step(state) == (2, 1)
+    assert lit(state) == "5"
+
+
+def test_m5_phase_2_returns_from_5_to_1():
+    state = play(IN_HOLD + PHASE_1)
+    state, outcome = engine.perform(state, step(3))
+    assert outcome["event"] == "tile_lit"
+    assert lit(state) == "35"
+    state, outcome = engine.perform(state, step(1))
+    assert outcome["event"] == "phase_complete"
+    assert phase_and_step(state) == (3, 1)
+    assert lit(state) == "1"
+
+
+def test_m5_phase_3_short_circuits_and_dissolves_the_barrier():
+    """1, 5, 2, 4, 3: the last tile solves the puzzle: the message, the barrier gone, the second half free."""
+    state = play(IN_HOLD + PHASE_1 + PHASE_2 + PHASE_3[:-1])
+    assert lit(state) == "1245"
+    assert not state["flags"]["hold_solved"]
+    state, outcome = engine.perform(state, PHASE_3[-1])
+    assert outcome["event"] == "tiles_complete"
+    assert outcome["text"] == story.FLOOR_PUZZLES["hold_tiles"]["solved_text"]
+    assert state["flags"]["hold_solved"]
+    assert lit(state) == "12345"
+    here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
+    assert "hold_barrier" not in here
+    assert here["second_key"] == "on_floor"
+    _, outcome = engine.pick_up(state, "second_key")
+    assert outcome["event"] == "picked_up"
+
+
+@pytest.mark.parametrize("done, wrong", [
+    pytest.param([step(1), step(2)], step(4), id="phase 1"),
+    pytest.param(PHASE_1 + [step(3)], step(5), id="phase 2, back on a tile lit earlier"),
+    pytest.param(PHASE_1 + PHASE_2 + [step(5)], step(3), id="phase 3"),
+])
+def test_m5_a_wrong_tile_starts_the_same_phase_over(done, wrong):
+    """BZZZ: the lights go out and the phase starts over from its first tile; the phases before stay done."""
+    state = play(IN_HOLD + done)
+    phase, _ = phase_and_step(state)
+    after, outcome = engine.perform(state, wrong)
+    assert outcome["event"] == "tiles_reset"
+    assert outcome["text"] == story.FLOOR_PUZZLES["hold_tiles"]["wrong_text"]
+    assert phase_and_step(after) == (phase, 0)
+    assert lit(after) == ""
+    first = story.FLOOR_PUZZLES["hold_tiles"]["phases"][phase - 1]["steps"][0]
+    again, outcome = engine.step_on(after, first)
+    assert outcome["event"] == "tile_lit"
+    assert phase_and_step(again) == (phase, 1)
+
+
+def test_m5_a_wrong_tile_before_the_first_one_is_a_mistake_too():
+    """Nothing is lit yet, but the player still hears and reads that the tile is wrong."""
+    state = play(IN_HOLD)
+    after, outcome = engine.perform(state, step(3))
+    assert outcome["ok"]
+    assert outcome["event"] == "tiles_reset"
+    assert phase_and_step(after) == (1, 0)
+
+
+@pytest.mark.parametrize("done", [
+    pytest.param([step(1), step(2)], id="back onto 2"),
+    pytest.param(PHASE_1, id="back onto 5, where phase 2 starts"),
+    pytest.param(PHASE_1 + PHASE_2, id="back onto 1, where phase 3 starts"),
+])
+def test_m5_stepping_back_onto_the_tile_lit_last_changes_nothing(done):
+    state = play(IN_HOLD + done)
+    after, outcome = engine.perform(state, done[-1])
+    assert not outcome["ok"]
+    assert outcome["event"] == "already_lit"
+    assert after == state
+
+
+def test_m5_walking_out_of_the_zone_starts_the_phase_over():
+    state = play(IN_HOLD + PHASE_1 + [step(3)])
+    after, outcome = engine.perform(state, LEAVE_TILES)
+    assert outcome["event"] == "tiles_reset"
+    assert outcome["text"] == story.FLOOR_PUZZLES["hold_tiles"]["left_text"]
+    assert phase_and_step(after) == (2, 0)
+    assert lit(after) == ""
+
+
+def test_m5_walking_out_with_nothing_lit_changes_nothing():
+    state = play(IN_HOLD + [step(1), step(3)])  # a mistake: nothing is lit any more
+    after, outcome = engine.perform(state, LEAVE_TILES)
+    assert not outcome["ok"]
+    assert after == state
+
+
+def test_m5_walking_out_of_the_hold_starts_the_phase_over():
+    """The engine does not need main.py for this: walking out of the room is walking out of the zone."""
+    state = play(IN_HOLD + PHASE_1 + [step(3), HOLD_TO_DECK, TO_HOLD])
+    assert phase_and_step(state) == (2, 0)
+    assert lit(state) == ""
+
+
+def test_m5_the_only_shortest_way_through_the_tiles_is_the_three_sequences():
+    """Every tile tried at every moment: the puzzle has no shortcut and no other solution.
+
+    The fewest steps that solve it are 1 2 3 4 5, then 3 1, then 5 2 4 3, and no
+    other path of that length solves it.
+    """
+    start = play(IN_HOLD)
+    paths = {phase_and_step(start): [[]]}  # every shortest path found to each moment of the puzzle
+    frontier = [start]
+    solutions = []
+    while frontier and not solutions:
+        found = {}
+        for state in frontier:
+            for path in paths[phase_and_step(state)]:
+                for tile in TILES:
+                    after, outcome = engine.step_on(state, tile)
+                    if outcome["event"] == "tiles_complete":
+                        solutions.append(path + [tile])
+                    elif phase_and_step(after) not in paths:
+                        found.setdefault(phase_and_step(after), (after, []))[1].append(path + [tile])
+        for moment, (state, moment_paths) in found.items():
+            paths[moment] = moment_paths
+        frontier = [state for state, _ in found.values()]
+    assert solutions == [[f"tile_{number}" for number in (1, 2, 3, 4, 5, 3, 1, 5, 2, 4, 3)]]
+
+
+def test_m5_from_any_moment_the_rest_of_the_sequences_solves_it():
+    """No dead ends: in any phase, with any number of tiles lit, finishing the sequences solves the puzzle."""
+    phases = story.FLOOR_PUZZLES["hold_tiles"]["phases"]
+    for phase, info in enumerate(phases, start=1):
+        for done in range(len(info["steps"])):
+            state = play(IN_HOLD)
+            state["flags"]["hold_phase"] = phase
+            state["flags"]["hold_step"] = done
+            rest = info["steps"][done:]
+            for later in phases[phase:]:
+                rest = rest + later["steps"][1:]  # each later phase starts on the tile lit last
+            for tile in rest:
+                state, outcome = engine.step_on(state, tile)
+                assert outcome["ok"], (phase, done, tile, outcome)
+            assert state["flags"]["hold_solved"], (phase, done)
+
+
+def test_m5_solved_tiles_stay_lit_and_do_nothing_more():
+    solved = play(IN_HOLD + SOLVE_TILES)
+    for action in [step(number) for number in range(1, 6)] + [LEAVE_TILES]:
+        after, outcome = engine.perform(solved, action)
+        assert outcome["event"] == "already_done"
+        assert after == solved
+
+
+def test_m5_resuming_keeps_the_phase_and_the_lit_tiles():
+    """A4: closing the game in the middle of a phase and reopening it gives back the same moment."""
+    state = play(IN_HOLD + PHASE_1 + [step(3)])
+    resumed = reopen(state)
+    assert resumed == state
+    assert lit(resumed) == "35"
+
+
 # --- Saving and resuming -----------------------------------------------------------
 
 
@@ -667,9 +951,9 @@ def test_persistence_every_accepted_action_survives_a_restart():
 
 def test_persistence_refused_actions_leave_the_file_untouched(save_file):
     """Rejected actions leave existing data unchanged, and the game on screen still matches the file."""
-    state = play_saving(GET_KEY + [OPEN_CRAB])
+    state = play_saving(GET_BOTH_KEYS + [OPEN_CRAB])
     saved_bytes = save_file.read_bytes()
-    for action in (TO_ANGEL, OPEN_ANGEL, TAKE_WAND, SOLVE_HOLD, GIVE_TO_CRAB):
+    for action in (TO_ANGEL, OPEN_ANGEL, TAKE_WAND, WAND_ON_BARREL, GIVE_TO_CRAB, step(1), LEAVE_TILES):
         state, outcome = save_if_accepted(engine.perform(state, action))
         assert not outcome["ok"]
         assert save_file.read_bytes() == saved_bytes
@@ -722,6 +1006,12 @@ def without(key):
     pytest.param(restorable(flags={"cabin_solved": "yes"}), id="wrong flag value"),
     pytest.param(restorable(flags={"cabin_solved": 1}), id="1 is not True"),
     pytest.param(restorable(flags={"chosen_door": "deck_to_cabin"}), id="not a choice door"),
+    pytest.param(restorable(flags={"hold_phase": 4}), id="no phase 4"),
+    pytest.param(restorable(flags={"hold_phase": "1"}), id="phase as text"),
+    pytest.param(restorable(flags={"hold_step": 6}), id="more steps than any phase"),
+    pytest.param(restorable(flags={"hold_step": True}), id="True is not a step"),
+    pytest.param(restorable(flags={"hold_phase": 2, "hold_step": 3}), id="phase 2 has only three steps"),
+    pytest.param(restorable(flags={"hold_step": 5}), id="a finished phase that did not go on"),
     pytest.param(restorable(ending="happy"), id="unknown ending"),
 ])
 def test_restore_state_rejects_broken_saves(data):
@@ -735,6 +1025,15 @@ def test_restore_state_fills_in_missing_flags():
     expected = dict(story.FLAGS)
     expected["cabin_solved"] = True
     assert restored["flags"] == expected
+
+
+def test_restore_state_accepts_every_moment_of_the_tiles():
+    """Any phase with fewer lit tiles than its sequence is a valid saved game, and so is the solved puzzle."""
+    for phase, info in enumerate(story.FLOOR_PUZZLES["hold_tiles"]["phases"], start=1):
+        for lit in range(len(info["steps"])):
+            data = restorable(flags={"hold_phase": phase, "hold_step": lit})
+            assert engine.restore_state(data) is not None, (phase, lit)
+    assert engine.restore_state(restorable(flags={"hold_phase": 3, "hold_step": 5, "hold_solved": True})) is not None
 
 
 def test_restore_state_returns_a_copy():
@@ -760,13 +1059,22 @@ def test_unknown_ids_raise_errors():
         engine.perform(state, act("jump", "deck"))
     with pytest.raises(ValueError):
         engine.activate(state, "crab")  # a character is not a generator
+    with pytest.raises(ValueError):
+        engine.step_on(state, "generator_a")  # a generator is not a tile
+    with pytest.raises(ValueError):
+        engine.leave_zone(state, "hold")  # a room is not a floor puzzle
+    with pytest.raises(ValueError):
+        engine.examine(state, "hold_tiles")  # a floor puzzle is walked on, not looked at
+    with pytest.raises(ValueError):
+        engine.use_item(state, "wand", "hold_tiles")
+    assert engine.actions_for(state, "hold_tiles") == []
 
 
 # --- The story data --------------------------------------------------------------
 
 
 def all_ids():
-    return list(story.ROOMS) + list(story.ITEMS) + list(story.DOORS) + list(story.OBJECTS)
+    return list(story.ROOMS) + list(story.ITEMS) + list(story.DOORS) + list(story.OBJECTS) + list(story.FLOOR_PUZZLES)
 
 
 def test_story_has_what_the_first_release_needs():
@@ -789,7 +1097,9 @@ def test_story_references_exist():
     for door in story.DOORS.values():
         assert door["room"] in story.ROOMS
         assert door["to"] in story.ROOMS
-        assert door["requires"] is None or door["requires"] in story.ITEMS
+        for item in door["requires"]:
+            assert item in story.ITEMS
+        assert door["opens_with"] is None or door["opens_with"] in story.ITEMS
         assert door["choice_flag"] is None or door["choice_flag"] in story.FLAGS
     for thing in story.OBJECTS.values():
         assert thing["room"] in story.ROOMS
@@ -807,6 +1117,14 @@ def test_story_references_exist():
         for switch in circuit["switches"]:
             assert story.OBJECTS[switch]["kind"] == "switch", (circuit_id, switch)
             assert story.OBJECTS[switch]["room"] == circuit["room"], (circuit_id, switch)
+    for puzzle_id, puzzle in story.FLOOR_PUZZLES.items():
+        assert puzzle["room"] in story.ROOMS, puzzle_id
+        for key in ("phase_flag", "step_flag", "solved_flag"):
+            assert puzzle[key] in story.FLAGS, (puzzle_id, key)
+        for phase in puzzle["phases"]:
+            for tile in phase["steps"]:
+                assert story.OBJECTS[tile]["kind"] == "tile", (puzzle_id, tile)
+                assert story.OBJECTS[tile]["room"] == puzzle["room"], (puzzle_id, tile)
 
 
 def test_story_every_door_has_a_way_back():
@@ -830,18 +1148,26 @@ def test_story_every_room_can_be_reached():
 
 
 def test_story_locked_doors_are_complete():
-    """A door with a lock has a choice flag and all three texts; a door without one has neither."""
+    """A door with a lock has a choice flag and all three texts; a door without one has neither.
+
+    A barred door says what bars it.
+    """
     for door_id, door in story.DOORS.items():
-        locked = door["requires"] is not None
+        assert isinstance(door["requires"], list), door_id
+        locked = bool(door["requires"])
         assert (door["choice_flag"] is not None) == locked, door_id
         if locked:
             for key in ("locked_text", "sealed_text", "open_text"):
                 assert door[key].strip(), f"{door_id} has no {key}"
+        barred = door["opens_with"] is not None
+        assert (door["barred_text"] is not None) == barred, door_id
+        if barred:
+            assert door["barred_text"].strip(), door_id
 
 
 def test_story_objects_are_well_formed():
     for thing_id, thing in story.OBJECTS.items():
-        assert thing["kind"] in ("puzzle", "character", "switch", "barrier", "altar"), thing_id
+        assert thing["kind"] in ("puzzle", "character", "switch", "tile", "barrier", "altar"), thing_id
         assert thing["name"].strip()
         assert thing["look_text"].strip()
         if thing["kind"] in ("puzzle", "character"):
@@ -854,6 +1180,11 @@ def test_story_objects_are_well_formed():
             assert thing["toggle_text"].strip() and thing["label"].strip(), thing_id
             in_circuits = [c for c in story.CIRCUITS.values() if thing_id in c["switches"]]
             assert len(in_circuits) == 1, f"{thing_id} must be in exactly one circuit"
+        if thing["kind"] == "tile":
+            assert thing["label"].strip(), thing_id
+            puzzles = [puzzle for puzzle in story.FLOOR_PUZZLES.values()
+                       if any(thing_id in phase["steps"] for phase in puzzle["phases"])]
+            assert len(puzzles) == 1, f"{thing_id} must be in exactly one floor puzzle"
         if thing["kind"] == "barrier":
             assert thing["open_if"] in story.FLAGS, thing_id
         for reaction in thing["reactions"].values():
@@ -864,6 +1195,18 @@ def test_story_objects_are_well_formed():
             assert thing["done_text"].strip(), f"{thing_id} has no done_text"
             for reaction in thing["reactions"].values():
                 assert "set_flag" in reaction, f"{thing_id} is a puzzle: it sets a flag, it does not end the game"
+
+
+def test_story_floor_puzzles_are_well_formed():
+    """Flags that start at phase 1 with nothing lit, and phases that each start on the tile the one before ended on."""
+    for puzzle_id, puzzle in story.FLOOR_PUZZLES.items():
+        assert type(story.FLAGS[puzzle["phase_flag"]]) is int and story.FLAGS[puzzle["phase_flag"]] == 1, puzzle_id
+        assert type(story.FLAGS[puzzle["step_flag"]]) is int and story.FLAGS[puzzle["step_flag"]] == 0, puzzle_id
+        assert story.FLAGS[puzzle["solved_flag"]] is False, puzzle_id
+        for index, phase in enumerate(puzzle["phases"]):
+            assert phase["name"].strip() and phase["steps"], (puzzle_id, index)
+            if index > 0:
+                assert phase["steps"][0] == puzzle["phases"][index - 1]["steps"][-1], (puzzle_id, index)
 
 
 def test_story_texts_are_not_empty():
@@ -883,5 +1226,8 @@ def test_story_texts_are_not_empty():
         assert text.strip()
     for circuit in story.CIRCUITS.values():
         assert circuit["solved_text"].strip()
+    for puzzle in story.FLOOR_PUZZLES.values():
+        for key in ("lit_text", "phase_text", "wrong_text", "left_text", "solved_text"):
+            assert puzzle[key].strip()
     for text in story.MESSAGES.values():
         assert text.strip()
