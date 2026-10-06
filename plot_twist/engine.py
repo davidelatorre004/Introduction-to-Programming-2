@@ -140,23 +140,21 @@ def door_status(state, door):
 def things_here(state):
     """List what is in the current room right now, as dicts with "id", "kind" and "status".
 
-    Items are listed only while they lie on the floor. The status is "on_floor"
-    for items, "solved" or "unsolved" for puzzles, "present" for characters and
-    "open", "locked" or "sealed" for doors.
+    Items are listed only while they lie on the floor, and a barrier only while
+    it stands. The status is "on_floor" for items, or "guarded" if they cannot be
+    picked up yet; "solved" or "unsolved" for puzzles; "on" or "off" for switches;
+    "up" for barriers; "present" for characters and altars; and "open", "locked"
+    or "sealed" for doors.
     """
     room = state["room"]
     things = []
     for item in story.ITEMS:
         if _on_floor(state, item):
-            things.append({"id": item, "kind": "item", "status": "on_floor"})
+            status = "on_floor" if _is_free(state, item) else "guarded"
+            things.append({"id": item, "kind": "item", "status": status})
     for thing, info in story.OBJECTS.items():
-        if info["room"] != room:
-            continue
-        if info["kind"] == "puzzle":
-            status = "solved" if _is_solved(state, thing) else "unsolved"
-        else:
-            status = "present"
-        things.append({"id": thing, "kind": info["kind"], "status": status})
+        if info["room"] == room and _is_standing(state, thing):
+            things.append({"id": thing, "kind": info["kind"], "status": _object_status(state, thing)})
     for door, info in story.DOORS.items():
         if info["room"] == room:
             things.append({"id": door, "kind": "door", "status": door_status(state, door)})
@@ -178,8 +176,13 @@ def actions_for(state, target):
     if kind == "room":
         return [_action("examine", target, story.MESSAGES["label_look_around"])]
     if kind == "item":
+        if not _is_free(state, target):
+            return [_action("examine", target, story.MESSAGES["label_examine"])]
         label = story.MESSAGES["label_pick_up"].format(item=story.ITEMS[target]["name"])
         return [_action("pick_up", target, label)]
+    if kind == "switch":
+        label = story.MESSAGES["label_activate"].format(name=story.OBJECTS[target]["name"])
+        return [_action("activate", target, label)]
     if kind == "door" and door_status(state, target) == "open":
         destination = story.ROOMS[story.DOORS[target]["to"]]["name"]
         label = story.MESSAGES["label_enter"].format(room=destination)
@@ -220,6 +223,8 @@ def pick_up(state, item):
         return _refuse(state, "already_have", story.MESSAGES["already_have"])
     if not _on_floor(state, item):
         return _refuse(state, "not_here", story.MESSAGES["not_here"])
+    if not _is_free(state, item):
+        return _refuse(state, "guarded", story.MESSAGES["guarded"])
     new = copy.deepcopy(state)
     new["inventory"].append(item)
     return _accept(new, "picked_up", story.ITEMS[item]["pickup_text"])
@@ -240,7 +245,34 @@ def enter(state, door):
         return _refuse(state, "sealed", info["sealed_text"])
     new = copy.deepcopy(state)
     new["room"] = info["to"]
+    _reset_circuits(new)
     return _accept(new, "entered", story.ROOMS[info["to"]]["name"])
+
+
+def activate(state, switch):
+    """Activate a generator: it and the generators wired to it switch over.
+
+    Activating flips (NOT) every flag in the generator's "toggles": its own and
+    those of the two generators next to it. Then the whole circuit is checked:
+    if every generator is on at the same time, the circuit is complete, its flag
+    is set (so the barrier it feeds dissolves) and the generators stay on from
+    then on. The flags are plain booleans: True is on, False is off.
+    """
+    _expect(switch, "switch")
+    if is_over(state):
+        return _refuse(state, "game_over", story.MESSAGES["game_over"])
+    if not _is_here(state, switch):
+        return _refuse(state, "not_here", story.MESSAGES["not_here"])
+    circuit = _circuit_of(switch)
+    if state["flags"][circuit["solved_flag"]]:
+        return _refuse(state, "already_done", story.MESSAGES["circuit_done"])
+    new = copy.deepcopy(state)
+    for flag in story.OBJECTS[switch]["toggles"]:
+        new["flags"][flag] = not new["flags"][flag]
+    if _circuit_complete(new, circuit):
+        new["flags"][circuit["solved_flag"]] = True
+        return _accept(new, "circuit_complete", circuit["solved_text"])
+    return _accept(new, "toggled", story.OBJECTS[switch]["toggle_text"])
 
 
 def use_item(state, item, target):
@@ -289,8 +321,8 @@ def examine(state, target):
 def perform(state, action):
     """Carry out an action given as data, such as one returned by actions_for().
 
-    The action is a dict with a "verb" ("pick_up", "enter", "use_item" or
-    "examine"), a "target" and, for "use_item", an "item".
+    The action is a dict with a "verb" ("pick_up", "enter", "use_item",
+    "examine" or "activate"), a "target" and, for "use_item", an "item".
     """
     verb = action["verb"]
     if verb == "pick_up":
@@ -301,6 +333,8 @@ def perform(state, action):
         return use_item(state, action["item"], action["target"])
     if verb == "examine":
         return examine(state, action["target"])
+    if verb == "activate":
+        return activate(state, action["target"])
     raise ValueError(f"Unknown verb: {verb!r}")
 
 
@@ -355,7 +389,7 @@ def _is_here(state, thing):
         return _on_floor(state, thing)
     if kind == "door":
         return story.DOORS[thing]["room"] == state["room"]
-    return story.OBJECTS[thing]["room"] == state["room"]
+    return story.OBJECTS[thing]["room"] == state["room"] and _is_standing(state, thing)
 
 
 def _on_floor(state, item):
@@ -379,6 +413,60 @@ def _is_solved(state, puzzle):
         if not _reaction_done(state, reaction):
             return False
     return True
+
+
+def _is_free(state, item):
+    """True if nothing keeps the player from picking up the item (its "free_if" flag, if any, is true)."""
+    flag = story.ITEMS[item]["free_if"]
+    return flag is None or bool(state["flags"][flag])
+
+
+def _is_standing(state, thing):
+    """True if a puzzle, character, switch, barrier or altar is in its room now. A barrier is gone once open."""
+    info = story.OBJECTS[thing]
+    if info["kind"] == "barrier":
+        return not state["flags"][info["open_if"]]
+    return True
+
+
+def _object_status(state, thing):
+    """The status of a puzzle, character, switch, barrier or altar, as things_here() lists it."""
+    info = story.OBJECTS[thing]
+    if info["kind"] == "puzzle":
+        return "solved" if _is_solved(state, thing) else "unsolved"
+    if info["kind"] == "switch":
+        return "on" if state["flags"][info["flag"]] else "off"
+    if info["kind"] == "barrier":
+        return "up"
+    return "present"
+
+
+def _circuit_of(switch):
+    """The circuit a switch belongs to."""
+    for circuit in story.CIRCUITS.values():
+        if switch in circuit["switches"]:
+            return circuit
+    raise ValueError(f"{switch!r} is not in any circuit")
+
+
+def _circuit_complete(state, circuit):
+    """True when every switch of the circuit is on at the same time."""
+    for switch in circuit["switches"]:
+        if not state["flags"][story.OBJECTS[switch]["flag"]]:
+            return False
+    return True
+
+
+def _reset_circuits(state):
+    """Put back the starting configuration of the circuits in the current room that are not complete.
+
+    It changes the state it is given, so it is used only on the copy an accepted action is building.
+    """
+    for circuit in story.CIRCUITS.values():
+        if circuit["room"] == state["room"] and not state["flags"][circuit["solved_flag"]]:
+            for switch in circuit["switches"]:
+                flag = story.OBJECTS[switch]["flag"]
+                state["flags"][flag] = story.FLAGS[flag]
 
 
 def _door_text(state, door):
@@ -448,7 +536,8 @@ def _is_choice_door(door):
 
 
 def _allowed_values(flag):
-    """Every value a flag can take in valid play: its starting value, and what doors and reactions write."""
+    """Every value a flag can take in valid play: its starting value, and what doors, reactions,
+    switches and circuits write."""
     values = [story.FLAGS[flag]]
     for door, info in story.DOORS.items():
         if info["choice_flag"] == flag:
@@ -457,6 +546,11 @@ def _allowed_values(flag):
         for reaction in info["reactions"].values():
             if reaction.get("set_flag") == flag:
                 values.append(reaction["value"])
+        if flag in info.get("toggles", []):
+            values += [True, False]  # a switch flips it both ways
+    for circuit in story.CIRCUITS.values():
+        if circuit["solved_flag"] == flag:
+            values.append(True)
     return values
 
 

@@ -33,8 +33,8 @@ def play(actions):
     return state
 
 
-TO_THE_CRAB_DOOR = [("pick_up", "wand", None), ("enter", "deck_to_cabin", None), ("use_item", "cabin_puzzle", "wand"),
-                    ("pick_up", "key", None), ("enter", "cabin_to_deck", None)]
+TO_THE_CRAB_DOOR = [("pick_up", "wand", None), ("enter", "deck_to_cabin", None), ("activate", "generator_a", None),
+                    ("activate", "generator_d", None), ("pick_up", "key", None), ("enter", "cabin_to_deck", None)]
 CRAB_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_crab", "key"), ("enter", "deck_to_crab", None),
                                   ("use_item", "crab", "wand")]
 ANGEL_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_angel", "key"), ("enter", "deck_to_angel", None),
@@ -65,12 +65,15 @@ def test_everything_on_screen_has_a_picture():
         assert sprites.image("wall_" + room) is not None or sprites.image("wall_" + room + "_0") is not None, room
     for item in story.ITEMS:
         assert sprites.image(item) is not None, item
+    statuses = {"puzzle": ["solved", "unsolved"], "character": ["present"], "switch": ["on", "off"],
+                "altar": ["present"], "barrier": ["up"]}
     for thing, info in story.OBJECTS.items():
-        if info["kind"] == "puzzle":
-            for status in ("solved", "unsolved"):
-                assert sprites.image(thing + "_" + status) is not None, (thing, status)
-        else:
-            assert sprites.image(thing) is not None, thing
+        for status in statuses[info["kind"]]:
+            if info["kind"] == "barrier":
+                assert sprites.image("barrier_0") is not None and sprites.image("barrier_1") is not None
+            else:
+                picture = main.thing_picture({"id": thing, "kind": info["kind"], "status": status})
+                assert picture is not None, (thing, status)
     for status in ("open", "locked", "sealed"):
         assert sprites.image("door_" + status) is not None, status
     for direction in ("down", "up", "right"):

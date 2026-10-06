@@ -35,15 +35,20 @@ TO_ANGEL = act("enter", "deck_to_angel")
 CABIN_TO_DECK = act("enter", "cabin_to_deck")
 HOLD_TO_DECK = act("enter", "hold_to_deck")
 CRAB_TO_DECK = act("enter", "crab_to_deck")
-SOLVE_CABIN = act("use_item", "cabin_puzzle", item="wand")
+ACTIVATE_A = act("activate", "generator_a")
+ACTIVATE_B = act("activate", "generator_b")
+ACTIVATE_C = act("activate", "generator_c")
+ACTIVATE_D = act("activate", "generator_d")
 SOLVE_HOLD = act("use_item", "hold_puzzle", item="wand")
 OPEN_CRAB = act("use_item", "deck_to_crab", item="key")
 OPEN_ANGEL = act("use_item", "deck_to_angel", item="key")
 GIVE_TO_CRAB = act("use_item", "crab", item="wand")
 GIVE_TO_ANGEL = act("use_item", "angel", item="wand")
 
+# The cabin's generators start A off, B on, C on, D off: A then D turns all four on.
+SOLVE_CABIN = [ACTIVATE_A, ACTIVATE_D]
 # Wand, cabin puzzle, key, and back on the deck.
-GET_KEY = [TAKE_WAND, TO_CABIN, SOLVE_CABIN, TAKE_KEY, CABIN_TO_DECK]
+GET_KEY = [TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK]
 # The shortest way to each ending: the hold is optional.
 CRAB_ENDING = GET_KEY + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
 ANGEL_ENDING = GET_KEY + [OPEN_ANGEL, TO_ANGEL, GIVE_TO_ANGEL]
@@ -51,6 +56,8 @@ ANGEL_ENDING = GET_KEY + [OPEN_ANGEL, TO_ANGEL, GIVE_TO_ANGEL]
 CLUE_THEN_CRAB = [TAKE_WAND, TO_HOLD, SOLVE_HOLD, HOLD_TO_DECK] + GET_KEY[1:] + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
 # Open a door, go in, come back and wander around without ending the game.
 CHOOSE_AND_WANDER = GET_KEY + [OPEN_CRAB, TO_CRAB, CRAB_TO_DECK, TO_CABIN]
+# Flip some generators, walk out and back in (they start over), flip another one.
+TOGGLE_AND_LEAVE = [TAKE_WAND, TO_CABIN, ACTIVATE_B, ACTIVATE_C, CABIN_TO_DECK, TO_CABIN, ACTIVATE_C]
 
 
 def play(steps, state=None):
@@ -81,8 +88,9 @@ def states_along(steps):
 
 
 def sample_states():
-    """A good spread of moments in a game: every step of three different paths."""
-    return states_along(CLUE_THEN_CRAB) + states_along(ANGEL_ENDING) + states_along(CHOOSE_AND_WANDER)
+    """A good spread of moments in a game: every step of four different paths."""
+    return (states_along(CLUE_THEN_CRAB) + states_along(ANGEL_ENDING) + states_along(CHOOSE_AND_WANDER)
+            + states_along(TOGGLE_AND_LEAVE))
 
 
 def every_action():
@@ -93,6 +101,9 @@ def every_action():
         actions.append(act("pick_up", item))
     for door in story.DOORS:
         actions.append(act("enter", door))
+    for thing, info in story.OBJECTS.items():
+        if info["kind"] == "switch":
+            actions.append(act("activate", thing))
     for target in targets:
         actions.append(act("examine", target))
         for item in story.ITEMS:
@@ -180,13 +191,13 @@ def test_a3_wand_cannot_be_collected_twice():
 
 
 def test_a3_revisited_cabin_offers_no_second_key():
-    """A3: back in the cabin, there is no key on the floor and the drawer does not make another one."""
+    """A3: back in the cabin, the altar is empty and the generators do not make another key."""
     state = play(GET_KEY + [TO_CABIN])
     ids_here = [thing["id"] for thing in engine.things_here(state)]
     assert "key" not in ids_here
     _, outcome = engine.pick_up(state, "key")
     assert not outcome["ok"]
-    after, outcome = engine.use_item(state, "wand", "cabin_puzzle")
+    after, outcome = engine.activate(state, "generator_a")
     assert outcome["event"] == "already_done"
     assert after["inventory"].count("key") == 1
 
@@ -365,7 +376,7 @@ def test_pt04_irreversible_actions_are_flagged():
     assert flags == {None: False, "wand": True, "key": False}
 
     in_cabin = play([TAKE_WAND, TO_CABIN])
-    for action in engine.actions_for(in_cabin, "cabin_puzzle"):
+    for action in engine.actions_for(in_cabin, "generator_a") + engine.actions_for(in_cabin, "barrier"):
         assert not action["irreversible"]
 
 
@@ -395,11 +406,11 @@ def test_pt05_finished_game_resumes_on_its_ending():
 
 def test_r1_actions_need_the_right_scene_and_conditions():
     on_deck = play([TAKE_WAND])
-    for action in (SOLVE_CABIN, SOLVE_HOLD, GIVE_TO_CRAB, GIVE_TO_ANGEL, CABIN_TO_DECK):
+    for action in (ACTIVATE_A, SOLVE_HOLD, GIVE_TO_CRAB, GIVE_TO_ANGEL, CABIN_TO_DECK):
         _, outcome = engine.perform(on_deck, action)
         assert outcome["event"] == "not_here"
-    empty_handed = play([TO_CABIN])
-    _, outcome = engine.perform(empty_handed, SOLVE_CABIN)
+    empty_handed = play([TO_HOLD])
+    _, outcome = engine.perform(empty_handed, SOLVE_HOLD)
     assert outcome["event"] == "no_item"
 
 
@@ -422,22 +433,48 @@ def test_r1_actions_never_modify_the_state_they_receive():
 def test_r2_items_can_be_collected_only_where_the_story_puts_them():
     in_cabin = play([TO_CABIN])
     _, outcome = engine.pick_up(in_cabin, "key")
-    assert outcome["event"] == "not_here"  # the drawer is still sealed
+    assert outcome["event"] == "guarded"  # the barrier still stands
     _, outcome = engine.pick_up(in_cabin, "wand")
     assert outcome["event"] == "not_here"  # the wand lies on the deck
 
 
 def test_r2_using_items_does_not_consume_them():
-    """After solving the drawer, opening a door and giving the wand away, both items are still there."""
+    """After the cabin's circuit, opening a door and giving the wand away, both items are still there."""
     assert play(CRAB_ENDING)["inventory"] == ["wand", "key"]
 
 
-def test_r3_revisited_cabin_remembers_the_open_drawer():
+def test_r3_revisited_cabin_remembers_the_complete_circuit():
+    """Back in the cabin: the generators are still on, the barrier is still gone, the altar is empty."""
     state = play(GET_KEY + [TO_CABIN])
     here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
-    assert here["cabin_puzzle"] == "solved"
-    _, outcome = engine.examine(state, "cabin_puzzle")
-    assert outcome["text"] == story.OBJECTS["cabin_puzzle"]["done_text"]
+    for generator in ("generator_a", "generator_b", "generator_c", "generator_d"):
+        assert here[generator] == "on"
+    assert "barrier" not in here
+    assert "key" not in here
+    assert here["altar"] == "present"
+
+
+def test_r3_revisited_hold_remembers_the_solved_barrel():
+    """Back in the hold: the barrel shows the solved puzzle, and using the wand again does nothing."""
+    state = play([TAKE_WAND, TO_HOLD, SOLVE_HOLD, HOLD_TO_DECK, TO_HOLD])
+    here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
+    assert here["hold_puzzle"] == "solved"
+    _, outcome = engine.examine(state, "hold_puzzle")
+    assert outcome["text"] == story.OBJECTS["hold_puzzle"]["done_text"]
+    after, outcome = engine.use_item(state, "wand", "hold_puzzle")
+    assert outcome["event"] == "already_done"
+    assert after == state
+
+
+def test_r2_an_item_can_wait_for_a_flag_to_appear(monkeypatch):
+    """An item with "appears_if" is not there until its flag is true: here the wand waits for the clue."""
+    monkeypatch.setitem(story.ITEMS["wand"], "appears_if", "crab_truthful")
+    state = engine.new_game()
+    assert "wand" not in [thing["id"] for thing in engine.things_here(state)]
+    _, outcome = engine.pick_up(state, "wand")
+    assert outcome["event"] == "not_here"
+    state["flags"]["crab_truthful"] = True
+    assert "wand" in [thing["id"] for thing in engine.things_here(state)]
 
 
 def test_r3_found_clue_is_remembered():
@@ -478,6 +515,142 @@ def test_r4_every_ending_is_reachable_from_a_new_game():
     for steps in (CRAB_ENDING, ANGEL_ENDING, CLUE_THEN_CRAB):
         reached.add(play(steps)["ending"])
     assert reached == set(story.ENDINGS)
+
+
+# --- M5: the generators of the captain's cabin -----------------------------------------
+
+GENERATORS = ["generator_a", "generator_b", "generator_c", "generator_d"]
+
+
+def generators(state):
+    """The four generators as their letters, capital when on: "aBCd" is A off, B on, C on, D off."""
+    letters = ""
+    for generator in GENERATORS:
+        letter = story.OBJECTS[generator]["label"]
+        letters += letter if state["flags"][generator] else letter.lower()
+    return letters
+
+
+def test_m5_the_generators_start_a_off_b_on_c_on_d_off():
+    """The starting configuration the puzzle asks for, with the barrier up and the key behind it."""
+    in_cabin = play([TO_CABIN])
+    assert generators(in_cabin) == "aBCd"
+    here = {thing["id"]: thing["status"] for thing in engine.things_here(in_cabin)}
+    assert here["barrier"] == "up"
+    assert here["key"] == "guarded"
+
+
+@pytest.mark.parametrize("generator, after", [
+    ("generator_a", "Abcd"),  # A, B and C flip
+    ("generator_b", "AbCD"),  # B, A and D flip
+    ("generator_c", "ABcD"),  # C, A and D flip
+    ("generator_d", "abcD"),  # D, B and C flip
+])
+def test_m5_a_generator_flips_itself_and_the_two_next_to_it(generator, after):
+    """From aBCd, each generator flips itself and its two neighbours along the sides, never the one across."""
+    in_cabin = play([TO_CABIN])
+    state, outcome = engine.activate(in_cabin, generator)
+    assert outcome["event"] == "toggled"
+    assert generators(state) == after
+    assert not state["flags"]["cabin_solved"]
+
+
+def test_m5_activating_a_generator_twice_undoes_it():
+    in_cabin = play([TO_CABIN])
+    for generator in GENERATORS:
+        once, _ = engine.activate(in_cabin, generator)
+        twice, _ = engine.activate(once, generator)
+        assert generators(twice) == "aBCd", generator
+
+
+@pytest.mark.parametrize("first, last", [(ACTIVATE_A, ACTIVATE_D), (ACTIVATE_D, ACTIVATE_A)])
+def test_m5_all_four_on_dissolves_the_barrier(first, last):
+    """As soon as all four are on: the message, the barrier gone, and the key can be taken from the altar."""
+    state = play([TO_CABIN, first])
+    assert not state["flags"]["cabin_solved"]  # one generator is not enough
+    state, outcome = engine.perform(state, last)
+    assert outcome["event"] == "circuit_complete"
+    assert outcome["text"] == story.CIRCUITS["cabin_circuit"]["solved_text"]
+    assert generators(state) == "ABCD"
+    here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
+    assert "barrier" not in here
+    assert here["key"] == "on_floor"
+    _, outcome = engine.pick_up(state, "key")
+    assert outcome["event"] == "picked_up"
+
+
+def test_m5_every_configuration_of_the_generators_can_be_completed():
+    """Whatever the player does, the circuit can still be completed: the puzzle has no dead ends.
+
+    On the way, every press is checked: the circuit is complete exactly when all four are on.
+    """
+    for number in range(16):
+        start = play([TO_CABIN])
+        for index, generator in enumerate(GENERATORS):
+            start["flags"][generator] = bool(number >> index & 1)
+        seen = {generators(start)}
+        frontier = [start]
+        completed = False
+        while frontier and not completed:  # all the configurations one press further, then two...
+            further = []
+            for state in frontier:
+                for generator in GENERATORS:
+                    after, outcome = engine.activate(state, generator)
+                    assert (outcome["event"] == "circuit_complete") == (generators(after) == "ABCD")
+                    if outcome["event"] == "circuit_complete":
+                        completed = True
+                    elif generators(after) not in seen:
+                        seen.add(generators(after))
+                        further.append(after)
+            frontier = further
+        assert completed, generators(start)
+
+
+def test_m5_a_complete_circuit_stays_on():
+    complete = play([TO_CABIN] + SOLVE_CABIN)
+    for generator in GENERATORS:
+        after, outcome = engine.activate(complete, generator)
+        assert outcome["event"] == "already_done"
+        assert after == complete
+
+
+def test_m5_walking_back_in_finds_the_starting_configuration():
+    """Until the circuit is complete, entering the cabin always finds A off, B on, C on, D off."""
+    state = play([TO_CABIN, ACTIVATE_B, ACTIVATE_C])
+    assert generators(state) != "aBCd"
+    state = play([CABIN_TO_DECK, TO_CABIN], state)
+    assert generators(state) == "aBCd"
+
+
+def test_m5_a_complete_circuit_is_remembered():
+    state = play([TO_CABIN] + SOLVE_CABIN + [CABIN_TO_DECK, TO_CABIN])
+    assert generators(state) == "ABCD"
+    assert state["flags"]["cabin_solved"]
+
+
+def test_m5_resuming_keeps_the_generators_as_they_were():
+    """A4: reopening the game is not walking in again: the generators are as the player left them."""
+    state = play([TO_CABIN, ACTIVATE_B])
+    assert generators(reopen(state)) == generators(state)
+
+
+def test_m5_the_key_waits_behind_the_barrier():
+    """R2 and PT04: the key can be seen but not taken, the reason is given, and E only lets you look at it."""
+    in_cabin = play([TO_CABIN])
+    after, outcome = engine.pick_up(in_cabin, "key")
+    assert outcome["event"] == "guarded"
+    assert outcome["text"].strip()
+    assert after == in_cabin
+    assert offered(in_cabin, "key") == [("examine", None)]
+    _, outcome = engine.examine(in_cabin, "barrier")
+    assert outcome["text"] == story.OBJECTS["barrier"]["look_text"]
+
+
+def test_m5_a_dissolved_barrier_is_gone():
+    complete = play([TO_CABIN] + SOLVE_CABIN)
+    _, outcome = engine.examine(complete, "barrier")
+    assert outcome["event"] == "not_here"
+    assert offered(complete, "barrier") == []
 
 
 # --- Saving and resuming -----------------------------------------------------------
@@ -559,7 +732,9 @@ def test_restore_state_fills_in_missing_flags():
     """A save made before a flag existed still loads, with the flag at its starting value."""
     data = restorable(flags={"cabin_solved": True})
     restored = engine.restore_state(data)
-    assert restored["flags"] == {"cabin_solved": True, "crab_truthful": False, "chosen_door": None}
+    expected = dict(story.FLAGS)
+    expected["cabin_solved"] = True
+    assert restored["flags"] == expected
 
 
 def test_restore_state_returns_a_copy():
@@ -583,6 +758,8 @@ def test_unknown_ids_raise_errors():
         engine.use_item(state, "wand", "sword")
     with pytest.raises(ValueError):
         engine.perform(state, act("jump", "deck"))
+    with pytest.raises(ValueError):
+        engine.activate(state, "crab")  # a character is not a generator
 
 
 # --- The story data --------------------------------------------------------------
@@ -608,6 +785,7 @@ def test_story_references_exist():
     for item in story.ITEMS.values():
         assert item["room"] in story.ROOMS
         assert item["appears_if"] is None or item["appears_if"] in story.FLAGS
+        assert item["free_if"] is None or item["free_if"] in story.FLAGS
     for door in story.DOORS.values():
         assert door["room"] in story.ROOMS
         assert door["to"] in story.ROOMS
@@ -623,6 +801,12 @@ def test_story_references_exist():
                 assert reaction["set_flag"] in story.FLAGS
     for flag in story.CLUES:
         assert flag in story.FLAGS
+    for circuit_id, circuit in story.CIRCUITS.items():
+        assert circuit["room"] in story.ROOMS, circuit_id
+        assert circuit["solved_flag"] in story.FLAGS, circuit_id
+        for switch in circuit["switches"]:
+            assert story.OBJECTS[switch]["kind"] == "switch", (circuit_id, switch)
+            assert story.OBJECTS[switch]["room"] == circuit["room"], (circuit_id, switch)
 
 
 def test_story_every_door_has_a_way_back():
@@ -657,10 +841,21 @@ def test_story_locked_doors_are_complete():
 
 def test_story_objects_are_well_formed():
     for thing_id, thing in story.OBJECTS.items():
-        assert thing["kind"] in ("puzzle", "character"), thing_id
+        assert thing["kind"] in ("puzzle", "character", "switch", "barrier", "altar"), thing_id
         assert thing["name"].strip()
         assert thing["look_text"].strip()
-        assert thing["reactions"], f"{thing_id} reacts to nothing"
+        if thing["kind"] in ("puzzle", "character"):
+            assert thing["reactions"], f"{thing_id} reacts to nothing"
+        if thing["kind"] == "switch":
+            assert thing["flag"] in story.FLAGS, thing_id
+            assert thing["flag"] in thing["toggles"], f"{thing_id} must switch itself over"
+            for flag in thing["toggles"]:
+                assert flag in story.FLAGS, (thing_id, flag)
+            assert thing["toggle_text"].strip() and thing["label"].strip(), thing_id
+            in_circuits = [c for c in story.CIRCUITS.values() if thing_id in c["switches"]]
+            assert len(in_circuits) == 1, f"{thing_id} must be in exactly one circuit"
+        if thing["kind"] == "barrier":
+            assert thing["open_if"] in story.FLAGS, thing_id
         for reaction in thing["reactions"].values():
             # Exactly one effect: set a flag or end the game.
             assert ("ending" in reaction) != ("set_flag" in reaction), thing_id
@@ -686,5 +881,7 @@ def test_story_texts_are_not_empty():
             assert line.strip()
     for text in story.CLUES.values():
         assert text.strip()
+    for circuit in story.CIRCUITS.values():
+        assert circuit["solved_text"].strip()
     for text in story.MESSAGES.values():
         assert text.strip()

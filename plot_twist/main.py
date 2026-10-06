@@ -41,6 +41,8 @@ DIALOG_TEXT_WIDTH = WIDTH - 4 * DIALOG_PADDING  # margin and padding on both sid
 FADE_FRAMES = FPS // 4     # how long a room takes to come out of the dark after a door
 WALK_STEP_FRAMES = 8       # frames per step of the walking animation
 WAVE_FRAMES = FPS // 2     # frames between the two pictures of the sea
+BARRIER_FRAMES = 6         # frames between the two pictures of a barrier's energy
+ALTAR_LIFT = 5             # how much higher an item lying on an altar is drawn
 ENDING_SCENE_HEIGHT = 64   # the picture at the top of the ending screen
 ENDING_HORIZON = 40        # where the sea starts in that picture
 ENDING_MENU_TOP = 186
@@ -88,6 +90,7 @@ COLORS = {
     "dawn_light": (252, 214, 160),
     "land": (52, 128, 80),
     "night": (40, 24, 40),
+    "cable": (60, 60, 72),
 }
 
 # Floor and wall color of each room.
@@ -105,7 +108,8 @@ DEFAULT_ROOM_COLORS = ((100, 100, 100), (50, 50, 50))
 THING_COLORS = {
     "wand": (180, 110, 255),
     "key": (250, 210, 70),
-    "cabin_puzzle": (150, 100, 55),
+    "barrier": (110, 230, 255),
+    "altar": (176, 176, 190),
     "hold_puzzle": (110, 75, 45),
     "crab": (230, 90, 55),
     "angel": (250, 250, 235),
@@ -137,12 +141,14 @@ def door_rect(door):
 
 
 def thing_rect(thing):
-    """The tile of an item, a puzzle or a character."""
+    """The tiles an item or an object covers: one, or "size" tiles from "pos" (like the barrier)."""
     if thing in story.ITEMS:
         col, row = story.ITEMS[thing]["pos"]
-    else:
-        col, row = story.OBJECTS[thing]["pos"]
-    return tile_rect(col, row)
+        return tile_rect(col, row)
+    info = story.OBJECTS[thing]
+    col, row = info["pos"]
+    width, height = info.get("size", (1, 1))
+    return tile_rect(col, row, width, height)
 
 
 def wall_rects(room):
@@ -618,7 +624,11 @@ def do_action(app, action):
         go_through(app, action["target"])
         return
     state, outcome = engine.perform(app["state"], action)
-    say(app, outcome["text"])
+    if outcome["event"] == "toggled":
+        show_banner(app, outcome["text"])  # a generator clicks: no text box to close every time
+    else:
+        app["banner_frames"] = 0  # the text box takes over from an older banner
+        say(app, outcome["text"])
     if outcome["ok"]:
         app["state"] = state
         save_progress(app)
@@ -837,21 +847,28 @@ def draw_door(screen, door, status):
 
 
 def thing_picture(thing):
-    """The sprite of an item, puzzle or character as it is now ("cabin_puzzle_solved"), or just by its id."""
-    picture = sprites.image(thing["id"] + "_" + thing["status"])
-    if picture is None:
-        picture = sprites.image(thing["id"])
-    return picture
+    """The sprite of a thing as it is now, or None.
+
+    It tries the id with the status ("hold_puzzle_solved"), the id alone ("crab"),
+    the kind with the status ("switch_on") and the kind alone ("altar").
+    """
+    for name in (thing["id"] + "_" + thing["status"], thing["id"], thing["kind"] + "_" + thing["status"], thing["kind"]):
+        picture = sprites.image(name)
+        if picture is not None:
+            return picture
+    return None
 
 
-def draw_thing(screen, thing):
-    """An item, a puzzle or a character: its sprite, or colored rectangles if it has none."""
-    rect = thing_rect(thing["id"])
+def draw_thing(screen, thing, lift=0):
+    """A thing of the room: its sprite, or colored rectangles if it has none. `lift` raises it a little."""
+    rect = thing_rect(thing["id"]).move(0, -lift)
     picture = thing_picture(thing)
     if picture is not None:
         screen.blit(picture, rect)
         return
     color = THING_COLORS.get(thing["id"], MISSING_COLOR)
+    if thing["kind"] == "switch":
+        color = COLORS["highlight"] if thing["status"] == "on" else COLORS["dim_text"]
     if thing["kind"] == "item":
         pygame.draw.rect(screen, color, rect.inflate(-8, -8))  # small: it lies on the floor
         return
@@ -908,6 +925,51 @@ def draw_railing(screen):
         pygame.draw.rect(screen, COLORS["railing"], (rail.right - 2, y, 4, 2))
 
 
+def draw_barrier(app, screen, thing):
+    """A barrier: its flickering energy over every tile it covers."""
+    area = thing_rect(thing["id"])
+    tile = sprites.image("barrier_" + str((app["frame"] // BARRIER_FRAMES) % 2))
+    if tile is None:
+        pygame.draw.rect(screen, THING_COLORS["barrier"], area, 2)
+        return
+    for x in range(area.left, area.right, TILE):
+        for y in range(area.top, area.bottom, TILE):
+            screen.blit(tile, (x, y))
+
+
+def switch_of_flag(flag):
+    """The switch (generator) whose own state is this flag, or None."""
+    for switch, info in story.OBJECTS.items():
+        if info["kind"] == "switch" and info["flag"] == flag:
+            return switch
+    return None
+
+
+def draw_cables(screen, state):
+    """The cables between the generators of the room, along the sides of their square.
+
+    A cable joins two generators that switch each other over, and lights up when both are on.
+    """
+    for switch, info in story.OBJECTS.items():
+        if info["kind"] != "switch" or info["room"] != state["room"]:
+            continue
+        for flag in info["toggles"]:
+            other = switch_of_flag(flag)
+            if other is None or other <= switch:
+                continue  # itself, or a cable already drawn from the other end
+            lit = state["flags"][info["flag"]] and state["flags"][flag]
+            color = COLORS["highlight"] if lit else COLORS["cable"]
+            pygame.draw.line(screen, color, thing_rect(switch).center, thing_rect(other).center, 2)
+
+
+def on_an_altar(state, item):
+    """True if an item lies on the tile of an altar of its room."""
+    for thing, info in story.OBJECTS.items():
+        if info["kind"] == "altar" and info["room"] == state["room"] and info["pos"] == story.ITEMS[item]["pos"]:
+            return True
+    return False
+
+
 def draw_room(app, screen):
     state = app["state"]
     room = state["room"]
@@ -927,23 +989,42 @@ def draw_room(app, screen):
                 screen.blit(picture, tile_rect(col, row))
     if story.ROOMS[room]["outdoor"]:
         draw_railing(screen)
+    things = engine.things_here(state)
+    draw_cables(screen, state)
     standing = []
-    for thing in engine.things_here(state):
+    for thing in things:
         if thing["kind"] == "door":
             draw_door(screen, thing["id"], thing["status"])
-        elif thing["kind"] == "item":
-            draw_thing(screen, thing)
-        else:
+        elif thing["kind"] == "altar":
+            draw_thing(screen, thing)  # low furniture, drawn before what lies on it
+        elif thing["kind"] != "item":
             standing.append(thing)
+    for thing in things:
+        if thing["kind"] == "item":
+            draw_thing(screen, thing, ALTAR_LIFT if on_an_altar(state, thing["id"]) else 0)
     # From the back of the room to the front: what stands lower on screen covers the rest.
     feet = player_rect(app["player"]).bottom
     for thing in standing:
         if thing_rect(thing["id"]).bottom <= feet:
-            draw_thing(screen, thing)
+            draw_standing(app, screen, thing)
     draw_player(app, screen)
     for thing in standing:
         if thing_rect(thing["id"]).bottom > feet:
-            draw_thing(screen, thing)
+            draw_standing(app, screen, thing)
+    # The letter of each generator, on the floor above it.
+    for thing in things:
+        if thing["kind"] == "switch":
+            rect = thing_rect(thing["id"])
+            label = story.OBJECTS[thing["id"]]["label"]
+            draw_text(screen, app["fonts"]["text"], label, COLORS["text"], (rect.centerx, rect.top - 10), "center", True)
+
+
+def draw_standing(app, screen, thing):
+    """A puzzle, character, switch or barrier: the barrier has its own way of being drawn."""
+    if thing["kind"] == "barrier":
+        draw_barrier(app, screen, thing)
+    else:
+        draw_thing(screen, thing)
 
 
 def draw_hud(app, screen):

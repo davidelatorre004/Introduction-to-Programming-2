@@ -10,7 +10,14 @@ START_ROOM = "deck"
 # What the game remembers about the player's progress and choices, with the
 # value each flag has at the start of a new game.
 FLAGS = {
-    # The cabin puzzle is solved: the key appears in the cabin.
+    # The four generators of the captain's cabin: True is on, False is off. The
+    # puzzle starts with A off, B on, C on, D off, and goes back to that every
+    # time the player walks into the cabin, until the circuit is complete.
+    "generator_a": False,
+    "generator_b": True,
+    "generator_c": True,
+    "generator_d": False,
+    # All four generators were on at once: the barrier in the cabin has dissolved.
     "cabin_solved": False,
     # The hold puzzle is solved: the player has learned that the crab tells the truth.
     "crab_truthful": False,
@@ -35,8 +42,8 @@ ROOMS = {
     "cabin": {
         "name": "Cabina del capitano",
         "description": (
-            "Carte nautiche sparse a terra e una lanterna spenta. "
-            "Sulla scrivania, un cassetto chiuso da un sigillo che brilla."
+            "Carte nautiche sparse a terra e quattro generatori che ronzano ai lati di un quadrato, "
+            "collegati da cavi. In fondo, una barriera di energia protegge un piccolo altare."
         ),
         "outdoor": False,
         "entry": (7, 9),
@@ -66,6 +73,7 @@ ROOMS = {
 
 # Items the player can collect. An item lies in its room, on tile "pos", until it
 # is picked up. If "appears_if" names a flag, it shows up only once that flag is true.
+# If "free_if" names a flag, it can be seen but not picked up until that flag is true.
 ITEMS = {
     "wand": {
         "name": "Bacchetta magica",
@@ -73,15 +81,17 @@ ITEMS = {
         "room": "deck",
         "pos": (8, 6),
         "appears_if": None,
+        "free_if": None,
         "pickup_text": "Raccogli la bacchetta magica. Una scintilla ti corre lungo il braccio.",
     },
     "key": {
-        "name": "Chiave d'ottone",
-        "description": "Una chiave d'ottone con l'impugnatura a forma di onda.",
+        "name": "Chiave centrale",
+        "description": "Una chiave d'ottone con l'impugnatura a forma di onda. Era custodita sull'altare della cabina.",
         "room": "cabin",
-        "pos": (4, 2),
-        "appears_if": "cabin_solved",
-        "pickup_text": "Prendi la chiave d'ottone.",
+        "pos": (7, 1),  # on the altar, behind the barrier
+        "appears_if": None,
+        "free_if": "cabin_solved",
+        "pickup_text": "Prendi la chiave centrale dall'altare.",
     },
 }
 
@@ -143,26 +153,94 @@ DOORS = {
     },
 }
 
-# Puzzles and characters: things that react when the player uses an item on them.
-# Each one stands on tile "pos" and blocks the way. A reaction either sets a flag
-# ("set_flag" and "value") or ends the game ("ending"), and always has a "text"
-# for the player. "done_text" replaces "look_text" once a puzzle is solved.
-# PLACEHOLDER: for now both puzzles only ask for the wand. The real ones come in M5.
+# The things that stand in the rooms. Each one stands on tile "pos" (and the
+# tiles "size" covers, if it is bigger than one) and blocks the way. "kind" says
+# what it does:
+# - "puzzle" and "character" react when the player uses an item on them. A
+#   reaction either sets a flag ("set_flag" and "value") or ends the game
+#   ("ending"), and always has a "text". "done_text" replaces "look_text" once a
+#   puzzle is solved.
+# - "switch" is a generator of a circuit (see CIRCUITS): activating it flips the
+#   flags in "toggles", its own included, and shows "toggle_text".
+# - "barrier" stands in the way until its "open_if" flag is true, then it is gone.
+# - "altar" is only there to be looked at, and to hold an item.
+# PLACEHOLDER: the hold puzzle only asks for the wand. Its real version is still to come.
 OBJECTS = {
-    "cabin_puzzle": {
-        "kind": "puzzle",
-        "name": "Cassetto sigillato",
+    # The generators of the cabin, at the corners of a square: A top left, B top
+    # right, C bottom left, D bottom right. Each one is wired to the two next to
+    # it along the sides of the square, never to the one across.
+    "generator_a": {
+        "kind": "switch",
+        "name": "Generatore A",
+        "label": "A",
         "room": "cabin",
-        "pos": (3, 2),
-        "look_text": "Un cassetto chiuso da un sigillo luminoso. Non c'è serratura: forse serve la magia.",
-        "done_text": "Il cassetto è aperto. Del sigillo non resta traccia.",
-        "reactions": {
-            "wand": {
-                "set_flag": "cabin_solved",
-                "value": True,
-                "text": "Punti la bacchetta sul sigillo: si spezza e il cassetto si apre. Dentro c'è una chiave!",
-            },
-        },
+        "pos": (4, 4),
+        "flag": "generator_a",
+        "toggles": ["generator_a", "generator_b", "generator_c"],
+        "toggle_text": "Clic! A, B e C cambiano stato.",
+        "look_text": "Un generatore con una grossa leva. La targhetta dice «A».",
+        "done_text": None,
+        "reactions": {},
+    },
+    "generator_b": {
+        "kind": "switch",
+        "name": "Generatore B",
+        "label": "B",
+        "room": "cabin",
+        "pos": (11, 4),
+        "flag": "generator_b",
+        "toggles": ["generator_b", "generator_a", "generator_d"],
+        "toggle_text": "Clic! B, A e D cambiano stato.",
+        "look_text": "Un generatore con una grossa leva. La targhetta dice «B».",
+        "done_text": None,
+        "reactions": {},
+    },
+    "generator_c": {
+        "kind": "switch",
+        "name": "Generatore C",
+        "label": "C",
+        "room": "cabin",
+        "pos": (4, 7),
+        "flag": "generator_c",
+        "toggles": ["generator_c", "generator_a", "generator_d"],
+        "toggle_text": "Clic! C, A e D cambiano stato.",
+        "look_text": "Un generatore con una grossa leva. La targhetta dice «C».",
+        "done_text": None,
+        "reactions": {},
+    },
+    "generator_d": {
+        "kind": "switch",
+        "name": "Generatore D",
+        "label": "D",
+        "room": "cabin",
+        "pos": (11, 7),
+        "flag": "generator_d",
+        "toggles": ["generator_d", "generator_b", "generator_c"],
+        "toggle_text": "Clic! D, B e C cambiano stato.",
+        "look_text": "Un generatore con una grossa leva. La targhetta dice «D».",
+        "done_text": None,
+        "reactions": {},
+    },
+    # The barrier fed by the generators, in front of the altar and around it.
+    "barrier": {
+        "kind": "barrier",
+        "name": "Barriera di energia",
+        "room": "cabin",
+        "pos": (6, 1),
+        "size": (3, 2),
+        "open_if": "cabin_solved",
+        "look_text": "Una barriera di energia crepita intorno all'altare. Sembra alimentata dai generatori.",
+        "done_text": None,
+        "reactions": {},
+    },
+    "altar": {
+        "kind": "altar",
+        "name": "Altare",
+        "room": "cabin",
+        "pos": (7, 1),
+        "look_text": "Un piccolo altare di pietra, contro la parete in fondo alla cabina.",
+        "done_text": None,
+        "reactions": {},
     },
     "hold_puzzle": {
         "kind": "puzzle",
@@ -206,6 +284,19 @@ OBJECTS = {
                 "text": "Porgi la bacchetta all'angelo. Il suo sorriso si allarga.",
             },
         },
+    },
+}
+
+# Circuits of generators. When every switch of a circuit is on at the same time,
+# the circuit is complete: "solved_flag" becomes true and "solved_text" is shown.
+# From then on its switches stay on. Until then, they go back to their starting
+# value (in FLAGS) every time the player walks into "room".
+CIRCUITS = {
+    "cabin_circuit": {
+        "room": "cabin",
+        "switches": ["generator_a", "generator_b", "generator_c", "generator_d"],
+        "solved_flag": "cabin_solved",
+        "solved_text": "Il flusso elettrico è completo! La barriera si è dissolta!",
     },
 }
 
@@ -253,6 +344,8 @@ MESSAGES = {
     "already_open": "È già aperta.",
     "already_done": "L'hai già fatto.",
     "nothing_happens": "Non succede niente.",
+    "guarded": "La barriera ti impedisce di prenderla.",
+    "circuit_done": "Il circuito è completo: i generatori restano accesi.",
     # What an open door shows when examined.
     "door_open": "Una porta aperta verso: {room}.",
     # Labels of the actions offered by the E key.
@@ -263,6 +356,7 @@ MESSAGES = {
     "label_talk": "Parla",
     "label_use": "Usa: {item}",
     "label_give": "Dai: {item}",
+    "label_activate": "Attiva: {name}",
     # The window title and the menus.
     "title": "Plot Twist",
     "subtitle": "Un mistero in mezzo al mare",

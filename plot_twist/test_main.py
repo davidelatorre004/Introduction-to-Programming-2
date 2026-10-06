@@ -21,7 +21,8 @@ OPPOSITE = {"N": "S", "S": "N", "E": "W", "W": "E"}
 TO_THE_CRAB_ENDING = [
     {"verb": "pick_up", "target": "wand"},
     {"verb": "enter", "target": "deck_to_cabin"},
-    {"verb": "use_item", "target": "cabin_puzzle", "item": "wand"},
+    {"verb": "activate", "target": "generator_a"},
+    {"verb": "activate", "target": "generator_d"},
     {"verb": "pick_up", "target": "key"},
     {"verb": "enter", "target": "cabin_to_deck"},
     {"verb": "use_item", "target": "deck_to_crab", "item": "key"},
@@ -74,7 +75,7 @@ def stand_next_to(app, thing):
     """Put the player within reach of a thing: on it if it is an item on the floor, else just below it."""
     rect = main.thing_rect(thing)
     body = pygame.Rect(0, 0, main.PLAYER_SIZE, main.PLAYER_SIZE)
-    if thing in story.ITEMS:
+    if thing in story.ITEMS and not main.on_an_altar(app["state"], thing):
         body.center = rect.center
     else:
         body.midtop = (rect.centerx, rect.bottom + 2)
@@ -132,15 +133,34 @@ def test_layout_everything_stands_on_the_floor():
         assert on_the_floor(room["entry"]), room_id
     for thing_id, info in list(story.ITEMS.items()) + list(story.OBJECTS.items()):
         assert on_the_floor(info["pos"]), thing_id
+        width, height = info.get("size", (1, 1))
+        last_tile = (info["pos"][0] + width - 1, info["pos"][1] + height - 1)
+        assert on_the_floor(last_tile), thing_id
 
 
 def test_layout_nothing_shares_a_tile():
+    """Each thing has a tile of its own, except an item lying on an altar."""
     for room in story.ROOMS:
         tiles = [story.ROOMS[room]["entry"]]
-        for info in list(story.ITEMS.values()) + list(story.OBJECTS.values()):
+        for info in story.OBJECTS.values():
             if info["room"] == room:
                 tiles.append(info["pos"])
+        for item, info in story.ITEMS.items():
+            if info["room"] == room and not main.on_an_altar(in_room(room), item):
+                tiles.append(info["pos"])
         assert len(tiles) == len(set(tiles)), room
+
+
+def test_layout_the_barrier_keeps_the_key_out_of_reach():
+    """While the barrier stands, there is no spot in the cabin from where E could reach the key."""
+    cabin = in_room("cabin")
+    solids = main.solid_rects(cabin)
+    key = main.reach_rect("key")
+    for x in range(main.TILE, main.WIDTH - main.TILE, 2):
+        for y in range(main.HUD_HEIGHT + main.TILE, main.HEIGHT - main.TILE, 2):
+            body = main.player_rect((x, y))
+            if body.collidelist(solids) == -1:
+                assert not body.inflate(2 * main.REACH, 2 * main.REACH).colliderect(key), (x, y)
 
 
 def test_layout_each_wall_has_at_most_one_door():
@@ -388,19 +408,31 @@ def test_prompt_says_what_e_does_here():
     pick_up_label = story.MESSAGES["label_pick_up"].format(item=story.ITEMS["wand"]["name"])
     assert main.prompt(state, on_the_wand) == hint(pick_up_label)
     with_wand_in_cabin = play(TO_THE_CRAB_ENDING[:2])
-    drawer = main.thing_rect("cabin_puzzle")
-    below_drawer = (drawer.centerx - main.PLAYER_SIZE // 2, drawer.bottom + 2)
-    assert main.prompt(with_wand_in_cabin, below_drawer) == hint(story.OBJECTS["cabin_puzzle"]["name"])
+    generator = main.thing_rect("generator_a")
+    below_generator = (generator.centerx - main.PLAYER_SIZE // 2, generator.bottom + 2)
+    activate_label = story.MESSAGES["label_activate"].format(name=story.OBJECTS["generator_a"]["name"])
+    assert main.prompt(with_wand_in_cabin, below_generator) == hint(activate_label)
+    barrier = main.thing_rect("barrier")
+    below_barrier = (barrier.centerx - main.PLAYER_SIZE // 2, barrier.bottom + 2)
+    assert main.prompt(with_wand_in_cabin, below_barrier) == hint(story.OBJECTS["barrier"]["name"])
 
 
 def test_the_nearest_thing_is_the_one_e_acts_on(app):
-    """With the open drawer and the key side by side, E picks whichever is closer."""
-    state = play(TO_THE_CRAB_ENDING[:3])  # in the cabin, drawer open, key on the floor
-    app["state"] = state
-    stand_next_to(app, "cabin_puzzle")
-    assert main.nearest_target(state, app["player"]) == "cabin_puzzle"
+    """In the corner between generator A and the barrier both are in reach: E picks the closer generator.
+
+    On the very same tile, the key lying on the altar comes before the altar itself.
+    """
+    state = play(TO_THE_CRAB_ENDING[:2])  # in the cabin with the wand, the barrier still up
+    generator, barrier = main.thing_rect("generator_a"), main.thing_rect("barrier")
+    body = pygame.Rect(0, 0, main.PLAYER_SIZE, main.PLAYER_SIZE)
+    body.bottomleft = (generator.right + 2, generator.top - 2)
+    reach = body.inflate(2 * main.REACH, 2 * main.REACH)
+    assert reach.colliderect(generator) and reach.colliderect(barrier)
+    assert main.nearest_target(state, body.topleft) == "generator_a"
+    solved = play(TO_THE_CRAB_ENDING[:4])  # circuit complete, the key free on the altar
+    app["state"] = solved
     stand_next_to(app, "key")
-    assert main.nearest_target(state, app["player"]) == "key"
+    assert main.nearest_target(solved, app["player"]) == "key"
 
 
 def test_e_with_nothing_near_describes_the_room(app):
@@ -426,7 +458,7 @@ def test_e_menu_offers_every_action_and_esc_closes_it(app):
     press(app, pygame.K_e)
     read_all(app)
     walk_into(app, "deck_to_cabin")
-    stand_next_to(app, "cabin_puzzle")
+    stand_next_to(app, "barrier")
     press(app, pygame.K_e)
     assert app["scene"] == "actions"
     use_wand = story.MESSAGES["label_use"].format(item=story.ITEMS["wand"]["name"])
@@ -438,7 +470,7 @@ def test_e_menu_offers_every_action_and_esc_closes_it(app):
 
 def test_a_choice_that_cannot_be_undone_asks_first(app):
     """Opening a final door asks for confirmation; "No" changes nothing, not even the save."""
-    app["state"] = play(TO_THE_CRAB_ENDING[:5])  # back on the deck with the key
+    app["state"] = play(TO_THE_CRAB_ENDING[:6])  # back on the deck with the key
     main.set_scene(app, "play")
     save.save_game(app["state"])
     saved = save.load_game()
@@ -455,7 +487,7 @@ def test_a_choice_that_cannot_be_undone_asks_first(app):
 
 def test_the_sealed_door_explains_itself(app):
     """PT04 on screen: after choosing the crab, the angel's door refuses even the key, and says why."""
-    app["state"] = play(TO_THE_CRAB_ENDING[:6])  # the crab's door just opened
+    app["state"] = play(TO_THE_CRAB_ENDING[:7])  # the crab's door just opened
     main.set_scene(app, "play")
     app["player"] = main.spawn_in_front_of("deck_to_angel")
     press(app, pygame.K_e)
@@ -496,9 +528,10 @@ def test_a_whole_game_on_screen(app, door, character, ending):
     press(app, pygame.K_e)
     read_all(app)
     walk_into(app, "deck_to_cabin")
-    stand_next_to(app, "cabin_puzzle")
-    press(app, pygame.K_e)
-    choose_in_menu(app, "use_item", "wand")
+    for generator in ("generator_a", "generator_d"):
+        stand_next_to(app, generator)
+        press(app, pygame.K_e)  # a single action: pull the lever
+    assert dialog_text(app) == story.CIRCUITS["cabin_circuit"]["solved_text"]
     read_all(app)
     stand_next_to(app, "key")
     press(app, pygame.K_e)
@@ -531,8 +564,9 @@ def test_every_scene_and_room_can_be_drawn(app):
     main.draw(app, screen)
     start_new_game(app)
     states = [in_room(room) for room in story.ROOMS]
-    states.append(play(TO_THE_CRAB_ENDING[:6]))  # the crab's door open, the angel's sealed, the key taken
-    states.append(play(TO_THE_CRAB_ENDING[:3]))  # in the cabin: the drawer open, the key on the floor
+    states.append(play(TO_THE_CRAB_ENDING[:7]))  # the crab's door open, the angel's sealed, the key taken
+    states.append(play(TO_THE_CRAB_ENDING[:3]))  # in the cabin: one generator pulled, the barrier up
+    states.append(play(TO_THE_CRAB_ENDING[:4]))  # in the cabin: the circuit complete, the key on the altar
     for state in states:
         app["state"] = state
         app["player"] = main.spawn_at_entry(state["room"])
@@ -545,7 +579,7 @@ def test_every_scene_and_room_can_be_drawn(app):
         app["dialog"] = []
         main.set_scene(app, "play")
         main.draw(app, screen)  # with the hint of what E does
-    for ending_path in (TO_THE_CRAB_ENDING, TO_THE_CRAB_ENDING[:5] + [
+    for ending_path in (TO_THE_CRAB_ENDING, TO_THE_CRAB_ENDING[:6] + [
             {"verb": "use_item", "target": "deck_to_angel", "item": "key"},
             {"verb": "enter", "target": "deck_to_angel"},
             {"verb": "use_item", "target": "angel", "item": "wand"}]):
