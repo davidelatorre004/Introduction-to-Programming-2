@@ -38,10 +38,10 @@ TO_THE_CRAB_DOOR = ([("pick_up", "wand", None), ("enter", "deck_to_cabin", None)
                      ("activate", "generator_d", None), ("pick_up", "key", None), ("enter", "cabin_to_deck", None),
                      ("enter", "deck_to_hold", None)]
                     + [("step_on", tile, None) for tile in TILES]
-                    + [("pick_up", "second_key", None), ("enter", "hold_to_deck", None)])
-CRAB_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_crab", "key"), ("enter", "deck_to_crab", None),
+                    + [("pick_up", "second_key", None), ("use_item", "anvil", "key"), ("enter", "hold_to_deck", None)])
+CRAB_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_crab", "fused_key"), ("enter", "deck_to_crab", None),
                                   ("use_item", "crab", "wand")]
-ANGEL_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_angel", "key"), ("enter", "deck_to_angel", None),
+ANGEL_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_angel", "fused_key"), ("enter", "deck_to_angel", None),
                                    ("use_item", "angel", "wand")]
 
 
@@ -58,6 +58,8 @@ def test_every_sprite_is_a_proper_picture():
         size = (len(rows[0]), len(rows))
         if name.startswith("door_") or name == "ship":
             assert size == (2 * main.TILE, main.TILE), name
+        elif name in story.OBJECTS:
+            assert size == main.thing_rect(name).size, name  # the big characters fill all their tiles
         else:
             assert size == (main.TILE, main.TILE), name
 
@@ -70,7 +72,7 @@ def test_everything_on_screen_has_a_picture():
     for item in story.ITEMS:
         assert sprites.image(item) is not None, item
     statuses = {"puzzle": ["solved", "unsolved"], "character": ["present"], "switch": ["on", "off"],
-                "altar": ["present"], "barrier": ["up"], "tile": ["lit", "dark", "error"]}
+                "altar": ["present"], "anvil": ["present"], "barrier": ["up"], "tile": ["lit", "dark", "error"]}
     for thing, info in story.OBJECTS.items():
         for status in statuses[info["kind"]]:
             if info["kind"] == "barrier":
@@ -140,11 +142,11 @@ def game_texts():
     for room in story.ROOMS.values():
         texts += [room["name"], room["description"]]
     for item in story.ITEMS.values():
-        texts += [item["name"], item["description"], item["pickup_text"]]
+        texts += [item["name"], item["description"], item["pickup_text"] or ""]
     for door in story.DOORS.values():
         texts += [door["locked_text"] or "", door["sealed_text"] or "", door["open_text"] or ""]
     for thing in story.OBJECTS.values():
-        texts += [thing["name"], thing["look_text"], thing["done_text"] or ""]
+        texts += [thing["name"], thing["look_text"], thing["done_text"] or "", thing.get("fuse_text", "")]
         for reaction in thing["reactions"].values():
             texts.append(reaction["text"])
     for ending in story.ENDINGS.values():

@@ -87,6 +87,9 @@ def restore_state(data):
             return None
     if len(set(inventory)) != len(inventory):
         return None
+    for item in inventory:
+        if story.ITEMS[item]["part_of"] in inventory:
+            return None  # a part next to the item it was fused into: impossible
 
     flags = data["flags"]
     if not isinstance(flags, dict):
@@ -125,15 +128,15 @@ def has_item(state, item):
 def door_status(state, door):
     """Return "open", "barred", "locked" or "sealed".
 
-    A barred door stays shut until the player carries the item it "opens_with";
-    then it is open. A door without a lock is always open. A locked door
+    A barred door stays shut until the player carries the item it "opens_with",
+    or what that item was fused into; then it is open. A door without a lock is always open. A locked door
     remembers being opened in its choice flag: it is open if the flag holds this
     door, sealed if it holds another door sharing the flag, and locked while the
     flag is None.
     """
     _expect(door, "door")
     info = story.DOORS[door]
-    if info["opens_with"] is not None and not has_item(state, info["opens_with"]):
+    if info["opens_with"] is not None and not _has_or_fused(state, info["opens_with"]):
         return "barred"
     if not info["requires"]:
         return "open"
@@ -360,11 +363,12 @@ def leave_zone(state, floor_puzzle):
 
 
 def use_item(state, item, target):
-    """Use an item from the inventory on something in the room: a door, a puzzle or a character.
+    """Use an item from the inventory on something in the room: a door, a puzzle, a character or the anvil.
 
     On anything else (a generator, a tile, a barrier, an altar) nothing happens.
 
-    The item is never used up: it stays in the inventory, even after giving it away.
+    The item stays in the inventory, even after giving it away or opening a door
+    with it. Only the anvil changes the inventory: it fuses parts into a whole.
     """
     _expect(item, "item")
     kind = _kind(target)
@@ -379,6 +383,8 @@ def use_item(state, item, target):
         return _use_on_door(state, item, target)
     if kind == "puzzle" or kind == "character":
         return _use_on_object(state, item, target)
+    if kind == "anvil":
+        return _use_on_anvil(state, item, target)
     return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
 
 
@@ -495,14 +501,23 @@ def _is_here(state, thing):
     return story.OBJECTS[thing]["room"] == state["room"] and _is_standing(state, thing)
 
 
+def _has_or_fused(state, item):
+    """True if the player carries the item, or the whole it was fused into."""
+    whole = story.ITEMS[item]["part_of"]
+    return has_item(state, item) or (whole is not None and has_item(state, whole))
+
+
 def _on_floor(state, item):
-    """True if the item lies in the current room: it belongs here, it has appeared, nobody took it."""
+    """True if the item lies in the current room: it belongs here, it has appeared, nobody took it.
+
+    A part fused into a whole is gone for good, even though it is no longer in the inventory.
+    """
     info = story.ITEMS[item]
     if info["room"] != state["room"]:
         return False
     if info["appears_if"] is not None and not state["flags"][info["appears_if"]]:
         return False
-    return not has_item(state, item)
+    return not _has_or_fused(state, item)
 
 
 def _reaction_done(state, reaction):
@@ -632,7 +647,8 @@ def _use_on_door(state, item, door):
     """Open a locked door with the items it needs. Opening a choice door seals the others.
 
     The item must be one the lock "requires", and the player must carry all of
-    them: half a key does not turn.
+    them. A part of a required item (half of the key) does not turn: it has to
+    be fused first, and the refusal says so.
     """
     info = story.DOORS[door]
     status = door_status(state, door)
@@ -641,6 +657,8 @@ def _use_on_door(state, item, door):
     if status == "sealed":
         return _refuse(state, "sealed", info["sealed_text"])
     if item not in info["requires"]:
+        if story.ITEMS[item]["part_of"] in info["requires"]:
+            return _refuse(state, "not_fused", story.MESSAGES["not_fused"])
         return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
     for needed in info["requires"]:
         if not has_item(state, needed):
@@ -648,6 +666,25 @@ def _use_on_door(state, item, door):
     new = copy.deepcopy(state)
     new["flags"][info["choice_flag"]] = door
     return _accept(new, "door_opened", info["open_text"])
+
+
+def _use_on_anvil(state, item, anvil):
+    """Fuse the parts of an item into the whole: one part is used on the anvil, and the player carries them all.
+
+    The parts leave the inventory for good, and the whole takes the place of the first one.
+    """
+    whole = story.ITEMS[item]["part_of"]
+    if whole is None:
+        return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
+    parts = [part for part, info in story.ITEMS.items() if info["part_of"] == whole]
+    for part in parts:
+        if not has_item(state, part):
+            return _refuse(state, "missing_item", story.MESSAGES["missing_item"])
+    new = copy.deepcopy(state)
+    first = min(new["inventory"].index(part) for part in parts)
+    new["inventory"] = [held for held in new["inventory"] if held not in parts]
+    new["inventory"].insert(first, whole)
+    return _accept(new, "fused", story.OBJECTS[anvil]["fuse_text"])
 
 
 def _use_on_object(state, item, thing):

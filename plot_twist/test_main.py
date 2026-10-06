@@ -32,10 +32,11 @@ FIRST_HALF = CIRCUIT_COMPLETE + [act("pick_up", "key"), act("enter", "cabin_to_d
 IN_THE_HOLD = FIRST_HALF + [act("enter", "deck_to_hold")]
 TILE_SEQUENCE = ["tile_1", "tile_2", "tile_3", "tile_4", "tile_5", "tile_3", "tile_1", "tile_5", "tile_2", "tile_4", "tile_3"]
 TILES_SOLVED = IN_THE_HOLD + [act("step_on", tile) for tile in TILE_SEQUENCE]
-BOTH_HALVES = TILES_SOLVED + [act("pick_up", "second_key"), act("enter", "hold_to_deck")]  # back on the deck
-CRAB_DOOR_OPEN = BOTH_HALVES + [act("use_item", "deck_to_crab", "key")]
+BOTH_HALVES = TILES_SOLVED + [act("pick_up", "second_key")]  # in the hold, not fused yet
+KEY_FUSED = BOTH_HALVES + [act("use_item", "anvil", "second_key"), act("enter", "hold_to_deck")]  # back on the deck
+CRAB_DOOR_OPEN = KEY_FUSED + [act("use_item", "deck_to_crab", "fused_key")]
 TO_THE_CRAB_ENDING = CRAB_DOOR_OPEN + [act("enter", "deck_to_crab"), act("use_item", "crab", "wand")]
-TO_THE_ANGEL_ENDING = BOTH_HALVES + [act("use_item", "deck_to_angel", "key"), act("enter", "deck_to_angel"),
+TO_THE_ANGEL_ENDING = KEY_FUSED + [act("use_item", "deck_to_angel", "fused_key"), act("enter", "deck_to_angel"),
                                      act("use_item", "angel", "wand")]
 
 
@@ -81,7 +82,7 @@ def start_new_game(app):
 
 def stand_next_to(app, thing):
     """Put the player within reach of a thing: on it if it is an item on the floor, else just below it,
-    or just above it if there is no room below (the chest stands against the bottom wall)."""
+    or just above it if there is no room below (the anvil stands against the bottom wall)."""
     rect = main.thing_rect(thing)
     body = pygame.Rect(0, 0, main.PLAYER_SIZE, main.PLAYER_SIZE)
     if thing in story.ITEMS and not main.on_an_altar(app["state"], thing):
@@ -177,6 +178,8 @@ def test_layout_everything_stands_on_the_floor():
     for room_id, room in story.ROOMS.items():
         assert on_the_floor(room["entry"]), room_id
     for thing_id, info in list(story.ITEMS.items()) + list(story.OBJECTS.items()):
+        if info["room"] is None:
+            continue  # made at the anvil: it never lies anywhere
         assert on_the_floor(info["pos"]), thing_id
         width, height = info.get("size", (1, 1))
         last_tile = (info["pos"][0] + width - 1, info["pos"][1] + height - 1)
@@ -184,16 +187,20 @@ def test_layout_everything_stands_on_the_floor():
 
 
 def test_layout_nothing_shares_a_tile():
-    """Each thing has a tile of its own, except an item lying on an altar."""
+    """Each thing has its own tiles, all of them for the big ones, except an item lying on an altar or the anvil.
+
+    The barriers are left out: they wrap around what they guard.
+    """
     for room in story.ROOMS:
-        tiles = [story.ROOMS[room]["entry"]]
-        for info in story.OBJECTS.values():
-            if info["room"] == room:
-                tiles.append(info["pos"])
+        areas = [main.tile_rect(*story.ROOMS[room]["entry"])]
+        for thing, info in story.OBJECTS.items():
+            if info["room"] == room and info["kind"] != "barrier":
+                areas.append(main.thing_rect(thing))
         for item, info in story.ITEMS.items():
             if info["room"] == room and not main.on_an_altar(in_room(room), item):
-                tiles.append(info["pos"])
-        assert len(tiles) == len(set(tiles)), room
+                areas.append(main.thing_rect(item))
+        for index, area in enumerate(areas):
+            assert area.collidelist(areas[index + 1:]) == -1, (room, area)
 
 
 @pytest.mark.parametrize("room, item", [("cabin", "key"), ("hold", "second_key")])
@@ -587,34 +594,47 @@ def test_e_menu_offers_every_action_and_esc_closes_it(app):
 
 
 def test_a_choice_that_cannot_be_undone_asks_first(app):
-    """Opening a final door asks for confirmation; "No" changes nothing, not even the save."""
-    app["state"] = play(BOTH_HALVES)  # back on the deck with both halves of the key
+    """Giving the wand asks for confirmation; "No" changes nothing, not even the save."""
+    app["state"] = play(CRAB_DOOR_OPEN + [act("enter", "deck_to_crab")])
     main.set_scene(app, "play")
     save.save_game(app["state"])
     saved = save.load_game()
-    app["player"] = main.spawn_in_front_of("deck_to_crab")
+    stand_next_to(app, "crab")
     press(app, pygame.K_e)
-    choose_in_menu(app, "use_item", "key")
+    choose_in_menu(app, "use_item", "wand")
     assert app["scene"] == "confirm"
     assert main.menu_entries(app)[app["menu_index"]] == "no"
     press(app, pygame.K_RETURN)  # "No"
     assert app["scene"] == "play"
-    assert engine.door_status(app["state"], "deck_to_crab") == "locked"
+    assert not engine.is_over(app["state"])
     assert save.load_game() == saved
 
 
-def test_the_sealed_door_explains_itself(app):
-    """PT04 on screen: after choosing the crab, the angel's door refuses even the key, and says why."""
-    app["state"] = play(CRAB_DOOR_OPEN)
+def test_the_fused_key_opens_both_doors_on_screen(app):
+    """No confirmation and no sealing: the fused key opens the crab's door, then the angel's, and both lead in."""
+    app["state"] = play(KEY_FUSED)
     main.set_scene(app, "play")
-    app["player"] = main.spawn_in_front_of("deck_to_angel")
+    for door, room in (("deck_to_crab", "crab_room"), ("deck_to_angel", "angel_room")):
+        app["player"] = main.spawn_in_front_of(door)
+        press(app, pygame.K_e)
+        choose_in_menu(app, "use_item", "fused_key")
+        assert app["scene"] == "play"  # no question: nothing is lost
+        assert dialog_text(app) == story.DOORS[door]["open_text"]
+        read_all(app)
+        walk_into(app, door)
+        assert app["state"]["room"] == room
+        walk_into(app, main.return_door(room, "deck"))
+    assert engine.has_item(app["state"], "fused_key")
+
+
+def test_a_half_on_the_door_says_to_fuse_it(app):
+    """PT04 on screen: the halves, even both, do not open the door, and the text says where to fuse them."""
+    playing(app, BOTH_HALVES + [act("enter", "hold_to_deck")])
+    app["player"] = main.spawn_in_front_of("deck_to_crab")
     press(app, pygame.K_e)
-    choose_in_menu(app, "use_item", "key")
-    assert dialog_text(app) == story.DOORS["deck_to_angel"]["sealed_text"]
-    read_all(app)
-    walk_into(app, "deck_to_angel")
-    assert app["state"]["room"] == "deck"
-    assert dialog_text(app) == story.DOORS["deck_to_angel"]["sealed_text"]
+    choose_in_menu(app, "use_item", "second_key")
+    assert dialog_text(app) == story.MESSAGES["not_fused"]
+    assert engine.door_status(app["state"], "deck_to_crab") == "locked"
 
 
 def test_inventory_shows_items_and_clues(app):
@@ -664,11 +684,15 @@ def test_a_whole_game_on_screen(app, door, character, ending):
     stand_next_to(app, "second_key")
     press(app, pygame.K_e)
     read_all(app)
+    stand_next_to(app, "anvil")
+    press(app, pygame.K_e)
+    choose_in_menu(app, "use_item", "key")  # either half fuses both
+    assert dialog_text(app) == story.OBJECTS["anvil"]["fuse_text"]
+    read_all(app)
     walk_into(app, "hold_to_deck")
     app["player"] = main.spawn_in_front_of(door)
     press(app, pygame.K_e)
-    choose_in_menu(app, "use_item", "key")
-    press(app, pygame.K_UP, pygame.K_RETURN)  # "Sì"
+    choose_in_menu(app, "use_item", "fused_key")
     read_all(app)
     walk_into(app, door)
     stand_next_to(app, character)
@@ -862,12 +886,13 @@ def test_every_scene_and_room_can_be_drawn(app):
     main.draw(app, screen)
     start_new_game(app)
     states = [in_room(room) for room in story.ROOMS]
-    states.append(play(CRAB_DOOR_OPEN))  # the crab's door open, the angel's sealed, both halves taken
+    states.append(play(CRAB_DOOR_OPEN))  # the crab's door open, the angel's still locked, the key fused
     states.append(play(IN_THE_CABIN[:1]))  # on the deck: the hold barred
     states.append(play(CIRCUIT_COMPLETE[:-1]))  # in the cabin: one generator pulled, the barrier up
     states.append(play(CIRCUIT_COMPLETE))  # in the cabin: the circuit complete, the key on the altar
     states.append(play(TILES_SOLVED[:-4]))  # in the hold: phase 3, two tiles lit, the barrier up
-    states.append(play(TILES_SOLVED))  # in the hold: every tile lit, the second half on the chest
+    states.append(play(TILES_SOLVED))  # in the hold: every tile lit, the second half on the anvil
+    states.append(play(KEY_FUSED + [act("use_item", "deck_to_angel", "fused_key"), act("enter", "deck_to_angel")]))
     for state in states:
         app["state"] = state
         app["player"] = main.spawn_at_entry(state["room"])

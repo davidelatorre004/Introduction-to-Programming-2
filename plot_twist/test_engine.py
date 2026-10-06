@@ -41,8 +41,9 @@ ACTIVATE_B = act("activate", "generator_b")
 ACTIVATE_C = act("activate", "generator_c")
 ACTIVATE_D = act("activate", "generator_d")
 WAND_ON_BARREL = act("use_item", "hold_puzzle", item="wand")
-OPEN_CRAB = act("use_item", "deck_to_crab", item="key")
-OPEN_ANGEL = act("use_item", "deck_to_angel", item="key")
+FUSE = act("use_item", "anvil", item="second_key")
+OPEN_CRAB = act("use_item", "deck_to_crab", item="fused_key")
+OPEN_ANGEL = act("use_item", "deck_to_angel", item="fused_key")
 GIVE_TO_CRAB = act("use_item", "crab", item="wand")
 GIVE_TO_ANGEL = act("use_item", "angel", item="wand")
 LEAVE_TILES = act("leave_zone", "hold_tiles")
@@ -64,16 +65,17 @@ PHASE_3 = [step(5), step(2), step(4), step(3)]
 SOLVE_TILES = PHASE_1 + PHASE_2 + PHASE_3
 # Wand, cabin puzzle, the first half of the key, and back on the deck.
 GET_KEY = [TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK]
-# Then the hold, no longer barred: the tiles, the second half, and back on the deck.
-GET_BOTH_KEYS = GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY, HOLD_TO_DECK]
+# Then the hold, no longer barred: the tiles, the second half, the two halves
+# fused on the anvil, and back on the deck.
+GET_FUSED_KEY = GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY, FUSE, HOLD_TO_DECK]
 # The shortest way to each ending: the barrel of the hold is optional.
-CRAB_ENDING = GET_BOTH_KEYS + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
-ANGEL_ENDING = GET_BOTH_KEYS + [OPEN_ANGEL, TO_ANGEL, GIVE_TO_ANGEL]
+CRAB_ENDING = GET_FUSED_KEY + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
+ANGEL_ENDING = GET_FUSED_KEY + [OPEN_ANGEL, TO_ANGEL, GIVE_TO_ANGEL]
 # The long way: read the clue on the barrel too.
 CLUE_THEN_CRAB = (GET_KEY + [TO_HOLD, WAND_ON_BARREL] + SOLVE_TILES
-                  + [TAKE_SECOND_KEY, HOLD_TO_DECK, OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB])
-# Open a door, go in, come back and wander around without ending the game.
-CHOOSE_AND_WANDER = GET_BOTH_KEYS + [OPEN_CRAB, TO_CRAB, CRAB_TO_DECK, TO_CABIN]
+                  + [TAKE_SECOND_KEY, FUSE, HOLD_TO_DECK, OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB])
+# Open both doors, go in one, come back and wander around without ending the game.
+CHOOSE_AND_WANDER = GET_FUSED_KEY + [OPEN_CRAB, OPEN_ANGEL, TO_CRAB, CRAB_TO_DECK, TO_CABIN]
 # Flip some generators, walk out and back in (they start over), flip another one.
 TOGGLE_AND_LEAVE = [TAKE_WAND, TO_CABIN, ACTIVATE_B, ACTIVATE_C, CABIN_TO_DECK, TO_CABIN, ACTIVATE_C]
 # Mistakes on the tiles: a wrong tile, walking out of the zone, walking out of the
@@ -201,11 +203,10 @@ def test_a1_locked_route_is_rejected_and_nothing_moves():
     (OPEN_ANGEL, TO_ANGEL, "angel_room"),
 ])
 def test_a2_key_opens_the_route_and_stays_in_inventory(open_door, go_in, room):
-    """A2: with both halves of the key, the locked route leads to its room, and the key is not used up."""
-    state = play(GET_BOTH_KEYS + [open_door, go_in])
+    """A2: with the fused key, the locked route leads to its room, and the key is not used up."""
+    state = play(GET_FUSED_KEY + [open_door, go_in])
     assert state["room"] == room
-    assert engine.has_item(state, "key")
-    assert engine.has_item(state, "second_key")
+    assert engine.has_item(state, "fused_key")
 
 
 def test_a3_wand_cannot_be_collected_twice():
@@ -230,14 +231,16 @@ def test_a3_revisited_cabin_offers_no_second_key():
 
 
 def test_a3_revisited_hold_offers_no_third_key():
-    """A3: back in the hold, the chest is empty and walking on the tiles again does not make another key."""
-    state = play(GET_BOTH_KEYS + [TO_HOLD])
+    """A3: back in the hold, the anvil is empty, and the tiles and the anvil do not make another key."""
+    state = play(GET_FUSED_KEY + [TO_HOLD])
     assert "second_key" not in [thing["id"] for thing in engine.things_here(state)]
     _, outcome = engine.pick_up(state, "second_key")
-    assert outcome["event"] == "already_have"
+    assert not outcome["ok"]
     after, outcome = engine.step_on(state, "tile_1")
     assert outcome["event"] == "already_done"
-    assert after["inventory"].count("second_key") == 1
+    after, outcome = engine.use_item(state, "fused_key", "anvil")
+    assert outcome["event"] == "nothing_happens"
+    assert after["inventory"] == ["wand", "fused_key"]
 
 
 def test_a4_resume_restores_scene_items_and_choice():
@@ -245,24 +248,25 @@ def test_a4_resume_restores_scene_items_and_choice():
 
     Here the game only goes through JSON in memory; the next test uses the real save file.
     """
-    state = play(GET_BOTH_KEYS + [OPEN_CRAB])
+    state = play(GET_FUSED_KEY + [OPEN_CRAB])
     resumed = reopen(state)
     assert resumed == state
     assert resumed["room"] == "deck"
-    assert resumed["inventory"] == ["wand", "key", "second_key"]
-    assert resumed["flags"]["chosen_door"] == "deck_to_crab"
-    assert engine.door_status(resumed, "deck_to_angel") == "sealed"
+    assert resumed["inventory"] == ["wand", "fused_key"]
+    assert resumed["flags"]["crab_door"] == "deck_to_crab"
+    assert engine.door_status(resumed, "deck_to_crab") == "open"
+    assert engine.door_status(resumed, "deck_to_angel") == "locked"  # still to open, with the same key
     assert_same_routes(resumed, state)
 
 
 def test_a4_resume_through_the_save_file():
     """A4 with the real file: every accepted action is saved, and reopening the app reads only the file."""
-    played = play_saving(GET_BOTH_KEYS + [OPEN_CRAB, TO_CRAB])
+    played = play_saving(GET_FUSED_KEY + [OPEN_CRAB, TO_CRAB])
     resumed = resume()
     assert resumed == played
     assert resumed["room"] == "crab_room"
-    assert resumed["inventory"] == ["wand", "key", "second_key"]
-    assert resumed["flags"]["chosen_door"] == "deck_to_crab"
+    assert resumed["inventory"] == ["wand", "fused_key"]
+    assert resumed["flags"]["crab_door"] == "deck_to_crab"
     assert_same_routes(resumed, played)
 
 
@@ -291,7 +295,7 @@ def test_a5_finished_game_cannot_change(steps):
 
 def test_a6_cancelled_restart_keeps_progress():
     """A6: without confirmation, starting over changes nothing."""
-    progress = play(GET_BOTH_KEYS + [OPEN_CRAB])
+    progress = play(GET_FUSED_KEY + [OPEN_CRAB])
     after, outcome = engine.start_new_game(progress)
     assert not outcome["ok"]
     assert outcome["event"] == "needs_confirmation"
@@ -300,7 +304,7 @@ def test_a6_cancelled_restart_keeps_progress():
 
 def test_a6_confirmed_restart_restores_the_opening():
     """A6: once confirmed, the game is back to the opening scene, empty-handed, nothing decided."""
-    progress = play(GET_BOTH_KEYS + [OPEN_CRAB])
+    progress = play(GET_FUSED_KEY + [OPEN_CRAB])
     fresh, outcome = engine.start_new_game(progress, confirmed=True)
     assert outcome["ok"]
     assert outcome["event"] == "started"
@@ -312,7 +316,7 @@ def test_a6_confirmed_restart_restores_the_opening():
 
 def test_a6_restart_through_the_save_file(save_file):
     """A6 with the real file: cancelling leaves the save as it was; confirming replaces it with a new game."""
-    play_saving(GET_BOTH_KEYS + [OPEN_CRAB])
+    play_saving(GET_FUSED_KEY + [OPEN_CRAB])
     saved_bytes = save_file.read_bytes()
     progress = resume()
 
@@ -375,35 +379,103 @@ def test_pt02_accepted_actions_show_a_result():
 
 
 def test_pt03_the_key_unlocks_opening_the_door():
-    """Without the key, E only lets you look at the door; with both halves, either one opens it."""
-    assert ("use_item", "key") not in offered(play([TAKE_WAND]), "deck_to_crab")
-    with_both = play(GET_BOTH_KEYS)
-    for half in ("key", "second_key"):
-        assert ("use_item", half) in offered(with_both, "deck_to_crab")
-        _, outcome = engine.use_item(with_both, half, "deck_to_crab")
+    """Without the key, E only lets you look at the door; with the fused key, it opens it."""
+    assert ("use_item", "fused_key") not in offered(play([TAKE_WAND]), "deck_to_crab")
+    with_key = play(GET_FUSED_KEY)
+    for door in ("deck_to_crab", "deck_to_angel"):
+        assert ("use_item", "fused_key") in offered(with_key, door)
+        _, outcome = engine.use_item(with_key, "fused_key", door)
         assert outcome["event"] == "door_opened"
 
 
-def test_pt03_half_a_key_does_not_turn():
-    """PT04 too: with only the first half, the lock refuses, says what is missing, and nothing changes."""
-    with_half = play(GET_KEY)
-    after, outcome = engine.use_item(with_half, "key", "deck_to_crab")
-    assert not outcome["ok"]
+@pytest.mark.parametrize("steps, half", [
+    pytest.param(GET_KEY, "key", id="only the first half"),
+    pytest.param(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY, HOLD_TO_DECK], "second_key", id="both, not fused"),
+])
+def test_pt03_the_halves_do_not_open_the_doors(steps, half):
+    """PT04 too: a half refuses to turn, says it must be fused on the anvil, and nothing changes."""
+    state = play(steps)
+    for door in ("deck_to_crab", "deck_to_angel"):
+        after, outcome = engine.use_item(state, half, door)
+        assert not outcome["ok"]
+        assert outcome["event"] == "not_fused"
+        assert outcome["text"] == story.MESSAGES["not_fused"]
+        assert after == state
+        assert engine.door_status(state, door) == "locked"
+
+
+def test_pt03_the_anvil_fuses_the_two_halves():
+    """Either half on the anvil, with both in hand: the halves become the fused key, in the first half's place."""
+    with_both = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY])
+    assert with_both["inventory"] == ["wand", "key", "second_key"]
+    for half in ("key", "second_key"):
+        fused, outcome = engine.use_item(with_both, half, "anvil")
+        assert outcome["event"] == "fused"
+        assert outcome["text"] == story.OBJECTS["anvil"]["fuse_text"]
+        assert fused["inventory"] == ["wand", "fused_key"]
+    _, outcome = engine.use_item(with_both, "wand", "anvil")
+    assert outcome["event"] == "nothing_happens"
+    halves_first = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TAKE_WAND, TO_HOLD] + SOLVE_TILES
+                        + [TAKE_SECOND_KEY, FUSE])
+    assert halves_first["inventory"] == ["fused_key", "wand"]  # the order things were found in is kept
+
+
+def test_pt03_one_half_alone_cannot_be_fused():
+    """The anvil needs both halves: the refusal says the other one is missing, and nothing changes."""
+    state = play(GET_KEY + [TO_HOLD])
+    after, outcome = engine.use_item(state, "key", "anvil")
     assert outcome["event"] == "missing_item"
     assert outcome["text"] == story.MESSAGES["missing_item"]
-    assert after == with_half
-    assert engine.door_status(with_half, "deck_to_crab") == "locked"
+    assert after == state
 
 
-def test_pt04_choosing_a_door_seals_the_other_forever():
-    """The remembered choice blocks the other door, even with the key and after walking around."""
+def test_pt03_fused_halves_never_come_back():
+    """R2: the halves are gone for good: not on the altar, not on the anvil, and the hold stays open."""
+    state = play(GET_FUSED_KEY)
+    assert engine.door_status(state, "deck_to_hold") == "open"
+    for room, half in (("cabin", "key"), ("hold", "second_key")):
+        there = dict(state, room=room)
+        assert half not in [thing["id"] for thing in engine.things_here(there)]
+        _, outcome = engine.pick_up(there, half)
+        assert not outcome["ok"]
+
+
+def test_pt03_a_lock_needing_several_items_wants_them_all(monkeypatch):
+    """The engine's rule for any lock: every item it requires must be carried, or it explains what is missing."""
+    monkeypatch.setitem(story.DOORS["deck_to_crab"], "requires", ["fused_key", "wand"])
+    without_wand = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TO_HOLD] + SOLVE_TILES
+                        + [TAKE_SECOND_KEY, FUSE, HOLD_TO_DECK])
+    after, outcome = engine.use_item(without_wand, "fused_key", "deck_to_crab")
+    assert outcome["event"] == "missing_item"
+    assert after == without_wand
+    _, outcome = engine.use_item(play([TAKE_WAND], without_wand), "fused_key", "deck_to_crab")
+    assert outcome["event"] == "door_opened"
+
+
+def test_pt04_the_fused_key_opens_both_doors():
+    """Opening one final door no longer seals the other: the fused key stays, and opens it too."""
     state = play(CHOOSE_AND_WANDER + [CABIN_TO_DECK])
     assert engine.door_status(state, "deck_to_crab") == "open"
+    assert engine.door_status(state, "deck_to_angel") == "open"
+    assert engine.has_item(state, "fused_key")
+    after, outcome = engine.perform(state, TO_ANGEL)
+    assert outcome["event"] == "entered"
+
+
+def test_pt04_doors_sharing_a_choice_flag_seal_each_other(monkeypatch):
+    """The engine still knows choices between doors: with one flag for both, opening one seals the other."""
+    monkeypatch.setitem(story.DOORS["deck_to_angel"], "choice_flag", "crab_door")
+    monkeypatch.setitem(story.DOORS["deck_to_angel"], "sealed_text", "Sigillata.")
+    with_key = play(GET_FUSED_KEY)
+    assert engine.actions_for(with_key, "deck_to_crab")[-1]["irreversible"]
+    state = play([OPEN_CRAB], with_key)
     assert engine.door_status(state, "deck_to_angel") == "sealed"
     for action in (TO_ANGEL, OPEN_ANGEL):
         after, outcome = engine.perform(state, action)
         assert outcome["event"] == "sealed"
         assert after == state
+    _, outcome = engine.examine(state, "deck_to_angel")
+    assert outcome["text"] == "Sigillata."
 
 
 def test_pt04_refused_actions_are_explained():
@@ -416,18 +488,18 @@ def test_pt04_refused_actions_are_explained():
 
 
 def test_pt04_irreversible_actions_are_flagged():
-    """Opening a final door and giving the wand ask for confirmation; solving a puzzle does not."""
+    """Giving the wand asks for confirmation; opening a door, fusing or solving a puzzle does not."""
     with_half = play(GET_KEY)
     flags = {action["item"]: action["irreversible"] for action in engine.actions_for(with_half, "deck_to_crab")}
     assert flags == {None: False, "wand": False, "key": False}  # half a key opens nothing
 
-    with_both = play(GET_BOTH_KEYS)
-    flags = {action["item"]: action["irreversible"] for action in engine.actions_for(with_both, "deck_to_crab")}
-    assert flags == {None: False, "wand": False, "key": True, "second_key": True}
+    with_key = play(GET_FUSED_KEY)
+    flags = {action["item"]: action["irreversible"] for action in engine.actions_for(with_key, "deck_to_crab")}
+    assert flags == {None: False, "wand": False, "fused_key": False}  # the other door stays open to choose
 
-    near_crab = play(GET_BOTH_KEYS + [OPEN_CRAB, TO_CRAB])
+    near_crab = play(GET_FUSED_KEY + [OPEN_CRAB, TO_CRAB])
     flags = {action["item"]: action["irreversible"] for action in engine.actions_for(near_crab, "crab")}
-    assert flags == {None: False, "wand": True, "key": False, "second_key": False}
+    assert flags == {None: False, "wand": True, "fused_key": False}
 
     in_cabin = play([TAKE_WAND, TO_CABIN])
     for action in engine.actions_for(in_cabin, "generator_a") + engine.actions_for(in_cabin, "barrier"):
@@ -518,8 +590,11 @@ def test_r2_items_can_be_collected_only_where_the_story_puts_them():
 
 
 def test_r2_using_items_does_not_consume_them():
-    """After both puzzles, opening a door and giving the wand away, every item is still there."""
-    assert play(CRAB_ENDING)["inventory"] == ["wand", "key", "second_key"]
+    """After opening a door and giving the wand away, the wand and the key are still there.
+
+    Only the anvil changes the inventory: the two halves become the fused key.
+    """
+    assert play(CRAB_ENDING)["inventory"] == ["wand", "fused_key"]
 
 
 def test_r3_revisited_cabin_remembers_the_complete_circuit():
@@ -557,13 +632,13 @@ def test_r2_an_item_can_wait_for_a_flag_to_appear(monkeypatch):
 
 
 def test_r3_revisited_hold_remembers_the_solved_tiles():
-    """Back in the hold: every tile still lit, the barrier still gone, the chest empty."""
-    state = play(GET_BOTH_KEYS + [TO_HOLD])
+    """Back in the hold: every tile still lit, the barrier still gone, the anvil empty."""
+    state = play(GET_FUSED_KEY + [TO_HOLD])
     here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
     assert [here[f"tile_{number}"] for number in range(1, 6)] == ["lit"] * 5
     assert "hold_barrier" not in here
     assert "second_key" not in here
-    assert here["chest"] == "present"
+    assert here["anvil"] == "present"
 
 
 def test_r3_found_clue_is_remembered():
@@ -951,9 +1026,9 @@ def test_persistence_every_accepted_action_survives_a_restart():
 
 def test_persistence_refused_actions_leave_the_file_untouched(save_file):
     """Rejected actions leave existing data unchanged, and the game on screen still matches the file."""
-    state = play_saving(GET_BOTH_KEYS + [OPEN_CRAB])
+    state = play_saving(GET_FUSED_KEY + [OPEN_CRAB])
     saved_bytes = save_file.read_bytes()
-    for action in (TO_ANGEL, OPEN_ANGEL, TAKE_WAND, WAND_ON_BARREL, GIVE_TO_CRAB, step(1), LEAVE_TILES):
+    for action in (TO_ANGEL, OPEN_CRAB, TAKE_WAND, WAND_ON_BARREL, GIVE_TO_CRAB, step(1), LEAVE_TILES):
         state, outcome = save_if_accepted(engine.perform(state, action))
         assert not outcome["ok"]
         assert save_file.read_bytes() == saved_bytes
@@ -1005,7 +1080,9 @@ def without(key):
     pytest.param(restorable(flags={"lucky": True}), id="unknown flag"),
     pytest.param(restorable(flags={"cabin_solved": "yes"}), id="wrong flag value"),
     pytest.param(restorable(flags={"cabin_solved": 1}), id="1 is not True"),
-    pytest.param(restorable(flags={"chosen_door": "deck_to_cabin"}), id="not a choice door"),
+    pytest.param(restorable(flags={"crab_door": "deck_to_cabin"}), id="not a choice door"),
+    pytest.param(restorable(flags={"crab_door": "deck_to_angel"}), id="the angel's door in the crab's flag"),
+    pytest.param(restorable(inventory=["key", "fused_key"]), id="a half next to the fused key"),
     pytest.param(restorable(flags={"hold_phase": 4}), id="no phase 4"),
     pytest.param(restorable(flags={"hold_phase": "1"}), id="phase as text"),
     pytest.param(restorable(flags={"hold_step": 6}), id="more steps than any phase"),
@@ -1090,8 +1167,13 @@ def test_story_ids_are_unique():
 
 def test_story_references_exist():
     assert story.START_ROOM in story.ROOMS
-    for item in story.ITEMS.values():
-        assert item["room"] in story.ROOMS
+    for item_id, item in story.ITEMS.items():
+        made = [part for part, info in story.ITEMS.items() if info["part_of"] == item_id]
+        if made:  # made at the anvil from at least two parts, never lying around
+            assert len(made) >= 2 and item["room"] is None and item["pos"] is None, item_id
+        else:
+            assert item["room"] in story.ROOMS, item_id
+        assert item["part_of"] is None or item["part_of"] in story.ITEMS, item_id
         assert item["appears_if"] is None or item["appears_if"] in story.FLAGS
         assert item["free_if"] is None or item["free_if"] in story.FLAGS
     for door in story.DOORS.values():
@@ -1148,17 +1230,20 @@ def test_story_every_room_can_be_reached():
 
 
 def test_story_locked_doors_are_complete():
-    """A door with a lock has a choice flag and all three texts; a door without one has neither.
+    """A door with a lock has a choice flag and its texts; a door without one has neither.
 
-    A barred door says what bars it.
+    The sealed text is needed only when doors share a choice flag. A barred door says what bars it.
     """
     for door_id, door in story.DOORS.items():
         assert isinstance(door["requires"], list), door_id
         locked = bool(door["requires"])
         assert (door["choice_flag"] is not None) == locked, door_id
         if locked:
-            for key in ("locked_text", "sealed_text", "open_text"):
+            for key in ("locked_text", "open_text"):
                 assert door[key].strip(), f"{door_id} has no {key}"
+            sharing = [other for other in story.DOORS.values() if other["choice_flag"] == door["choice_flag"]]
+            if len(sharing) > 1:
+                assert door["sealed_text"].strip(), f"{door_id} has no sealed_text"
         barred = door["opens_with"] is not None
         assert (door["barred_text"] is not None) == barred, door_id
         if barred:
@@ -1167,7 +1252,7 @@ def test_story_locked_doors_are_complete():
 
 def test_story_objects_are_well_formed():
     for thing_id, thing in story.OBJECTS.items():
-        assert thing["kind"] in ("puzzle", "character", "switch", "tile", "barrier", "altar"), thing_id
+        assert thing["kind"] in ("puzzle", "character", "switch", "tile", "barrier", "altar", "anvil"), thing_id
         assert thing["name"].strip()
         assert thing["look_text"].strip()
         if thing["kind"] in ("puzzle", "character"):
@@ -1187,6 +1272,8 @@ def test_story_objects_are_well_formed():
             assert len(puzzles) == 1, f"{thing_id} must be in exactly one floor puzzle"
         if thing["kind"] == "barrier":
             assert thing["open_if"] in story.FLAGS, thing_id
+        if thing["kind"] == "anvil":
+            assert thing["fuse_text"].strip(), thing_id
         for reaction in thing["reactions"].values():
             # Exactly one effect: set a flag or end the game.
             assert ("ending" in reaction) != ("set_flag" in reaction), thing_id
@@ -1216,7 +1303,8 @@ def test_story_texts_are_not_empty():
     for item in story.ITEMS.values():
         assert item["name"].strip()
         assert item["description"].strip()
-        assert item["pickup_text"].strip()
+        if item["room"] is not None:  # only what lies somewhere is picked up
+            assert item["pickup_text"].strip()
     for ending in story.ENDINGS.values():
         assert ending["title"].strip()
         assert ending["text"]

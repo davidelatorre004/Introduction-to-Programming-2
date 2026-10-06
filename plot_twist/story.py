@@ -21,14 +21,16 @@ FLAGS = {
     "cabin_solved": False,
     # The numbered tiles of the hold: the phase being played (1, 2 or 3) and how
     # many tiles of its sequence are lit. Then all three phases are done: the
-    # barrier around the chest has dissolved.
+    # barrier around the anvil has dissolved.
     "hold_phase": 1,
     "hold_step": 0,
     "hold_solved": False,
     # The hold puzzle is solved: the player has learned that the crab tells the truth.
     "crab_truthful": False,
-    # Id of the final door the player opened. From then on the other one is sealed.
-    "chosen_door": None,
+    # The final doors, each with its own memory: the door's id once it has been
+    # opened, None while it is locked. Opening one does not seal the other.
+    "crab_door": None,
+    "angel_door": None,
 }
 
 # "outdoor" tells the screen to draw the sea around the room. "entry" is the tile
@@ -58,7 +60,7 @@ ROOMS = {
         "name": "Stiva",
         "description": (
             "Buio, casse rovesciate e odore di salsedine. Nel pavimento brillano cinque piastrelle "
-            "numerate, dall'1 al 5. In fondo, uno scrigno avvolto da una barriera; "
+            "numerate, dall'1 al 5. In fondo, un'incudine avvolta da una barriera; "
             "in un angolo, un barile coperto di simboli."
         ),
         "outdoor": False,
@@ -81,6 +83,9 @@ ROOMS = {
 # Items the player can collect. An item lies in its room, on tile "pos", until it
 # is picked up. If "appears_if" names a flag, it shows up only once that flag is true.
 # If "free_if" names a flag, it can be seen but not picked up until that flag is true.
+# An item that is "part_of" another one is fused into it at the anvil: then the
+# parts leave the inventory for good, and the whole item takes their place. An
+# item that only comes from fusing has no room and no "pos".
 ITEMS = {
     "wand": {
         "name": "Bacchetta magica",
@@ -88,6 +93,7 @@ ITEMS = {
         "room": "deck",
         "pos": (8, 6),
         "appears_if": None,
+        "part_of": None,
         "free_if": None,
         "pickup_text": "Raccogli la bacchetta magica. Una scintilla ti corre lungo il braccio.",
     },
@@ -98,6 +104,7 @@ ITEMS = {
         "room": "cabin",
         "pos": (7, 1),  # on the altar, behind the barrier
         "appears_if": None,
+        "part_of": "fused_key",
         "free_if": "cabin_solved",
         "pickup_text": (
             "Prendi la chiave centrale dall'altare: è solo metà di una chiave. "
@@ -108,13 +115,25 @@ ITEMS = {
         "name": "Seconda chiave",
         "description": "L'altra metà della chiave d'ottone. Combacia con la chiave centrale.",
         "room": "hold",
-        "pos": (7, 10),  # in the chest, behind the barrier
+        "pos": (7, 10),  # on the anvil, behind the barrier
         "appears_if": None,
+        "part_of": "fused_key",
         "free_if": "hold_solved",
         "pickup_text": (
-            "Prendi la seconda chiave dallo scrigno. Combacia con la chiave centrale: "
-            "insieme formano una chiave intera."
+            "Prendi la seconda chiave dall'incudine. Combacia con la chiave centrale: "
+            "sull'incudine si possono fondere insieme."
         ),
+    },
+    # The two halves fused at the anvil: the key of the final doors.
+    "fused_key": {
+        "name": "Chiave fusa",
+        "description": "Le due metà della chiave d'ottone, fuse in un pezzo solo. Apre le porte del granchio e dell'angelo.",
+        "room": None,
+        "pos": None,
+        "appears_if": None,
+        "part_of": None,
+        "free_if": None,
+        "pickup_text": None,
     },
 }
 
@@ -122,8 +141,9 @@ ITEMS = {
 # middle of one wall ("side": N, S, E or W). The way back is on the opposite wall.
 # - A door that "requires" items stays locked until one of them is used on it while
 #   the player carries them all. Opening it writes the door's id in its
-#   "choice_flag", and every other door sharing that flag is sealed forever. Only
-#   locked doors use "locked_text", "sealed_text" and "open_text".
+#   "choice_flag". Doors sharing a choice flag would be a choice: opening one would
+#   seal the others forever ("sealed_text"). The final doors have a flag each, so
+#   both can be opened. Locked doors use "locked_text" and "open_text".
 # - A door that "opens_with" an item is barred until the player carries that item,
 #   and then it is simply open. "barred_text" says what bars it.
 DOORS = {
@@ -140,24 +160,18 @@ DOORS = {
     },
     "deck_to_crab": {
         "room": "deck", "to": "crab_room", "side": "E",
-        "requires": ["key", "second_key"], "choice_flag": "chosen_door", "opens_with": None,
+        "requires": ["fused_key"], "choice_flag": "crab_door", "opens_with": None,
         "locked_text": "Una porta con una chela incisa nel legno. È chiusa a chiave.",
-        "sealed_text": "La serratura della porta con la chela si è fusa. Non si aprirà mai più.",
-        "open_text": (
-            "Unisci le due metà della chiave: combaciano. La chiave gira e la porta con la chela si apre. "
-            "Dall'altra parte del ponte, la porta con l'ala si sigilla con uno schianto."
-        ),
+        "sealed_text": None,
+        "open_text": "La chiave fusa gira senza sforzo e la porta con la chela si apre.",
         "barred_text": None,
     },
     "deck_to_angel": {
         "room": "deck", "to": "angel_room", "side": "W",
-        "requires": ["key", "second_key"], "choice_flag": "chosen_door", "opens_with": None,
+        "requires": ["fused_key"], "choice_flag": "angel_door", "opens_with": None,
         "locked_text": "Una porta con un'ala incisa nel legno. È chiusa a chiave.",
-        "sealed_text": "La serratura della porta con l'ala si è fusa. Non si aprirà mai più.",
-        "open_text": (
-            "Unisci le due metà della chiave: combaciano. La chiave gira e la porta con l'ala si apre. "
-            "Dall'altra parte del ponte, la porta con la chela si sigilla con uno schianto."
-        ),
+        "sealed_text": None,
+        "open_text": "La chiave fusa gira senza sforzo e la porta con l'ala si apre.",
         "barred_text": None,
     },
     "cabin_to_deck": {
@@ -194,7 +208,9 @@ DOORS = {
 # - "tile" is a numbered tile of a floor puzzle (see FLOOR_PUZZLES): the player
 #   walks on it, and it lights up when stepped on in the right order.
 # - "barrier" stands in the way until its "open_if" flag is true, then it is gone.
-# - "altar" holds an item: the cabin's altar, the hold's chest.
+# - "altar" holds an item: the cabin's altar.
+# - "anvil" holds an item too, and fuses the parts of an item (see "part_of" in
+#   ITEMS) when one of them is used on it while the player carries them all.
 # The barrel of the hold is still a simple puzzle: it only asks for the wand.
 OBJECTS = {
     # The generators of the cabin, at the corners of a square: A top left, B top
@@ -325,7 +341,7 @@ OBJECTS = {
         "done_text": None,
         "reactions": {},
     },
-    # The barrier fed by the tiles, around the chest against the bottom wall.
+    # The barrier fed by the tiles, around the anvil against the bottom wall.
     "hold_barrier": {
         "kind": "barrier",
         "name": "Barriera di energia",
@@ -334,18 +350,22 @@ OBJECTS = {
         "size": (3, 2),
         "open_if": "hold_solved",
         "look_text": (
-            "Una barriera di energia avvolge lo scrigno. Sul bordo dello scrigno si legge: "
+            "Una barriera di energia avvolge l'incudine. Sul suo ceppo si legge: "
             "«L'Onda, Il Ritorno, Il Cortocircuito.»"
         ),
         "done_text": None,
         "reactions": {},
     },
-    "chest": {
-        "kind": "altar",
-        "name": "Scrigno",
+    "anvil": {
+        "kind": "anvil",
+        "name": "Incudine",
         "room": "hold",
         "pos": (7, 10),
-        "look_text": "Uno scrigno di legno cerchiato di ferro.",
+        "look_text": "Un'incudine nera, ancora tiepida. Qui due metà di qualcosa potrebbero tornare una cosa sola.",
+        "fuse_text": (
+            "Appoggi le due metà sull'incudine e le batti con forza: l'ottone si salda. "
+            "Ora hai una chiave sola, intera: la chiave fusa."
+        ),
         "done_text": None,
         "reactions": {},
     },
@@ -369,6 +389,7 @@ OBJECTS = {
         "name": "Granchio",
         "room": "crab_room",
         "pos": (10, 5),
+        "size": (2, 2),
         "look_text": "«Dammi la bacchetta e porterò questa nave in salvo. Tutti quanti.»",
         "done_text": None,
         "reactions": {
@@ -383,6 +404,7 @@ OBJECTS = {
         "name": "Angelo",
         "room": "angel_room",
         "pos": (5, 5),
+        "size": (1, 2),
         "look_text": "«Affidami la bacchetta. Con me sarete tutti al sicuro.»",
         "done_text": None,
         "reactions": {
@@ -486,7 +508,8 @@ MESSAGES = {
     "nothing_happens": "Non succede niente.",
     "guarded": "La barriera ti impedisce di prenderla.",
     "circuit_done": "Il circuito è completo: i generatori restano accesi.",
-    "missing_item": "Da sola non gira: a questa chiave manca l'altra metà.",
+    "missing_item": "Da sola non serve: a questa metà manca l'altra.",
+    "not_fused": "È solo metà della chiave, e da sola non gira: va fusa con l'altra metà sull'incudine della stiva.",
     "already_lit": "La piastrella è già accesa.",
     "tiles_done": "Le piastrelle restano accese: il sistema della stiva è sbloccato.",
     # What an open door shows when examined.

@@ -103,6 +103,9 @@ COLORS = {
 # The fallback colors of the numbered tiles, if they have no picture.
 TILE_COLORS = {"lit": COLORS["highlight"], "dark": COLORS["cable"], "error": COLORS["error"]}
 
+# The kinds of object an item can lie on: drawn low, before the item, which sits a little higher.
+HOLDERS = ("altar", "anvil")
+
 # The sound each outcome of a floor puzzle plays (see sounds.py).
 EVENT_SOUNDS = {
     "tile_lit": "blip",
@@ -132,7 +135,8 @@ THING_COLORS = {
     "barrier": (110, 230, 255),
     "hold_barrier": (110, 230, 255),
     "altar": (176, 176, 190),
-    "chest": (140, 90, 50),
+    "anvil": (60, 60, 72),
+    "fused_key": (250, 210, 70),
     "hold_puzzle": (110, 75, 45),
     "crab": (230, 90, 55),
     "angel": (250, 250, 235),
@@ -1115,9 +1119,9 @@ def draw_floor_puzzles(app, screen, things):
 
 
 def on_an_altar(state, item):
-    """True if an item lies on the tile of an altar of its room."""
+    """True if an item lies on the tile of an altar (or of the anvil) of its room."""
     for thing, info in story.OBJECTS.items():
-        if info["kind"] == "altar" and info["room"] == state["room"] and info["pos"] == story.ITEMS[item]["pos"]:
+        if info["kind"] in HOLDERS and info["room"] == state["room"] and info["pos"] == story.ITEMS[item]["pos"]:
             return True
     return False
 
@@ -1148,7 +1152,7 @@ def draw_room(app, screen):
     for thing in things:
         if thing["kind"] == "door":
             draw_door(screen, thing["id"], thing["status"])
-        elif thing["kind"] == "altar":
+        elif thing["kind"] in HOLDERS:
             draw_thing(screen, thing)  # low furniture, drawn before what lies on it
         elif thing["kind"] not in ("item", "tile"):
             standing.append(thing)

@@ -18,15 +18,15 @@ Una nave è alla deriva nell'oceano. Il protagonista si sveglia sul ponte, con u
 |---|---|---|
 | Ponte (esterno, inizio) | `deck` | La bacchetta a terra e le porte verso tutte le altre stanze |
 | Cabina del capitano | `cabin` | Quattro generatori collegati: accenderli tutti insieme dissolve la barriera che protegge la prima metà della chiave |
-| Stiva | `hold` | Sbarrata da un cancello finché non hai la prima metà. Dentro, cinque piastrelle da calpestare in tre sequenze: dissolvono la barriera intorno alla seconda metà. E un barile che, con la bacchetta, rivela che il granchio dice la verità |
-| Stanza del granchio | `crab_room` | Il granchio: dargli la bacchetta porta al finale *Tutti salvi* |
-| Stanza dell'angelo | `angel_room` | L'angelo: dargli la bacchetta porta al finale *La nave esplode* |
+| Stiva | `hold` | Sbarrata da un cancello finché non hai la prima metà. Dentro, cinque piastrelle da calpestare in tre sequenze: dissolvono la barriera intorno all'incudine, con sopra la seconda metà. Sull'incudine le due metà si fondono nella chiave fusa. E un barile che, con la bacchetta, rivela che il granchio dice la verità |
+| Stanza del granchio | `crab_room` | Il granchio, grande 2×2 caselle: dargli la bacchetta porta al finale *Tutti salvi* |
+| Stanza dell'angelo | `angel_room` | L'angelo, alto 2 caselle: dargli la bacchetta porta al finale *La nave esplode* |
 
 Regole della storia:
-- **Porte:** dal ponte si entra liberamente in cabina. La porta della stiva ha un cancello, che si apre da solo appena hai la prima metà della chiave. Le porte del granchio e dell'angelo richiedono la chiave intera: le due metà.
-- **Scelta:** aprire una delle due porte finali sigilla l'altra per sempre.
-- **Oggetti:** non si consumano e non si duplicano.
-- **Percorso minimo:** bacchetta → generatori in cabina → prima metà della chiave → piastrelle in stiva → seconda metà → una porta finale → dare la bacchetta. Il barile della stiva è facoltativo: dà l'indizio per scegliere la porta giusta.
+- **Porte:** dal ponte si entra liberamente in cabina. La porta della stiva ha un cancello, che si apre da solo appena hai la prima metà della chiave. Le porte del granchio e dell'angelo richiedono la chiave fusa: le due metà, fuse sull'incudine della stiva. Con la chiave fusa si aprono entrambe.
+- **Scelta:** a chi dare la bacchetta. Le porte finali si possono aprire tutte e due, quindi si può incontrare sia il granchio sia l'angelo prima di decidere.
+- **Oggetti:** non si duplicano, e non si consumano usandoli. L'unica trasformazione è all'incudine: le due metà della chiave diventano la chiave fusa.
+- **Percorso minimo:** bacchetta → generatori in cabina → prima metà della chiave → piastrelle in stiva → seconda metà → fusione all'incudine → una porta finale → dare la bacchetta. Il barile della stiva è facoltativo: dà l'indizio per scegliere la porta giusta.
 - **Enigmi:** due, entrambi veri (M5), descritti in §4: gli interruttori collegati in cabina e le piastrelle in stiva. Il barile resta una semplice reazione alla bacchetta.
 
 Controlli:
@@ -40,9 +40,9 @@ Cosa chiede il brief per la prima versione, e dove si trova nel gioco:
 | Il brief chiede | Nel gioco |
 |---|---|
 | Almeno 5 scene | 5 stanze |
-| Almeno 2 oggetti collezionabili | Bacchetta e le due metà della chiave |
+| Almeno 2 oggetti collezionabili | Bacchetta e le due metà della chiave, che all'incudine diventano la chiave fusa |
 | 2 finali raggiungibili | *Tutti salvi* e *La nave esplode* |
-| Un finale che dipende da una scelta o da un oggetto precedente | Entrambi dipendono dalla porta scelta (`chosen_door`) e dalla bacchetta |
+| Un finale che dipende da una scelta o da un oggetto precedente | Entrambi dipendono da a chi si dà la bacchetta, e servono la chiave fusa per arrivarci |
 | Circa 10 minuti di gioco | Due enigmi veri. Quanto dura davvero va misurato con chi non conosce le soluzioni |
 | Testo e controlli semplici | Riquadri di testo e 4 tasti |
 | Nessun servizio a pagamento né integrazione esterna | pygame e un file JSON locale |
@@ -81,18 +81,18 @@ La cartella `plot_twist/` sta accanto a `splitit/` ed è organizzata allo stesso
 
 Convenzioni:
 - **Solo costanti:** niente funzioni, niente import.
-- **Id:** ogni cosa, stanze comprese, ha un id stringa unico in tutto il gioco, in inglese (come `chosen_door`). I testi a schermo sono in italiano.
+- **Id:** ogni cosa, stanze comprese, ha un id stringa unico in tutto il gioco, in inglese (come `crab_door`). I testi a schermo sono in italiano.
 - **Dizionari piatti:** oggetti, porte e personaggi stanno in dizionari `id → dati` con un campo `room`, invece di essere elencati dentro le stanze. Così ogni informazione sta in un posto solo.
 - **Testi:** stanno tutti qui, mai nel motore. Puoi riscrivere i dialoghi senza toccare né le regole né i test.
 
 | Costante | Contenuto | Campi |
 |---|---|---|
 | `START_ROOM` | `"deck"` | — |
-| `FLAGS` | Nome del flag → valore iniziale | `generator_a: False`, `generator_b: True`, `generator_c: True`, `generator_d: False`, `cabin_solved: False`, `hold_phase: 1`, `hold_step: 0`, `hold_solved: False`, `crab_truthful: False`, `chosen_door: None` |
+| `FLAGS` | Nome del flag → valore iniziale | `generator_a: False`, `generator_b: True`, `generator_c: True`, `generator_d: False`, `cabin_solved: False`, `hold_phase: 1`, `hold_step: 0`, `hold_solved: False`, `crab_truthful: False`, `crab_door: None`, `angel_door: None` |
 | `ROOMS` | Le 5 stanze | `name`, `description`, `outdoor` (il ponte è all'aperto: serve al disegno) |
-| `ITEMS` | `wand`, `key`, `second_key` | `name`, `description`, `room`, `appears_if` (flag che lo fa comparire, o `None`), `free_if` (flag che permette di raccoglierlo, o `None`), `pickup_text` |
+| `ITEMS` | `wand`, `key`, `second_key`, `fused_key` | `part_of` (l'oggetto in cui si fonde, o `None`), `name`, `description`, `room`, `appears_if` (flag che lo fa comparire, o `None`), `free_if` (flag che permette di raccoglierlo, o `None`), `pickup_text` |
 | `DOORS` | 8 porte, una per verso | `room`, `to`, `requires` (lista di oggetti, vuota se la porta non ha serratura), `choice_flag` (flag o `None`), `opens_with` (oggetto o `None`), `locked_text`, `sealed_text`, `open_text` (solo per le porte con serratura), `barred_text` (solo per le porte sbarrate) |
-| `OBJECTS` | 4 generatori, 5 piastrelle, 2 barriere, un altare, uno scrigno, un barile e 2 personaggi | `kind`, `name`, `room`, `look_text`, `done_text` (obbligatorio per gli enigmi), `reactions` (oggetto usato → reazione). I generatori hanno in più `flag`, `toggles`, `toggle_text` e `label`; le piastrelle `label`; le barriere `open_if` |
+| `OBJECTS` | 4 generatori, 5 piastrelle, 2 barriere, un altare, un'incudine, un barile e 2 personaggi | `kind`, `name`, `room`, `look_text`, `done_text` (obbligatorio per gli enigmi), `reactions` (oggetto usato → reazione). I generatori hanno in più `flag`, `toggles`, `toggle_text` e `label`; le piastrelle `label`; le barriere `open_if`; l'incudine `fuse_text`. Granchio e angelo hanno `size` |
 | `CIRCUITS` | `cabin_circuit` | `room`, `switches` (i generatori), `solved_flag`, `solved_text` |
 | `FLOOR_PUZZLES` | `hold_tiles` | `room`, `zone`, `phases` (ognuna con `name` e `steps`), `phase_flag`, `step_flag`, `solved_flag` e i testi `lit_text`, `phase_text`, `wrong_text`, `left_text`, `solved_text` |
 | `ENDINGS` | `saved`, `explosion` | `title`, `text` (righe della schermata finale), `good` |
@@ -104,7 +104,8 @@ I `kind` di `OBJECTS`:
 - `switch`: un generatore di un circuito. Attivarlo inverte i flag elencati in `toggles`, compreso il suo.
 - `tile`: una piastrella numerata di un enigma a pavimento. Non è solida: ci si cammina sopra, ed è camminandoci sopra che si gioca.
 - `barrier`: blocca il passaggio finché il flag `open_if` è falso, poi sparisce.
-- `altar`: si può solo guardare, e ci si appoggia un oggetto: l'altare della cabina, lo scrigno della stiva.
+- `altar`: si può solo guardare, e ci si appoggia un oggetto: l'altare della cabina.
+- `anvil`: anche sull'incudine si appoggia un oggetto, e in più ci si fondono le parti di un oggetto (vedi "La fusione").
 
 ### Porte
 
@@ -112,7 +113,7 @@ I `kind` di `OBJECTS`:
 |---|---|---|
 | `deck_to_cabin` | Ponte → cabina | Libera |
 | `deck_to_hold` | Ponte → stiva | Sbarrata da un cancello finché il giocatore non ha la prima metà della chiave (`opens_with: key`). Poi è libera: non serve usare niente |
-| `deck_to_crab`, `deck_to_angel` | Ponte → stanze finali | `requires: [key, second_key]`, `choice_flag: chosen_door`. Si apre usando una delle due metà, ma solo se il giocatore le ha entrambe |
+| `deck_to_crab`, `deck_to_angel` | Ponte → stanze finali | `requires: [fused_key]`, con un flag a testa (`crab_door`, `angel_door`): aprirne una non sigilla l'altra. Le metà separate non girano |
 | `cabin_to_deck`, `hold_to_deck`, `crab_to_deck`, `angel_to_deck` | Ritorno al ponte | Libere |
 
 Ogni collegamento ha due porte e ognuna sta in una sola stanza, quindi il motore non deve capire da che lato si sta passando.
@@ -121,7 +122,17 @@ Ogni collegamento ha due porte e ognuna sta in una sola stanza, quindi il motore
 
 - `wand`: sul ponte, sempre a terra (`appears_if` e `free_if` sono `None`).
 - `key`, la "Chiave centrale": la prima metà della chiave. In cabina, sull'altare. Si vede da subito, ma con `free_if: cabin_solved` non si raccoglie finché c'è la barriera.
-- `second_key`, la "Seconda chiave": la seconda metà. In stiva, sullo scrigno, con `free_if: hold_solved`.
+- `second_key`, la "Seconda chiave": la seconda metà. In stiva, sull'incudine, con `free_if: hold_solved`.
+- `fused_key`, la "Chiave fusa": non sta da nessuna parte (`room` e `pos` sono `None`). Nasce all'incudine dalle due metà, che hanno `part_of: fused_key`.
+
+### La fusione
+
+Si usa una delle due metà sull'incudine (E vicino all'incudine, poi "Usa: …").
+- Con entrambe le metà nell'inventario, le metà spariscono e al posto della prima compare la Chiave fusa. Compare il `fuse_text` dell'incudine.
+- Con una metà sola, rifiuta con `missing_item`: manca l'altra.
+- Le metà fuse non tornano più: non ricompaiono né sull'altare né sull'incudine, e la porta della stiva resta aperta, perché la chiave fusa vale come la prima metà.
+- Una metà usata su una porta finale non gira: rifiuta con `not_fused`, e il testo dice di fonderla all'incudine.
+- La chiave fusa non si consuma: dopo aver aperto una porta, apre anche l'altra.
 
 ### Reazioni
 
@@ -181,13 +192,13 @@ Regole:
 - **Errore:** calpestare qualsiasi altra piastrella, anche una accesa prima nella stessa fase, oppure uscire dalla zona. Le luci si spengono e ricomincia **la fase in corso**, dalla sua prima piastrella; le fasi già superate restano superate. Uscire dalla stiva vale come uscire dalla zona.
 - **Non sono errori:** tornare sulla piastrella accesa per ultima, e uscire dalla zona quando nessuna piastrella è accesa.
 - **Vittoria:** l'ultima piastrella della Fase 3 imposta `hold_solved`. Allora:
-  - la barriera intorno allo scrigno sparisce, e con lei la sua collisione;
+  - la barriera intorno all'incudine sparisce, e con lei la sua collisione;
   - compare "Il sistema della stiva si sblocca! La barriera si è dissolta!";
-  - la Seconda chiave sullo scrigno si può raccogliere.
+  - la Seconda chiave sull'incudine si può raccogliere.
 
   Da quel momento le piastrelle restano tutte accese e non reagiscono più.
 
-Indizi: i nomi delle tre fasi sono incisi sullo scrigno (li si legge esaminando la barriera), e ogni cambio di fase annuncia il nome della prossima.
+Indizi: i nomi delle tre fasi sono incisi sull'incudine (li si legge esaminando la barriera), e ogni cambio di fase annuncia il nome della prossima.
 
 La soluzione più corta è 1 2 3 4 5, 3 1, 5 2 4 3: undici passi. Un test prova ogni piastrella in ogni momento e verifica che non esista un'altra soluzione della stessa lunghezza.
 
@@ -208,7 +219,7 @@ Le calcola il motore; non si salvano mai.
 - **Piastrella accesa:** è tra le prime `hold_step` della sequenza della fase in corso. Se l'enigma è risolto, sono accese tutte.
 - **Stato di una porta:** senza `requires` è sempre aperta. Con `choice_flag`:
   - è aperta se il flag contiene l'id di questa porta;
-  - è **sigillata per sempre** se contiene l'id di un'altra;
+  - è **sigillata per sempre** se contiene l'id di un'altra (succede solo a porte che condividono il flag: oggi nessuna);
   - è chiusa se il flag è `None`.
 
   Una porta chiusa "normale" è una porta il cui `choice_flag` non è condiviso con nessun'altra.
@@ -221,7 +232,7 @@ Si aggiunge in M3, e il motore non lo legge mai.
 - `entry` per ogni stanza: il punto in cui si compare riprendendo una partita.
 - `side` per ogni porta: N, S, E oppure O, a metà parete.
 - `pos` per oggetti e personaggi.
-- `size` per ciò che occupa più di un tile: ogni barriera ne copre 3×2, intorno all'altare o allo scrigno.
+- `size` per ciò che occupa più di un tile: ogni barriera ne copre 3×2, intorno all'altare o all'incudine; il granchio 2×2; l'angelo 1×2. Gli sprite hanno la stessa misura dell'area.
 - `zone` per ogni enigma a pavimento: il rettangolo intorno alle piastrelle. Uscirne fa ricominciare la fase.
 
 Un oggetto può stare sul tile di un altare: è così che la chiave sta sull'altare.
@@ -285,7 +296,7 @@ Queste funzioni non cambiano niente.
   - generatori (`on` o `off`);
   - piastrelle (`lit` o `dark`);
   - le barriere, finché ci sono (`up`);
-  - personaggi, altari e scrigno.
+  - personaggi, altare e incudine.
 
   `main.py` sa cosa disegnare e cosa è solido solo da qui.
 - **`actions_for(state, target)`:** restituisce le azioni possibili premendo E vicino al bersaglio, ciascuna con un'etichetta:
@@ -295,7 +306,7 @@ Queste funzioni non cambiano niente.
   - "Esamina" oppure "Parla";
   - "Usa X" o "Dai X" per **ogni** oggetto dell'inventario, non solo per quello giusto, altrimenti il menu rivelerebbe la soluzione.
 
-  Segna come `irreversible` le azioni che aprono una porta di scelta o fanno scattare un finale: con una sola metà della chiave la porta non si apre, quindi non è irreversibile. Dopo il finale restituisce una lista vuota, e così per un enigma a pavimento: non è un bersaglio di E.
+  Segna come `irreversible` le azioni che fanno scattare un finale, o che aprono una porta che ne sigilla un'altra (oggi nessuna: le porte finali hanno un flag a testa). Quindi chiede conferma solo dare la bacchetta. Dopo il finale restituisce una lista vuota, e così per un enigma a pavimento: non è un bersaglio di E.
 - **`clues(state)`:** restituisce i testi di `CLUES` dei flag veri, da mostrare nell'inventario.
 
 ### Azioni
@@ -317,7 +328,8 @@ Ogni azione controlla per prima cosa che la partita non sia finita.
   Rifiuta con `already_lit` se è la piastrella accesa per ultima, con `already_done` se l'enigma è già risolto, con `not_here` se la piastrella è in un'altra stanza.
 - **`leave_zone(state, floor_puzzle)`:** la chiama `main.py` quando il giocatore esce dalla zona intorno alle piastrelle. Se c'era almeno una piastrella accesa, risponde `tiles_reset` e la fase ricomincia; altrimenti rifiuta con `nothing_happens`.
 - **`use_item(state, item, target)`:** richiede che `item` sia nell'inventario e che `target` sia nella stanza.
-  - Su una porta chiusa che richiede quell'oggetto: se il giocatore ha **tutti** gli oggetti di `requires`, la apre scrivendo il proprio id nel suo `choice_flag` (per le porte finali, `chosen_door`), e da quel momento l'altra porta finale è sigillata. Con una sola metà della chiave rifiuta con `missing_item`, e spiega che manca l'altra metà.
+  - Su una porta chiusa che richiede quell'oggetto: se il giocatore ha **tutti** gli oggetti di `requires`, la apre scrivendo il proprio id nel suo `choice_flag` (`crab_door` o `angel_door`); altrimenti rifiuta con `missing_item`. Una parte di un oggetto richiesto (una metà della chiave) rifiuta con `not_fused`.
+  - Sull'incudine: fonde le parti, come in "La fusione".
   - Su un enigma o un personaggio: applica la reazione. Se non c'è una reazione il testo è "non succede niente"; se la reazione è già stata applicata è "già fatto".
   - L'oggetto resta sempre nell'inventario, anche dopo "dai".
 - **`examine(state, target)`:** restituisce solo un testo. A seconda del bersaglio è:
@@ -330,8 +342,8 @@ Ogni azione controlla per prima cosa che la partita non sia finita.
 
 ### Codici di `event`
 
-- **Azioni accettate:** `started`, `picked_up`, `entered`, `door_opened`, `flag_set`, `toggled`, `circuit_complete`, `tile_lit`, `phase_complete`, `tiles_complete`, `tiles_reset`, `ending`, `info`.
-- **Azioni rifiutate:** `needs_confirmation`, `game_over`, `not_here`, `already_have`, `guarded`, `no_item`, `barred`, `locked`, `sealed`, `already_open`, `missing_item`, `already_done`, `already_lit`, `nothing_happens`.
+- **Azioni accettate:** `started`, `picked_up`, `entered`, `door_opened`, `fused`, `flag_set`, `toggled`, `circuit_complete`, `tile_lit`, `phase_complete`, `tiles_complete`, `tiles_reset`, `ending`, `info`.
+- **Azioni rifiutate:** `needs_confirmation`, `game_over`, `not_here`, `already_have`, `guarded`, `no_item`, `barred`, `locked`, `sealed`, `already_open`, `missing_item`, `not_fused`, `already_done`, `already_lit`, `nothing_happens`.
 
 Un errore sulle piastrelle (`tiles_reset`) è un'azione accettata: cambia lo stato, quindi si salva.
 
@@ -373,7 +385,7 @@ Funzioni private di supporto:
   - le barriere che crepitano;
   - le piastrelle che lampeggiano di rosso dopo un errore (`FLASH_FRAMES`), prima di spegnersi;
   - l'alba o l'esplosione nei finali.
-- **Piastrelle:** la zona è una grata metallica; sopra, le piastrelle grigie da spente e gialle da accese, con il numero scritto dal font. La porta della stiva, finché è sbarrata, ha le sbarre e una placca d'ottone con l'incavo a mezza chiave. Le due metà della chiave nell'inventario sono l'anello e la parte con i denti.
+- **Piastrelle:** la zona è una grata metallica; sopra, le piastrelle grigie da spente e gialle da accese, con il numero scritto dal font. La porta della stiva, finché è sbarrata, ha le sbarre e una placca d'ottone con l'incavo a mezza chiave. Le due metà della chiave nell'inventario sono l'anello e la parte con i denti; la chiave fusa è intera, con il segno della saldatura. Il granchio è disegnato 32×32 e l'angelo 16×32.
 - **Generatori:** ognuno ha una lampada e una leva, e sopra la sua lettera. Accesi e spenti si distinguono a colpo d'occhio. Un cavo unisce due generatori collegati, e si illumina quando sono accesi entrambi. La chiave sull'altare è disegnata un po' più in alto, appoggiata sopra.
 
 ### Scene
@@ -397,7 +409,7 @@ La sequenza è menu → conferma → gioco → finale. Sopra il gioco possono ap
 
 ### Movimento e porte
 
-- **Movimento:** con frecce o WASD. Il giocatore si ferma contro muri, porte chiuse, enigmi, personaggi, generatori, barriere, altare e scrigno. Gli oggetti a terra e le piastrelle invece si possono calpestare.
+- **Movimento:** con frecce o WASD. Il giocatore si ferma contro muri, porte chiuse, enigmi, personaggi, generatori, barriere, altare e incudine. Gli oggetti a terra e le piastrelle invece si possono calpestare.
 - **Porte:** camminare dentro una porta chiama `enter` **una volta per contatto**. Se la porta è aperta si cambia stanza, altrimenti compare il testo del rifiuto (A1, PT04).
 - **Arrivo:** entrando da una porta si compare davanti a quella che riporta indietro.
 
@@ -443,11 +455,11 @@ La schermata dice chiaramente quale finale è ("Finale 1 di 2 — Tutti salvi").
 |---|---|---|---|
 | **PT01** Start and resume | `menu_options`; `start_new_game` con conferma; `restore_state` | `test_pt01_*`, A4, A6 | M1, M2, M3 |
 | **PT02** Explore | `things_here` e `actions_for`; "E: <azione>" nell'HUD; E senza bersagli descrive la stanza; ogni azione accettata ha un testo | `test_pt02_*` | M1, M4 |
-| **PT03** Collect and use | Inventario con I; le due metà della chiave, insieme, aprono le porte finali; niente doppioni | A2, A3, `test_pt03_*` | M1, M4, M5 |
-| **PT04** Apply consequences | `chosen_door` sigilla l'altra porta e decide il finale; ogni rifiuto ha una spiegazione, anche la mezza chiave; ogni errore sulle piastrelle si vede, si legge e si sente | A5, `test_pt04_*` | M1, M5 |
+| **PT03** Collect and use | Inventario con I; le due metà, fuse all'incudine, diventano la chiave che apre entrambe le porte finali; niente doppioni | A2, A3, `test_pt03_*` | M1, M4, M5 |
+| **PT04** Apply consequences | A chi si dà la bacchetta decide il finale; la fusione cambia per sempre l'inventario; ogni rifiuto ha una spiegazione, anche la metà non fusa; ogni errore sulle piastrelle si vede, si legge e si sente | A5, `test_pt04_*` | M1, M5 |
 | **PT05** Finish and replay | `ENDINGS` con titolo; dopo il finale ogni azione è rifiutata; schermata finale con "Nuova partita" | A5, `test_pt05_*` | M1, M4 |
 | **R1** Azioni solo con stanza e condizioni giuste | Ogni azione verifica stanza e condizioni; un rifiuto restituisce lo stato intatto; la stiva è sbarrata finché non si ha la prima metà | `test_r1_*` | M1, M5 |
-| **R2** Oggetti solo dove previsti, una volta, riutilizzabili | `room`, `appears_if` e `free_if`; `pick_up` rifiuta i doppioni; gli oggetti non si consumano | `test_r2_*`, A2, A3 | M1, M5 |
+| **R2** Oggetti solo dove previsti, una volta, riutilizzabili | `room`, `appears_if` e `free_if`; `pick_up` rifiuta i doppioni; gli oggetti non si consumano, e le metà fuse non tornano | `test_r2_*`, A2, A3 | M1, M5 |
 | **R3** Le scene ricordano i cambiamenti | Visibilità derivata; `done_text`; enigmi risolti disegnati come tali; il circuito completo e le piastrelle risolte restano tali | `test_r3_*`, A3 | M1, M4, M5 |
 | **R4** Nuova partita azzera i progressi, non la storia; ogni finale è raggiungibile | `new_game` copia i dati; `story.py` non si modifica mai | `test_r4_*`, A5 | M1 |
 | Ricordare scena, oggetti, decisioni e finale | I 4 campi dello stato | A4 | M1, M2 |
@@ -461,9 +473,9 @@ La schermata dice chiaramente quale finale è ("Finale 1 di 2 — Tutti salvi").
 | Scenario | Passi | Cosa si verifica | Milestone |
 |---|---|---|---|
 | **A1** A locked route | Nuova partita, poi `enter` sulla porta del granchio e su quella dell'angelo | Rifiuto `locked` con spiegazione; il giocatore resta sul ponte, l'inventario non cambia, lo stato è identico | M1 |
-| **A2** An unlocked route | Bacchetta, generatori (A e poi D), prima metà, piastrelle della stiva, seconda metà, ritorno sul ponte, "usa chiave" sulla porta del granchio, `enter` | Si arriva nella stanza del granchio, con le due metà ancora nell'inventario | M1, M5 |
-| **A3** No duplicate collection | Raccogli la bacchetta, vai in cabina, torna e riprova; poi lo stesso con le due metà | Rifiuto, e una sola copia di ciascun oggetto. Tornando in cabina o in stiva la metà non è più in `things_here`; riattivare un generatore o ricalpestare le piastrelle dà `already_done` | M1, M5 |
-| **A4** Resume correctly | Bacchetta, le due metà, apertura della porta del granchio (la scelta); poi salva e riapri con `load_game` e `restore_state` | Stanza, inventario e flag uguali. `door_status` e `actions_for` identici prima e dopo: stesse vie disponibili, porta dell'angelo ancora sigillata | M1 con giro JSON, M2 con il file |
+| **A2** An unlocked route | Bacchetta, generatori (A e poi D), prima metà, piastrelle della stiva, seconda metà, fusione all'incudine, ritorno sul ponte, "usa chiave fusa" sulla porta del granchio, `enter` | Si arriva nella stanza del granchio, con la chiave fusa ancora nell'inventario | M1, M5 |
+| **A3** No duplicate collection | Raccogli la bacchetta, vai in cabina, torna e riprova; poi lo stesso con le due metà | Rifiuto, e una sola copia di ciascun oggetto. Tornando in cabina o in stiva le metà non ci sono più, neanche dopo la fusione; riattivare un generatore o ricalpestare le piastrelle dà `already_done` | M1, M5 |
+| **A4** Resume correctly | Bacchetta, chiave fusa, apertura della porta del granchio; poi salva e riapri con `load_game` e `restore_state` | Stanza, inventario e flag uguali. `door_status` e `actions_for` identici prima e dopo: stesse vie disponibili, porta dell'angelo ancora chiusa e ancora da aprire | M1 con giro JSON, M2 con il file |
 | **A5** Two outcomes | Due partite nuove, una per finale | Si ottengono `saved` ed `explosion`. Dopo il finale ogni azione è rifiutata e lo stato non cambia, anche dopo aver ricaricato | M1 |
 | **A6** Restart safely | Con progressi salvati, `start_new_game` prima senza conferma, poi con conferma | Senza conferma: stato identico e file intatto. Con conferma: ponte, inventario vuoto, flag iniziali, nessun finale, file sovrascritto | M1 e M2 |
 
@@ -476,15 +488,15 @@ Avvia il gioco con `uv run python main.py` dentro `plot_twist/`. Per partire da 
 | Scenario | Cosa fare | Cosa deve succedere |
 |---|---|---|
 | **A1** | Nuova partita. Cammina contro la porta a est (chela) e poi contro quella a ovest (ala). | Compare "È chiusa a chiave". Resti sul ponte e la seconda riga dell'HUD non mostra icone di oggetti. |
-| **A2** | Raccogli la bacchetta (E). In cabina: E vicino al generatore A, poi vicino al generatore D. Raccogli la chiave dall'altare. Entra in stiva e cammina sulle piastrelle 1 2 3 4 5, poi 3 1, poi 5 2 4 3. Raccogli la seconda chiave dallo scrigno. Sul ponte: E sulla porta della chela, poi "Usa: Chiave centrale" e "Sì". Entra. | Dopo il generatore D compare "Il flusso elettrico è completo! La barriera si è dissolta!"; dopo l'ultima piastrella "Il sistema della stiva si sblocca! La barriera si è dissolta!". Alla fine sei nella stanza del granchio, con le due metà ancora nell'inventario (I). |
-| **A3** | Torna in cabina dopo aver preso la prima metà, poi in stiva dopo aver preso la seconda. Prova E vicino all'altare, a un generatore e allo scrigno; ricammina sulle piastrelle. | Né sull'altare né sullo scrigno c'è un'altra metà. Il generatore risponde "Il circuito è completo: i generatori restano accesi"; le piastrelle restano accese e non suonano. Nell'inventario c'è una sola copia di ogni metà. |
-| **A4** | A metà partita, dopo aver aperto una porta finale, chiudi la finestra. Riapri e scegli "Riprendi". | Ricompari all'ingresso della stessa stanza, con gli stessi oggetti. La porta scelta è ancora aperta e l'altra ancora sigillata. |
+| **A2** | Raccogli la bacchetta (E). In cabina: E vicino al generatore A, poi vicino al generatore D. Raccogli la chiave dall'altare. Entra in stiva e cammina sulle piastrelle 1 2 3 4 5, poi 3 1, poi 5 2 4 3. Raccogli la seconda chiave dall'incudine, poi E vicino all'incudine e "Usa: Chiave centrale". Sul ponte: E sulla porta della chela, poi "Usa: Chiave fusa". Entra. | Dopo il generatore D compare "Il flusso elettrico è completo! La barriera si è dissolta!"; dopo l'ultima piastrella "Il sistema della stiva si sblocca! La barriera si è dissolta!". All'incudine compare il testo della fusione. Alla fine sei nella stanza del granchio, con la chiave fusa ancora nell'inventario (I). |
+| **A3** | Torna in cabina dopo aver preso la prima metà, poi in stiva dopo aver preso la seconda. Prova E vicino all'altare, a un generatore e all'incudine; ricammina sulle piastrelle. | Né sull'altare né sull'incudine c'è un'altra metà. Il generatore risponde "Il circuito è completo: i generatori restano accesi"; le piastrelle restano accese e non suonano. Nell'inventario c'è una sola chiave fusa. |
+| **A4** | A metà partita, dopo aver aperto una porta finale, chiudi la finestra. Riapri e scegli "Riprendi". | Ricompari all'ingresso della stessa stanza, con gli stessi oggetti. La porta aperta è ancora aperta, e l'altra si può ancora aprire con la chiave fusa. |
 | **A5** | Gioca fino a dare la bacchetta al granchio. Poi, da una partita nuova, all'angelo. | Prima il testo dell'azione, poi la schermata finale ("Finale 1 di 2 — Tutti salvi" o "Finale 2 di 2 — La nave esplode"). Riprendendo la partita torni sulla schermata finale, e non si può più giocare. |
 | **A6** | A metà partita, Esc e poi "Ricomincia". Rispondi "No". Rifallo e rispondi "Sì". | Con "No" la partita resta com'era. Con "Sì" sei sul ponte all'inizio, senza oggetti, con la scena d'apertura. |
-| **PT04** | Dopo aver aperto la porta della chela, prova la porta dell'ala, sia camminandoci contro sia con "Usa: Chiave centrale". | Compare "si è fusa. Non si aprirà mai più". |
+| **Due porte** | Con la chiave fusa, apri la porta della chela, poi quella dell'ala, ed entra in tutte e due. | Nessuna delle due chiede conferma, si aprono entrambe e la chiave fusa resta nell'inventario. Dare la bacchetta invece chiede conferma. |
 | **Cancello** | Nuova partita. Cammina contro la porta in basso, quella della stiva. Poi prendi la prima metà della chiave e riprova. | Prima compare il testo del cancello, con l'incavo a mezza chiave, e resti sul ponte. Con la prima metà, la porta non ha più le sbarre ed entri. |
-| **Mezza chiave** | Con la sola chiave centrale, E sulla porta della chela e "Usa: Chiave centrale". | Compare che a questa chiave manca l'altra metà, senza domanda di conferma, e la porta resta chiusa. |
-| **Piastrelle** | Con l'audio acceso, in stiva: cammina su 1 e 2, poi sulla 4. Rifai 1 2 3 4 5. Esci dalla zona, rientra e cammina su 5. Poi 3 1, e 5 2 4 3. | Ogni piastrella giusta si accende con un "blip". La 4 fa "BZZZ": le piastrelle lampeggiano di rosso e si spengono. Con la 5 si sente il "ding" e compare "Fase 2: Il Ritorno", con la 5 che resta accesa. Uscendo dalla zona si sente di nuovo "BZZZ" e la 5 si spegne. Alla fine c'è la fanfara, compare il messaggio di vittoria, la barriera intorno allo scrigno sparisce e si raccoglie la seconda chiave. |
+| **Mezza chiave** | Con le due metà non ancora fuse, E sulla porta della chela e "Usa: Chiave centrale". Poi, con una metà sola, prova a usarla sull'incudine. | Sulla porta compare che la metà va fusa all'incudine, e la porta resta chiusa. Sull'incudine compare che manca l'altra metà. |
+| **Piastrelle** | Con l'audio acceso, in stiva: cammina su 1 e 2, poi sulla 4. Rifai 1 2 3 4 5. Esci dalla zona, rientra e cammina su 5. Poi 3 1, e 5 2 4 3. | Ogni piastrella giusta si accende con un "blip". La 4 fa "BZZZ": le piastrelle lampeggiano di rosso e si spengono. Con la 5 si sente il "ding" e compare "Fase 2: Il Ritorno", con la 5 che resta accesa. Uscendo dalla zona si sente di nuovo "BZZZ" e la 5 si spegne. Alla fine c'è la fanfara, compare il messaggio di vittoria, la barriera intorno all'incudine sparisce e si raccoglie la seconda chiave. |
 | **Generatori** | Nuova partita, entra in cabina. Attiva B. Esci e rientra. Prova a raggiungere la chiave. Poi attiva A e D. | Con B si accendono A e D e si spegne B: lampade e cavi cambiano subito, con un "Clic!" che non blocca. Rientrando i generatori sono di nuovo come all'inizio (A e D spenti, B e C accesi). Finché c'è la barriera la chiave non si raggiunge. Con A e D la barriera sparisce. |
 
 ## 11. Altri test
@@ -607,8 +619,8 @@ Due cose previste per M4 sono arrivate già qui:
 ### M5 — Enigmi veri
 
 **Stato: fatta nel codice.** I due enigmi sono veri (§4): gli interruttori collegati in cabina e le piastrelle in stiva. La chiave è divisa in due metà, una per enigma, e la stiva è sbarrata finché non si ha la prima.
-- **Test:** 207 verdi. Tra questi c'è una partita completa giocata solo con i tasti, piastrelle comprese, camminandoci sopra.
-- **Bug inseriti apposta:** vengono scoperti tutti i 15 dei generatori e i 40 delle piastrelle, delle due metà della chiave e dei suoni. Vengono ancora scoperti anche quelli delle milestone precedenti: 23 nel motore, 9 nel salvataggio, 15 di M3, 13 di M4 e 11 di M6.
+- **Test:** 216 verdi. Tra questi c'è una partita completa giocata solo con i tasti, piastrelle comprese, camminandoci sopra.
+- **Bug inseriti apposta:** vengono scoperti tutti i 15 dei generatori, i 40 delle piastrelle e dei suoni, e i 13 dell'incudine, della chiave fusa e dei personaggi più grandi. Vengono ancora scoperti anche quelli delle milestone precedenti: 23 nel motore, 9 nel salvataggio, 15 di M3, 13 di M4 e 11 di M6.
 - **Nel gioco vero:** una partita registrata senza finestra, camminando, fino al finale. I suoni sono partiti nell'ordine giusto.
 - **Manca:** la checklist manuale (§10) sul gioco vero, e misurare se chi non conosce le soluzioni ci mette circa 10 minuti.
 
@@ -650,10 +662,13 @@ Gli sprite e il font sono originali, disegnati come testo: si modificano cambian
   - "configurazione iniziale all'ingresso nella stanza" vuol dire che i generatori tornano come all'inizio ogni volta che si entra in cabina dal ponte. Riprendendo una partita invece si ritrovano come sono stati salvati, perché si riprende lo stato salvato (A4);
   - a circuito completo i generatori restano accesi e non si attivano più;
   - la chiave si vede sull'altare da subito, dietro la barriera: si può esaminare, ma non raccogliere.
-- **Le due metà della chiave:**
-  - si chiamano come nelle consegne, "Chiave centrale" (cabina) e "Seconda chiave" (stiva); le descrizioni dicono che sono due metà, e i due sprite si incastrano;
-  - le porte finali vogliono entrambe. Nel menu di E si usa l'una o l'altra, ma la porta si apre solo se le hai tutte e due;
-  - gli oggetti non si consumano: dopo, le due metà restano nell'inventario.
+- **Le due metà della chiave e l'incudine:**
+  - le metà si chiamano come nelle consegne, "Chiave centrale" (cabina) e "Seconda chiave" (stiva); fuse diventano la "Chiave fusa";
+  - l'incudine prende il posto dello scrigno, dietro la stessa barriera, con sopra la seconda metà. Si fonde usando una delle due metà sull'incudine;
+  - fondendo, le due metà spariscono dall'inventario: è l'unico caso in cui un oggetto si trasforma. La chiave fusa invece non si consuma, e apre entrambe le porte;
+  - le porte finali non si sigillano più a vicenda, quindi aprirle non chiede conferma: la scelta che decide il finale è solo a chi dare la bacchetta. Il motore sa ancora sigillare porte che condividono un flag (c'è un test), ma nessuna lo fa;
+  - un salvataggio delle versioni precedenti, con il vecchio flag `chosen_door`, non si riprende più: va iniziata una nuova partita.
+- **Granchio e angelo:** cambia solo l'aspetto. Il granchio occupa 2×2 caselle, quattro volte l'area di prima; l'angelo 1×2, il doppio. Fanno e dicono le stesse cose.
 - **Il cancello della stiva:** sta sulla porta del ponte che porta in stiva, quindi sbarra tutta la stiva, barile compreso. Si apre da solo appena hai la prima metà della chiave, senza doverla usare. La consegna dice sia "finché il primo enigma non è risolto" sia "una volta ottenuto il pezzo della chiave": vale la seconda, che in pratica coincide.
 - **Enigma delle piastrelle:**
   - la Fase 2 e la Fase 3 partono con la prima piastrella già accesa, quella su cui il giocatore sta;
@@ -661,4 +676,4 @@ Gli sprite e il font sono originali, disegnati come testo: si modificano cambian
   - una piastrella sbagliata quando non ce n'è nessuna accesa fa comunque "BZZZ". Uscire dalla zona senza luci accese invece non fa niente, perché è solo camminare;
   - riprendendo una partita salvata a metà fase, le luci restano come erano: si riprende lo stato salvato (A4);
   - i suoni sono fatti nel codice; oltre a "BZZZ" e al suono di conferma della consegna c'è un "blip" a ogni passo giusto e una fanfara alla vittoria. Solo questo enigma ha suoni;
-  - per dare un indizio, i nomi delle fasi della consegna sono incisi sullo scrigno e annunciati a ogni cambio di fase.
+  - per dare un indizio, i nomi delle fasi della consegna sono incisi sull'incudine e annunciati a ogni cambio di fase.

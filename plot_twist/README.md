@@ -74,10 +74,10 @@ Qualche aiuto:
   - in alto, la cabina del capitano;
   - in basso, la stiva, chiusa da un cancello;
   - a destra e a sinistra, due porte chiuse a chiave.
-- La chiave delle porte chiuse è spezzata in due metà: ogni enigma ne nasconde una.
-- Puoi aprire **una sola** delle due porte: l'altra si sigilla per sempre. Dietro ognuna c'è qualcuno che vuole la tua bacchetta, e a chi la dai decide il finale.
+- La chiave delle porte chiuse è spezzata in due metà: ogni enigma ne nasconde una. Le metà da sole non girano: vanno fuse sull'incudine della stiva.
+- Con la chiave fusa si aprono tutte e due le porte. Dietro ognuna c'è qualcuno che vuole la tua bacchetta, e a chi la dai decide il finale.
 - **Indizio per la cabina:** i quattro generatori sono collegati da cavi, e attivarne uno cambia anche quelli collegati. Devi accenderli tutti insieme.
-- **Indizio per la stiva:** le cinque piastrelle numerate si calpestano, in tre prove una dopo l'altra. Una piastrella sbagliata, o uscire dalla grata intorno, fa ricominciare la prova in corso: "BZZZ!". I nomi delle prove sono incisi sullo scrigno: esamina la barriera che lo avvolge.
+- **Indizio per la stiva:** le cinque piastrelle numerate si calpestano, in tre prove una dopo l'altra. Una piastrella sbagliata, o uscire dalla grata intorno, fa ricominciare la prova in corso: "BZZZ!". I nomi delle prove sono incisi sull'incudine: esamina la barriera che la avvolge.
 
 ## 6. Il salvataggio
 
@@ -119,10 +119,11 @@ uv run pytest
      - **L'Onda:** 1, 2, 3, 4, 5;
      - **Il Ritorno**, partendo dalla 5 su cui sei: 3, 1;
      - **Il Cortocircuito**, partendo dalla 1 su cui sei: 5, 2, 4, 3.
-   - La barriera sparisce: prendi la Seconda chiave dallo scrigno.
-4. Torna sul ponte. Vicino alla porta a destra, quella con la chela, premi E, scegli "Usa: Chiave centrale" e poi "Sì". Entra.
+   - La barriera sparisce: prendi la Seconda chiave dall'incudine.
+   - Vicino all'incudine premi E e scegli "Usa: Chiave centrale" (o la seconda): le due metà diventano la Chiave fusa.
+4. Torna sul ponte. Vicino alla porta a destra, quella con la chela, premi E e scegli "Usa: Chiave fusa". Entra.
 5. Vicino al granchio premi E, scegli "Dai: Bacchetta magica" e poi "Sì": **Finale 1 di 2 — Tutti salvi**.
 
-Per l'altro finale, in una nuova partita apri la porta a sinistra, quella con l'ala, e dai la bacchetta all'angelo: **Finale 2 di 2 — La nave esplode**.
+Per l'altro finale apri anche la porta a sinistra, quella con l'ala (la chiave fusa apre tutte e due), e dai la bacchetta all'angelo: **Finale 2 di 2 — La nave esplode**.
 
 </details>
