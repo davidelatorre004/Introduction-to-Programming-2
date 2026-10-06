@@ -188,7 +188,7 @@ def actions_for(state, target):
         label = story.MESSAGES["label_enter"].format(room=destination)
         return [_action("enter", target, label)]
 
-    # A closed door, a puzzle or a character: look at it, or use an item on it.
+    # A closed door, a puzzle, a character, a barrier or an altar: look at it, or use an item on it.
     if kind == "character":
         actions = [_action("examine", target, story.MESSAGES["label_talk"])]
         use_label = story.MESSAGES["label_give"]
@@ -277,6 +277,8 @@ def activate(state, switch):
 
 def use_item(state, item, target):
     """Use an item from the inventory on something in the room: a door, a puzzle or a character.
+
+    On anything else (a generator, a barrier, an altar) nothing happens.
 
     The item is never used up: it stays in the inventory, even after giving it away.
     """

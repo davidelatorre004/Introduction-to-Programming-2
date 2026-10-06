@@ -103,8 +103,10 @@ ROOM_COLORS = {
 }
 DEFAULT_ROOM_COLORS = ((100, 100, 100), (50, 50, 50))
 
-# The color of each item, puzzle and character. An id missing here is drawn in
-# magenta, so something new in story.py shows up even before it has a color.
+# The color of each item and of each thing standing in a room, for when it has no
+# sprite. Generators need none: they are bright when on and dim when off. An id
+# missing here is drawn in magenta, so something new in story.py shows up even
+# before it has a color.
 THING_COLORS = {
     "wand": (180, 110, 255),
     "key": (250, 210, 70),
@@ -177,7 +179,9 @@ def wall_rects(room):
 
 
 def solid_rects(state):
-    """Everything the player cannot walk through right now: walls, closed doors, puzzles and characters.
+    """Everything the player cannot walk through right now: walls, closed doors and whatever stands in the room.
+
+    That is puzzles, characters, generators, altars, and the barrier until it dissolves.
 
     Items on the floor are not solid: the player can walk over them.
     """
