@@ -21,19 +21,17 @@ Un breve gioco 8-bit: ti svegli sul ponte di una nave alla deriva, con una bacch
 
 ## 2. Scarica il gioco
 
-Il gioco è sul branch `claude/funny-ramanujan-ffrx60`. **Su `main` non c'è.**
+Il gioco è sul branch `claude/funny-ramanujan-ffrx60`. **Su `main` non c'è.** Il repository è privato: GitHub ti chiederà di accedere con il tuo account.
 
-**Con git**, se hai già il repository sul computer:
+**Con git.** Nel terminale, dalla cartella dove vuoi mettere il gioco (va bene anche quella in cui si apre il terminale):
 ```
-cd Introduction-to-Programming-2
+git clone -b claude/funny-ramanujan-ffrx60 https://github.com/davidelatorre004/Introduction-to-Programming-2.git
+```
+Si crea la cartella `Introduction-to-Programming-2`, già sul branch giusto.
+
+Se invece il repository ce l'hai già sul computer, entra nella sua cartella e prendi il branch:
+```
 git fetch origin
-git checkout claude/funny-ramanujan-ffrx60
-```
-
-Se non ce l'hai ancora:
-```
-git clone https://github.com/davidelatorre004/Introduction-to-Programming-2.git
-cd Introduction-to-Programming-2
 git checkout claude/funny-ramanujan-ffrx60
 ```
 
@@ -44,11 +42,13 @@ git checkout claude/funny-ramanujan-ffrx60
 
 ## 3. Avvia il gioco
 
-Dal terminale, entra nella cartella `plot_twist` (quella con `main.py`) e lancia il gioco:
+Dal terminale, entra nella cartella `plot_twist` (quella con `main.py`) e lancia il gioco. Se hai appena fatto `git clone`:
 ```
-cd plot_twist
+cd Introduction-to-Programming-2/plot_twist
 uv run python main.py
 ```
+
+Su Windows c'è una scorciatoia: apri la cartella `plot_twist` in Esplora file, scrivi `powershell` nella barra dell'indirizzo e premi Invio. Si apre PowerShell già in quella cartella.
 
 La prima volta uv installa pygame: ci vuole qualche secondo. Poi si apre la finestra del gioco. Se i tasti non rispondono, clicca una volta sulla finestra.
 
@@ -90,6 +90,7 @@ Qualche aiuto:
 | Problema | Soluzione |
 |---|---|
 | `uv: command not found`, o "uv non è riconosciuto" | Installa uv (punto 1), poi chiudi e riapri il terminale |
+| `'origin' does not appear to be a git repository`, o `pathspec ... did not match` | Non sei nella cartella del repository: scaricalo con `git clone` (punto 2), oppure entra nella sua cartella |
 | `can't open file 'main.py'` | Non sei nella cartella giusta: entra in `plot_twist` |
 | Non trovi la cartella `plot_twist` | Sei su `main`: fai `git checkout claude/funny-ramanujan-ffrx60` |
 | La finestra non si vede | Cercala dietro le altre finestre, o nel Dock su Mac |
