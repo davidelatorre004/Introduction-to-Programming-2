@@ -1687,6 +1687,8 @@ MESSAGES = {
     "inventory_empty": "You have not picked up anything yet.",
     "clues": "Clues",
     "close_hint": "I or Esc to close",
+    "scroll_hint": "Up/Down: scroll · I or Esc: close",
+    "clues_none": "No clues yet.",
     # Shown if the save file cannot be written (for example, the disk is full).
     "save_failed": "The game cannot be saved: progress from here on could be lost.",
 }

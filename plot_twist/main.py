@@ -488,18 +488,32 @@ def prompt(state, position):
 
 def inventory_lines(state):
     """What the inventory screen lists, as (style, text) pairs: the items and their descriptions, then the clues."""
-    lines = []
-    if not state["inventory"]:
-        lines.append(("text", story.MESSAGES["inventory_empty"]))
-    for item in state["inventory"]:
-        lines.append(("name", story.ITEMS[item]["name"]))
-        lines.append(("text", story.ITEMS[item]["description"]))
+    lines = item_lines(state)
     found = engine.clues(state)
     if found:
         lines.append(("heading", story.MESSAGES["clues"]))
         for clue in found:
             lines.append(("text", clue))
     return lines
+
+
+def item_lines(state):
+    """The items carried, as (style, text) pairs: each name, then its description."""
+    if not state["inventory"]:
+        return [("text", story.MESSAGES["inventory_empty"])]
+    lines = []
+    for item in state["inventory"]:
+        lines.append(("name", story.ITEMS[item]["name"]))
+        lines.append(("text", story.ITEMS[item]["description"]))
+    return lines
+
+
+def clue_lines(state):
+    """The clues found, as (style, text) pairs, in the order of story.CLUES."""
+    found = engine.clues(state)
+    if not found:
+        return [("dim", story.MESSAGES["clues_none"])]
+    return [("text", clue) for clue in found]
 
 
 # --- Text ----------------------------------------------------------------------------
@@ -571,6 +585,7 @@ def new_app(fonts):
         "zones": set(),          # the floor puzzles whose zone the player was in, in the last frame
         "flash_frames": 0,       # frames left of the tiles blinking red after a mistake
         "fx": effects.new_fx(),  # the visual effects: particles, dissolves, the warp (see effects.py)
+        "inventory_scroll": 0,   # how many rows the list of items is scrolled down
     }
     open_main_menu(app)
     return app
@@ -883,6 +898,8 @@ def handle_key(app, key):
     elif scene == "inventory":
         if key == pygame.K_i or key == pygame.K_ESCAPE or key in CONFIRM_KEYS:
             set_scene(app, "play")
+        elif key in UP_KEYS or key in DOWN_KEYS:
+            scroll_inventory(app, -1 if key in UP_KEYS else 1)
     elif scene == "character":
         handle_character_key(app, key)
     else:
@@ -912,6 +929,7 @@ def handle_play_key(app, key):
     elif key == pygame.K_e:
         interact(app)
     elif key == pygame.K_i:
+        app["inventory_scroll"] = 0  # the list of items always opens at the top
         set_scene(app, "inventory")
 
 
@@ -1015,6 +1033,8 @@ def show_outcome(app, action, before, after, outcome):
     fx = app["fx"]
     event = outcome["event"]
     target = action.get("target")
+    if len(engine.clues(after)) > len(engine.clues(before)):
+        show_new_clue(app, action)
     if effects.FX["barriers"] and after["room"] == before["room"]:
         for barrier in standing_barriers(before) - standing_barriers(after):
             fx["fading"].append({"rect": thing_rect(barrier), "frames": effects.BARRIER_FADE_FRAMES})
@@ -1047,6 +1067,18 @@ def show_outcome(app, action, before, after, outcome):
         else:
             x, y = player_rect(app["player"]).center
         effects.spawn(fx, x, y, effects.MISTAKE_SPARKS, effects.RED, speed=1.8, life=24, gravity=0.05)
+
+
+def show_new_clue(app, action):
+    """A clue was just found: the chime, and a glow with twinkles on the thing that gave it."""
+    sounds.play("clue")
+    target = action.get("target")
+    if not effects.FX["clues"] or target not in story.OBJECTS and target not in story.ITEMS:
+        return
+    rect = thing_rect(target)
+    app["fx"]["clue"] = {"rect": rect, "age": 0}
+    effects.spawn(app["fx"], rect.centerx, rect.centery, effects.CLUE_SPARKS, effects.CLUE, speed=1.6, life=40,
+                  up=0.4)
 
 
 def lighter(color, amount=60):
@@ -1103,6 +1135,11 @@ def update_effects(app):
             side = 1 if app["facing"][0] >= 0 else -1
             effects.spawn(fx, body.centerx + side * 5, body.bottom - 3 - climb * 12, 1, [(255, 236, 140), (186, 116, 255)],
                           speed=0.2, life=16, up=0.5)
+        clue = fx["clue"]
+        if clue is not None and clue["age"] % effects.CLUE_TWINKLE_EVERY == 0:
+            area = clue["rect"].inflate(10, 10)
+            effects.spawn(fx, rng.uniform(area.left, area.right), rng.uniform(area.top, area.bottom), 1, effects.CLUE,
+                          speed=0.3, life=22, up=0.3)
         if fx["fuse"] is not None and fx["fuse"]["age"] == FUSE_MEET:
             x, y = fx["fuse"]["center"]
             effects.spawn(fx, x, y, effects.FUSE_SPARKS, effects.WELD, speed=2.6, life=36, gravity=0.08, up=0.6)
@@ -1652,6 +1689,7 @@ def draw_room(app, screen):
     # The effects on top: barriers dissolving, the key welding, particles, dust, and the light.
     draw_fading_barriers(app, screen)
     draw_fusing_key(app, screen)
+    effects.draw_clue_glow(screen, app["fx"])
     effects.draw_particles(screen, app["fx"]["particles"])
     effects.draw_dust(screen, app["fx"], app["frame"])
     draw_lights(app, screen, things)
@@ -1903,21 +1941,98 @@ def draw_actions(app, screen):
     draw_menu(app, screen, box.top + DIALOG_PADDING + line_height)
 
 
-def draw_inventory(app, screen):
-    """The inventory screen: the items carried, what they look like, and the clues found."""
+INVENTORY_BOX = pygame.Rect(16, HUD_HEIGHT + 8, WIDTH - 32, HEIGHT - HUD_HEIGHT - 24)
+CLUE_COLUMN = 82      # width of the clues column, on the left
+COLUMN_TOP = 24       # where the columns start, under the titles
+COLUMN_BOTTOM = 22    # room left at the bottom for the hint
+
+
+def column_rows(app, lines, width):
+    """The lines of a column of the inventory, wrapped to its width, one (style, text) per row.
+
+    Every item name after the first one gets an empty row above it, to keep the items apart.
+    """
+    measure = text_width(app["fonts"]["text"])
+    rows = []
+    for style, text in lines:
+        if style == "name" and rows:
+            rows.append(("space", ""))
+        rows += [(style, line) for line in wrap(text, width, measure)]
+    return rows
+
+
+def inventory_columns():
+    """The two columns of the inventory screen: the clues on the left, the items on the right."""
+    box = INVENTORY_BOX
+    clues = pygame.Rect(box.left + 8, box.top + COLUMN_TOP, CLUE_COLUMN - 8, box.height - COLUMN_TOP - COLUMN_BOTTOM)
+    items = pygame.Rect(box.left + CLUE_COLUMN + 8, clues.top, box.right - 8 - (box.left + CLUE_COLUMN + 8), clues.height)
+    return clues, items
+
+
+def visible_rows(app, column):
+    return column.height // app["fonts"]["text"].get_linesize()
+
+
+def inventory_scroll_limit(app):
+    """How far down the list of items can scroll: until its last row is in view."""
+    _, items = inventory_columns()
+    rows = column_rows(app, item_lines(app["state"]), items.width)
+    return max(0, len(rows) - visible_rows(app, items))
+
+
+def scroll_inventory(app, direction):
+    """Up or down the list of items, one item at a time: the next item's name goes to the top."""
+    _, items = inventory_columns()
+    rows = column_rows(app, item_lines(app["state"]), items.width)
+    starts = [index for index, (style, _) in enumerate(rows) if style == "name"] or [0]
+    now = app["inventory_scroll"]
+    if direction > 0:
+        later = [start for start in starts if start > now]
+        target = later[0] if later else now
+    else:
+        earlier = [start for start in starts if start < now]
+        target = earlier[-1] if earlier else 0
+    app["inventory_scroll"] = max(0, min(target, inventory_scroll_limit(app)))
+
+
+def draw_column(app, screen, column, rows, first=0):
+    """Draw the rows of a column from row `first`, as many as fit."""
     font = app["fonts"]["text"]
-    colors = {"name": COLORS["highlight"], "text": COLORS["text"], "heading": COLORS["dim_text"]}
-    box = pygame.Rect(16, HUD_HEIGHT + 8, WIDTH - 32, HEIGHT - HUD_HEIGHT - 24)
+    colors = {"name": COLORS["highlight"], "text": COLORS["text"], "heading": COLORS["dim_text"], "dim": COLORS["dim_text"]}
+    for index, (style, line) in enumerate(rows[first:first + visible_rows(app, column)]):
+        if style != "space":
+            draw_text(screen, font, line, colors[style], (column.left, column.top + index * font.get_linesize()))
+
+
+def draw_inventory(app, screen):
+    """The inventory screen: the clues found on the left, the items carried on the right.
+
+    The items can be many: up and down scroll their column, and small arrows say
+    there is more above or below.
+    """
+    font = app["fonts"]["text"]
+    box = INVENTORY_BOX
     draw_box(screen, box)
-    draw_text(screen, font, story.MESSAGES["inventory"], COLORS["dim_text"], (WIDTH // 2, box.top + 8), "center")
-    y = box.top + 24
-    for style, text in inventory_lines(app["state"]):
-        if style != "text":
-            y += 4  # a little space before each item and before the clues
-        for line in wrap(text, box.width - 20, text_width(font)):
-            draw_text(screen, font, line, colors[style], (box.left + 10, y))
-            y += font.get_linesize()
-    draw_text(screen, font, story.MESSAGES["close_hint"], COLORS["dim_text"], (WIDTH // 2, box.bottom - 18), "center")
+    clues, items = inventory_columns()
+    draw_text(screen, font, story.MESSAGES["clues"], COLORS["dim_text"], (clues.centerx, box.top + 8), "center")
+    draw_text(screen, font, story.MESSAGES["inventory"], COLORS["dim_text"], (items.centerx, box.top + 8), "center")
+    divider = box.left + CLUE_COLUMN
+    pygame.draw.line(screen, COLORS["dim_text"], (divider, box.top + 8), (divider, box.bottom - COLUMN_BOTTOM))
+    draw_column(app, screen, clues, column_rows(app, clue_lines(app["state"]), clues.width))
+    rows = column_rows(app, item_lines(app["state"]), items.width)
+    app["inventory_scroll"] = min(app["inventory_scroll"], inventory_scroll_limit(app))
+    first = app["inventory_scroll"]
+    draw_column(app, screen, items, rows, first)
+    x = items.right - 3
+    if first > 0:  # more above
+        pygame.draw.polygon(screen, COLORS["highlight"], [(x - 3, items.top + 3), (x + 3, items.top + 3), (x, items.top)])
+    if first < inventory_scroll_limit(app):  # more below
+        y = items.bottom - 1
+        pygame.draw.polygon(screen, COLORS["highlight"], [(x - 3, y - 3), (x + 3, y - 3), (x, y)])
+    hint = story.MESSAGES["close_hint"]
+    if inventory_scroll_limit(app) > 0:
+        hint = story.MESSAGES["scroll_hint"]
+    draw_text(screen, font, hint, COLORS["dim_text"], (WIDTH // 2, box.bottom - 16), "center")
 
 
 def draw_rescue(app, scene, time):

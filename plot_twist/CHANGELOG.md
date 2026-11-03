@@ -2,9 +2,18 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v19](versions/v19.md) - Visual effects (2026-11-03)
+## [v20](versions/v20.md) - Clues on the left, and a chime for a new one (2026-11-03)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- The inventory screen (I) has two columns: the clues found on the left (or "No clues yet."), the items carried on the right. Same box, same font, same clues in the same order.
+- The list of items can be longer than the box: up and down scroll it one item at a time, small arrows show there is more above or below, and it always opens at the top.
+- When a clue is found, the thing that gave it (the barrel of the hold) glows softly, with four short rays turning around it and twinkles for about a second, and a new light chime plays (`clue` in `sounds.py`). The effect can be switched off with `FX["clues"]` in `effects.py`.
+- Nothing changed in what is found, or when.
+
+## [v19](versions/v19.md) - Visual effects (2026-11-03)
+
+In commit [`937d09f`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/937d09f5e395ce5d3cb09a3844ddd682f0c7a36f/plot_twist).
 
 - A new module, `effects.py`: particles, banded 8-bit glows, pixel-by-pixel dissolves, floor ripples and the portal warp. Each effect can be switched off in its `FX` table, and its timing and size are constants at the top of the file. The rules of the game did not change.
 - Generators: a lamp that is on glows and pulses, and sparks jump from its lever. Lit cables pulse, with a spot of current running along them. When seven generators are on, the last one trembles and blushes red.

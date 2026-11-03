@@ -19,6 +19,7 @@ EFFECTS = {
     "ding": [(784, 0.07), (1175, 0.16)],                               # a phase is complete
     "fanfare": [(523, 0.08), (659, 0.08), (784, 0.08), (1047, 0.3)],   # the puzzle is solved
     "buzz": [(98, 0.12), (0, 0.04), (98, 0.3)],                        # BZZZ: a mistake, the lights go out
+    "clue": [(988, 0.05), (1319, 0.05), (0, 0.02), (1976, 0.22)],      # a new clue: a light, rising chime
 }
 
 _loaded = {}  # effect name -> pygame Sound, once load() has run with audio

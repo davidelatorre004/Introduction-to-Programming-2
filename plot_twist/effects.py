@@ -37,6 +37,7 @@ FX = {
     "wand": True,           # the spark up the arm, the glow on the inventory icon
     "dust": True,           # dust and salt floating in the rooms indoors
     "lights": True,         # swinging lanterns, pulsing crystals
+    "clues": True,          # a glow and twinkles on the thing that gave a new clue
 }
 
 # --- Timing and sizes (frames are 1/60 of a second) --------------------------------------
@@ -70,6 +71,11 @@ FLASH_FRAMES = 14            # how long a white flash lasts
 
 WAND_RISE_FRAMES = 40        # how long the spark climbs up the arm
 
+CLUE_FRAMES = 75             # how long the glow of a new clue lasts (a bit more than a second)
+CLUE_SPARKS = 22             # the twinkles thrown at the start
+CLUE_TWINKLE_EVERY = 5       # frames between two twinkles after that
+CLUE_GLOW = 16               # radius of the glow
+
 DUST_PER_TILES = 14          # one speck of dust for this many tiles of floor
 DUST_MAX = 70
 
@@ -83,6 +89,7 @@ SPARK = [(255, 236, 140), (255, 255, 255), (255, 190, 80)]
 ENERGY = [(112, 232, 255), (210, 250, 255), (56, 148, 200)]
 PURPLE = [(186, 116, 255), (230, 200, 255), (112, 62, 176)]
 RED = [(255, 90, 70), (214, 64, 52), (255, 170, 120)]
+CLUE = [(255, 236, 140), (255, 255, 255), (150, 230, 255)]  # gold, white and a touch of magic
 WELD = [(255, 255, 255), (255, 230, 120), (255, 150, 50), (255, 110, 40)]
 LIQUID = {                    # the cauldron, for each step of the recipe
     0: (54, 70, 78),          # nothing yet: dark water
@@ -110,6 +117,7 @@ def new_fx():
         "waves": [],         # rings spreading from a lit tile: {"center", "age"}
         "fuse": None,        # the halves welding: {"center", "age"}
         "wand_rise": None,   # the spark up the arm: {"age"}
+        "clue": None,        # the glow on what gave a new clue: {"rect", "age"}
         "warp": 0,           # frames left of the purple warp
         "flash": 0,          # frames left of the white flash
     }
@@ -122,6 +130,7 @@ def reset_room(fx, room, floor, indoor):
     fx["fading"] = []
     fx["waves"] = []
     fx["fuse"] = None
+    fx["clue"] = None
     fx["dust"] = []
     if not (FX["dust"] and indoor):
         return
@@ -208,6 +217,10 @@ def update(fx):
         fx["wand_rise"]["age"] += 1
         if fx["wand_rise"]["age"] >= WAND_RISE_FRAMES:
             fx["wand_rise"] = None
+    if fx["clue"] is not None:
+        fx["clue"]["age"] += 1
+        if fx["clue"]["age"] >= CLUE_FRAMES:
+            fx["clue"] = None
     if fx["warp"] > 0:
         fx["warp"] -= 1
     if fx["flash"] > 0:
@@ -345,6 +358,26 @@ def draw_warp(screen, view, fx):
     if fx["warp"] % 2 == 0:
         spawn(fx, view.centerx, view.centery, 6, PURPLE, speed=3.0, life=26, layer="screen")
     draw_particles(screen, fx["screen"])
+
+
+def draw_clue_glow(surface, fx):
+    """A new clue: a soft glow on the thing that gave it, swelling then fading, and four short rays
+    turning around it like a twinkling star."""
+    clue = fx["clue"]
+    if clue is None:
+        return
+    progress = clue["age"] / CLUE_FRAMES
+    strength = math.sin(math.pi * min(1.0, progress * 1.4))  # swells quickly, fades slowly
+    center = clue["rect"].center
+    glow(surface, center, CLUE_GLOW, (110, 95, 40), strength)
+    length = round(3 + 6 * strength)
+    turn = clue["age"] * 0.06
+    for ray in range(4):
+        angle = turn + ray * math.pi / 2
+        for step in range(2, length):
+            x = center[0] + round(step * math.cos(angle))
+            y = center[1] + round(step * math.sin(angle))
+            surface.fill(CLUE[1] if step < length - 1 else CLUE[0], (x, y, 1, 1))
 
 
 def draw_flash(screen, view, fx, color=(255, 255, 255)):

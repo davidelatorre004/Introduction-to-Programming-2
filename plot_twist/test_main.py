@@ -1336,3 +1336,61 @@ def test_the_choice_screen_can_be_drawn(app):
     for index in range(len(main.character_entries())):
         app["menu_index"] = index
         main.draw(app, screen)
+
+
+# --- The inventory: clues on the left, items on the right ------------------------------
+
+
+def test_inventory_shows_the_clues_left_and_the_items_right(app):
+    playing(app, IN_THE_HOLD + [act("use_item", "hold_puzzle", "wand")])
+    clues, items = main.inventory_columns()
+    assert clues.right < items.left  # two columns, the clues first
+    assert main.clue_lines(app["state"]) == [("text", story.CLUES["crab_truthful"])]
+    assert main.item_lines(app["state"])[0] == ("name", story.ITEMS["wand"]["name"])
+    assert main.clue_lines(engine.new_game()) == [("dim", story.MESSAGES["clues_none"])]
+    press(app, pygame.K_i)
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+
+
+def test_a_long_inventory_scrolls_one_item_at_a_time(app):
+    """With seven items the list does not fit: down jumps to the next item, never past the end; up goes back."""
+    playing(app, TINCTURES_FOUND[:-1])
+    press(app, pygame.K_i)
+    assert app["scene"] == "inventory" and app["inventory_scroll"] == 0
+    limit = main.inventory_scroll_limit(app)
+    assert limit > 0
+    _, items = main.inventory_columns()
+    rows = main.column_rows(app, main.item_lines(app["state"]), items.width)
+    press(app, pygame.K_DOWN)
+    assert rows[app["inventory_scroll"]] == ("name", story.ITEMS["key"]["name"])
+    for _ in range(20):
+        press(app, pygame.K_DOWN)
+    assert app["inventory_scroll"] == limit  # the last item is in view, no further
+    press(app, pygame.K_UP)
+    assert 0 < app["inventory_scroll"] < limit
+    for _ in range(20):
+        press(app, pygame.K_w)
+    assert app["inventory_scroll"] == 0
+    press(app, pygame.K_DOWN, pygame.K_i, pygame.K_i)  # closing and opening again starts at the top
+    assert app["scene"] == "inventory" and app["inventory_scroll"] == 0
+
+
+def test_a_new_clue_chimes_and_glows_on_the_barrel(app, heard):
+    playing(app, IN_THE_HOLD)
+    stand_next_to(app, "hold_puzzle")
+    press(app, pygame.K_e)
+    choose_in_menu(app, "use_item", "wand")
+    assert "clue" in heard
+    assert app["fx"]["clue"]["rect"] == main.thing_rect("hold_puzzle")
+    read_all(app)
+    for _ in range(main.effects.CLUE_FRAMES):
+        main.update(app, 0, 0)
+    assert app["fx"]["clue"] is None
+    press(app, pygame.K_e)  # the clue is already known: using the wand again is refused, and nothing glows
+    choose_in_menu(app, "use_item", "wand")
+    assert app["fx"]["clue"] is None and heard.count("clue") == 1
+
+
+def test_the_clue_sound_exists():
+    assert "clue" in sounds.EFFECTS
