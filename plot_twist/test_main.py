@@ -89,8 +89,8 @@ def dialog_text(app):
 
 
 def start_new_game(app):
-    """Choose "Nuova partita" on a menu without saves, and read the opening scene."""
-    press(app, pygame.K_RETURN)
+    """Choose "New game" on a menu without saves, keep the first character, and read the opening scene."""
+    press(app, pygame.K_RETURN, pygame.K_RETURN)
     read_all(app)
 
 
@@ -496,7 +496,7 @@ def test_a_locked_door_speaks_once_per_push(app):
 
 
 def test_player_cannot_move_while_reading(app):
-    press(app, pygame.K_RETURN)  # the opening scene is on screen
+    press(app, pygame.K_RETURN, pygame.K_RETURN)  # the opening scene is on screen
     before = app["player"]
     for _ in range(30):
         main.update(app, 1, 0)
@@ -517,6 +517,8 @@ def test_menu_offers_resume_only_when_a_game_is_saved(app):
 
 
 def test_new_game_shows_the_opening_scene_and_saves_at_once(app):
+    press(app, pygame.K_RETURN)
+    assert app["scene"] == "character"  # first the choice of the character
     press(app, pygame.K_RETURN)
     assert app["scene"] == "play"
     assert dialog_text(app) == story.MESSAGES["intro"]
@@ -549,7 +551,10 @@ def test_new_game_over_a_save_asks_first(app):
     press(again, pygame.K_RETURN)  # "No"
     assert again["scene"] == "menu"
     assert save.load_game() == saved
-    press(again, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN)  # "Nuova partita", then "Sì"
+    press(again, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN)  # "New game", then "Yes"
+    assert again["scene"] == "character"
+    assert save.load_game() == saved  # nothing replaced until the character is chosen
+    press(again, pygame.K_RETURN)
     assert again["scene"] == "play"
     assert engine.restore_state(save.load_game()) == engine.new_game()
 
@@ -583,7 +588,7 @@ def test_a_failed_save_is_reported_not_fatal(app, monkeypatch):
     def full_disk(state, path=None):
         raise OSError("No space left on device")
     monkeypatch.setattr(save, "save_game", full_disk)
-    press(app, pygame.K_RETURN)
+    press(app, pygame.K_RETURN, pygame.K_RETURN)
     assert app["scene"] == "play"
     assert story.MESSAGES["save_failed"] in dialog_text(app)
 
@@ -1253,3 +1258,65 @@ def test_the_sea_is_a_storm_except_in_the_good_ending(app):
     calm = sprites.image("sea_calm_0")
     sea_y = main.ENDING_HORIZON + 8
     assert tuple(screen.get_at((2, sea_y)))[:3] == tuple(calm.get_at((2, sea_y - main.ENDING_HORIZON)))[:3]
+
+
+# --- The choice of the character ---------------------------------------------------
+
+
+def test_new_game_lets_the_player_choose_the_red_character(app):
+    """Right, then Enter: the game starts with the red character, saved, and Resume keeps it."""
+    press(app, pygame.K_RETURN)  # "New game"
+    assert app["scene"] == "character" and main.character_entries()[app["menu_index"]] == "green"
+    press(app, pygame.K_RIGHT)
+    assert main.character_entries()[app["menu_index"]] == "red"
+    press(app, pygame.K_RETURN)
+    assert app["scene"] == "play"
+    assert app["state"]["flags"]["character"] == "red"
+    assert main.player_picture(app) is sprites.image("player_red_down_0")
+    assert engine.restore_state(save.load_game())["flags"]["character"] == "red"
+    again = relaunch()
+    press(again, pygame.K_DOWN, pygame.K_RETURN)  # "Resume"
+    assert main.player_picture(again) is sprites.image("player_red_down_0")
+
+
+def test_the_choice_wraps_around_and_esc_goes_back(app):
+    press(app, pygame.K_RETURN)
+    press(app, pygame.K_LEFT)  # from the first, left goes round to the last
+    assert main.character_entries()[app["menu_index"]] == "red"
+    press(app, pygame.K_d)  # WASD works too
+    assert main.character_entries()[app["menu_index"]] == "green"
+    press(app, pygame.K_ESCAPE)
+    assert app["scene"] == "menu" and app["state"] is None
+    assert save.load_game() is None  # nothing was started
+
+
+def test_restarting_from_the_pause_menu_also_asks_for_a_character(app):
+    """Restart asks first, then the choice; Esc from the choice goes back to the pause menu, game untouched."""
+    start_new_game(app)
+    before = app["state"]
+    press(app, pygame.K_ESCAPE, pygame.K_DOWN, pygame.K_RETURN)  # "Restart"
+    press(app, pygame.K_UP, pygame.K_RETURN)  # "Yes"
+    assert app["scene"] == "character"
+    press(app, pygame.K_ESCAPE)
+    assert app["scene"] == "pause" and app["state"] == before
+    press(app, pygame.K_DOWN, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN, pygame.K_RIGHT, pygame.K_RETURN)
+    assert app["scene"] == "play" and app["state"]["flags"]["character"] == "red"
+
+
+def test_the_two_characters_differ_only_in_the_shirt():
+    """Every picture of the red character is the green one with red where the shirt is green."""
+    for name, rows in sprites.SPRITES.items():
+        if name.startswith("player_") and not name.startswith("player_red_"):
+            red = sprites.SPRITES["player_red_" + name[len("player_"):]]
+            for row, red_row in zip(rows, red):
+                for letter, red_letter in zip(row, red_row):
+                    expected = {"g": "r", "G": "R"}.get(letter, letter)
+                    assert red_letter == expected, name
+
+
+def test_the_choice_screen_can_be_drawn(app):
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    press(app, pygame.K_RETURN)
+    for index in range(len(main.character_entries())):
+        app["menu_index"] = index
+        main.draw(app, screen)

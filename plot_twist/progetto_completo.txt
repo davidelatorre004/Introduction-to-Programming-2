@@ -11,9 +11,19 @@ changes while the game runs. Ids and texts are in English.
 # Where every new game starts.
 START_ROOM = "deck"
 
+# The characters the player can choose from when a new game starts, in the order
+# the choice shows them. They look the same, except for the colour of the shirt:
+# "sprite" is the start of the names of their pictures in sprites.py.
+CHARACTERS = {
+    "green": {"sprite": "player"},
+    "red": {"sprite": "player_red"},
+}
+
 # What the game remembers about the player's progress and choices, with the
 # value each flag has at the start of a new game.
 FLAGS = {
+    # The character chosen for this game (one of CHARACTERS).
+    "character": "green",
     # The eight generators of the captain's cabin, in a ring: True is on, False is
     # off. The puzzle starts with H, A, C and D off and B, E, F and G on, and goes
     # back to that every time the player walks into the cabin, until the circuit
@@ -1345,6 +1355,9 @@ MESSAGES = {
     "menu_restart": "Restart",
     "menu_main_menu": "Main menu",
     "menu_yes": "Yes",
+    # The choice of the character, after "New game".
+    "choose_character": "Choose your character",
+    "choose_hint": "Left/Right: choose · E: confirm · Esc: back",
     "menu_no": "No",
     "pause": "Paused",
     "hint_inventory": "I: inventory",
@@ -1412,26 +1425,35 @@ STATE_KEYS = {"room", "inventory", "flags", "ending"}
 # --- Starting, restarting and resuming ---------------------------------------
 
 
-def new_game():
-    """Return the state of a brand-new game: on the deck, empty-handed, nothing decided."""
-    return {
+def new_game(character=None):
+    """Return the state of a brand-new game: on the deck, empty-handed, nothing decided.
+
+    `character` is one of story.CHARACTERS; without it, the first one.
+    """
+    state = {
         "room": story.START_ROOM,
         "inventory": [],
         # A copy: changing this game's flags must never change story.FLAGS.
         "flags": copy.deepcopy(story.FLAGS),
         "ending": None,
     }
+    if character is not None:
+        if character not in story.CHARACTERS:
+            raise ValueError(f"Unknown character: {character!r}")
+        state["flags"]["character"] = character
+    return state
 
 
-def start_new_game(existing, confirmed=False):
+def start_new_game(existing, confirmed=False, character=None):
     """Start a new game, asking for confirmation first if there is progress to lose.
 
     `existing` is the current or saved game, or None if there is none. Without
     confirmation it comes back untouched, with the question to ask the player.
+    `character` is the character chosen for the new game.
     """
     if existing is not None and not confirmed:
         return _refuse(existing, "needs_confirmation", story.MESSAGES["confirm_restart"])
-    return _accept(new_game(), "started", story.MESSAGES["intro"])
+    return _accept(new_game(character), "started", story.MESSAGES["intro"])
 
 
 def menu_options(existing):
@@ -2276,6 +2298,8 @@ def _allowed_values(flag):
     for info in story.ITEMS.values():
         if info.get("sets_flag") == flag:
             values.append(True)
+    if flag == "character":
+        values += list(story.CHARACTERS)
     return values
 
 
@@ -2892,7 +2916,7 @@ def new_app(fonts):
     app = {
         "running": True,
         "fonts": fonts,
-        "scene": "menu",         # "menu", "confirm", "play", "actions", "inventory", "pause" or "ending"
+        "scene": "menu",         # "menu", "confirm", "character", "play", "actions", "inventory", "pause" or "ending"
         "menu_index": 0,         # the highlighted entry of the menu on screen
         "existing": None,        # the saved game found when the main menu opened, or None
         "state": None,           # the game being played (the engine's state), or None in the main menu
@@ -2907,6 +2931,7 @@ def new_app(fonts):
         "question": "",          # what the confirm scene asks
         "confirming": "new_game",  # what "Yes" does: start a new game, or the action waiting for it
         "confirm_back": "menu",  # the scene to go back to if the answer is no
+        "character_back": "menu",  # the scene Esc goes back to from the choice of the character
         "frame": 0,              # frames since the game started, for everything that moves on screen
         "scene_frames": 0,       # frames since the current scene started
         "walk": 0,               # frames the player has spent walking, for the walking animation
@@ -2991,6 +3016,8 @@ def go_back(app):
         set_scene(app, app["confirm_back"])
     elif scene == "ending":
         open_main_menu(app)
+    elif scene == "character":
+        set_scene(app, app["character_back"])
 
 
 def progress(app):
@@ -3001,20 +3028,36 @@ def progress(app):
 
 
 def request_new_game(app):
-    """Start a new game, but ask first if there is progress to lose."""
-    state, outcome = engine.start_new_game(progress(app))
+    """Start a new game, but ask first if there is progress to lose. Then the player chooses a character."""
+    _, outcome = engine.start_new_game(progress(app))
     if outcome["event"] == "needs_confirmation":
         app["question"] = outcome["text"]
         app["confirming"] = "new_game"
         app["confirm_back"] = app["scene"]
         set_scene(app, "confirm", menu_index=1)  # "No" is highlighted: the safe answer
     else:
-        begin_game(app, state, outcome["text"])
+        choose_character(app, app["scene"])
 
 
 def confirm_new_game(app):
-    """The player said yes: replace the progress with a new game."""
-    state, outcome = engine.start_new_game(progress(app), confirmed=True)
+    """The player said yes: the progress can go. Now they choose a character; Esc takes them back."""
+    choose_character(app, app["confirm_back"])
+
+
+def choose_character(app, back):
+    """Show the choice of the character. Nothing is replaced yet: Esc goes back to `back`."""
+    app["character_back"] = back
+    set_scene(app, "character")
+
+
+def character_entries():
+    """The characters the player can choose from, in order."""
+    return list(story.CHARACTERS)
+
+
+def start_with_character(app, character):
+    """The character is chosen: the new game replaces the progress and starts."""
+    state, outcome = engine.start_new_game(progress(app), confirmed=True, character=character)
     begin_game(app, state, outcome["text"])
 
 
@@ -3204,8 +3247,23 @@ def handle_key(app, key):
     elif scene == "inventory":
         if key == pygame.K_i or key == pygame.K_ESCAPE or key in CONFIRM_KEYS:
             set_scene(app, "play")
+    elif scene == "character":
+        handle_character_key(app, key)
     else:
         handle_menu_key(app, key)
+
+
+def handle_character_key(app, key):
+    """Keys on the choice of the character: left and right to move, E or Enter to choose, Esc to go back."""
+    entries = character_entries()
+    if key in LEFT_KEYS:
+        app["menu_index"] = (app["menu_index"] - 1) % len(entries)
+    elif key in RIGHT_KEYS:
+        app["menu_index"] = (app["menu_index"] + 1) % len(entries)
+    elif key in CONFIRM_KEYS:
+        start_with_character(app, entries[app["menu_index"]])
+    elif key == pygame.K_ESCAPE:
+        go_back(app)
 
 
 def handle_play_key(app, key):
@@ -3382,7 +3440,7 @@ def bob(app):
 
 
 def draw_title_screen(app, screen):
-    draw_sea(app, screen, screen.get_rect())
+    draw_sea(app, screen, screen.get_rect(), calm=True)  # the title keeps the calm sea
     ship = sprites.image("ship")
     if ship is not None:
         screen.blit(ship, ship.get_rect(center=(WIDTH // 2, 104 + bob(app))))
@@ -3477,7 +3535,8 @@ def player_picture(app):
     step = 0
     if app["moving"]:
         step = 1 + (app["walk"] // WALK_STEP_FRAMES) % 2
-    return sprites.image("player_" + direction + "_" + str(step), flip=fx < 0)
+    character = story.CHARACTERS[app["state"]["flags"]["character"]]["sprite"]
+    return sprites.image(character + "_" + direction + "_" + str(step), flip=fx < 0)
 
 
 def draw_player(app, screen):
@@ -3964,6 +4023,37 @@ def draw_ending_screen(app, screen):
             y += font.get_linesize()
 
 
+CHARACTER_ZOOM = 3   # the characters are shown three times bigger on the choice screen
+CHARACTER_GAP = 72   # pixels between the middles of two characters
+
+
+def draw_character_choice(app, screen):
+    """The choice of the character, over the calm sea of the title: the characters side by side,
+    the highlighted one in a frame that blinks."""
+    draw_sea(app, screen, screen.get_rect(), calm=True)
+    font = app["fonts"]["text"]
+    draw_text(screen, app["fonts"]["title"], story.MESSAGES["choose_character"], COLORS["text"], (WIDTH // 2, 36),
+              "center", True)
+    entries = character_entries()
+    first = WIDTH // 2 - (len(entries) - 1) * CHARACTER_GAP // 2
+    for index, character in enumerate(entries):
+        picture = sprites.image(story.CHARACTERS[character]["sprite"] + "_down_0")
+        center = (first + index * CHARACTER_GAP, 118)
+        frame = pygame.Rect(0, 0, 16 * CHARACTER_ZOOM + 12, 16 * CHARACTER_ZOOM + 12)
+        frame.center = center
+        pygame.draw.rect(screen, COLORS["box"], frame)
+        chosen = index == app["menu_index"]
+        border = COLORS["highlight"] if chosen and (app["frame"] // 24) % 2 == 0 else COLORS["dim_text"]
+        pygame.draw.rect(screen, border, frame, 2 if chosen else 1)
+        if picture is not None:
+            big = pygame.transform.scale(picture, (picture.get_width() * CHARACTER_ZOOM, picture.get_height() * CHARACTER_ZOOM))
+            screen.blit(big, big.get_rect(center=center))
+    lines = wrap(story.MESSAGES["choose_hint"], WIDTH - 16, text_width(font))
+    for index, line in enumerate(lines):
+        y = HEIGHT - 6 - (len(lines) - index) * font.get_linesize()
+        draw_text(screen, font, line, COLORS["foam"], (WIDTH // 2, y), "center", True)
+
+
 def draw_question(app, screen):
     font = app["fonts"]["text"]
     lines = wrap(app["question"], DIALOG_TEXT_WIDTH, text_width(font))
@@ -4003,6 +4093,8 @@ def draw(app, screen):
     elif scene == "ending":
         draw_ending_screen(app, screen)
         draw_menu(app, screen, ENDING_MENU_TOP)
+    elif scene == "character":
+        draw_character_choice(app, screen)
     elif scene == "confirm":
         back = app["confirm_back"]
         if back == "menu":
@@ -5531,6 +5623,10 @@ SPRITES = {
         "kkkkkkkkkkkkkkkk",
     ],
 }
+
+# The second character: the same pictures as the player, with a red shirt instead of a green one.
+for _name in [name for name in SPRITES if name.startswith("player_")]:
+    SPRITES["player_red_" + _name[len("player_"):]] = [row.translate(str.maketrans("gG", "rR")) for row in SPRITES[_name]]
 
 # Some rooms reuse the wood of the cabin and the planks of the hold.
 SPRITES["floor_galley"] = SPRITES["floor_cabin"]
@@ -7448,6 +7544,16 @@ def test_entering_a_room_marks_it_on_the_map():
         assert story.FLAGS["visited_" + room] == (room == story.START_ROOM), room
 
 
+def test_a_new_game_remembers_the_character_chosen():
+    assert engine.new_game()["flags"]["character"] == "green"
+    state, outcome = engine.start_new_game(None, character="red")
+    assert outcome["ok"] and state["flags"]["character"] == "red"
+    assert reopen(state)["flags"]["character"] == "red"
+    with pytest.raises(ValueError):
+        engine.new_game("blue")
+    assert engine.restore_state(restorable(flags={"character": "blue"})) is None
+
+
 ================================================================================
 # FILE: plot_twist/test_save.py
 ================================================================================
@@ -7645,8 +7751,8 @@ def dialog_text(app):
 
 
 def start_new_game(app):
-    """Choose "Nuova partita" on a menu without saves, and read the opening scene."""
-    press(app, pygame.K_RETURN)
+    """Choose "New game" on a menu without saves, keep the first character, and read the opening scene."""
+    press(app, pygame.K_RETURN, pygame.K_RETURN)
     read_all(app)
 
 
@@ -8052,7 +8158,7 @@ def test_a_locked_door_speaks_once_per_push(app):
 
 
 def test_player_cannot_move_while_reading(app):
-    press(app, pygame.K_RETURN)  # the opening scene is on screen
+    press(app, pygame.K_RETURN, pygame.K_RETURN)  # the opening scene is on screen
     before = app["player"]
     for _ in range(30):
         main.update(app, 1, 0)
@@ -8073,6 +8179,8 @@ def test_menu_offers_resume_only_when_a_game_is_saved(app):
 
 
 def test_new_game_shows_the_opening_scene_and_saves_at_once(app):
+    press(app, pygame.K_RETURN)
+    assert app["scene"] == "character"  # first the choice of the character
     press(app, pygame.K_RETURN)
     assert app["scene"] == "play"
     assert dialog_text(app) == story.MESSAGES["intro"]
@@ -8105,7 +8213,10 @@ def test_new_game_over_a_save_asks_first(app):
     press(again, pygame.K_RETURN)  # "No"
     assert again["scene"] == "menu"
     assert save.load_game() == saved
-    press(again, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN)  # "Nuova partita", then "Sì"
+    press(again, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN)  # "New game", then "Yes"
+    assert again["scene"] == "character"
+    assert save.load_game() == saved  # nothing replaced until the character is chosen
+    press(again, pygame.K_RETURN)
     assert again["scene"] == "play"
     assert engine.restore_state(save.load_game()) == engine.new_game()
 
@@ -8139,7 +8250,7 @@ def test_a_failed_save_is_reported_not_fatal(app, monkeypatch):
     def full_disk(state, path=None):
         raise OSError("No space left on device")
     monkeypatch.setattr(save, "save_game", full_disk)
-    press(app, pygame.K_RETURN)
+    press(app, pygame.K_RETURN, pygame.K_RETURN)
     assert app["scene"] == "play"
     assert story.MESSAGES["save_failed"] in dialog_text(app)
 
@@ -8811,6 +8922,68 @@ def test_the_sea_is_a_storm_except_in_the_good_ending(app):
     assert tuple(screen.get_at((2, sea_y)))[:3] == tuple(calm.get_at((2, sea_y - main.ENDING_HORIZON)))[:3]
 
 
+# --- The choice of the character ---------------------------------------------------
+
+
+def test_new_game_lets_the_player_choose_the_red_character(app):
+    """Right, then Enter: the game starts with the red character, saved, and Resume keeps it."""
+    press(app, pygame.K_RETURN)  # "New game"
+    assert app["scene"] == "character" and main.character_entries()[app["menu_index"]] == "green"
+    press(app, pygame.K_RIGHT)
+    assert main.character_entries()[app["menu_index"]] == "red"
+    press(app, pygame.K_RETURN)
+    assert app["scene"] == "play"
+    assert app["state"]["flags"]["character"] == "red"
+    assert main.player_picture(app) is sprites.image("player_red_down_0")
+    assert engine.restore_state(save.load_game())["flags"]["character"] == "red"
+    again = relaunch()
+    press(again, pygame.K_DOWN, pygame.K_RETURN)  # "Resume"
+    assert main.player_picture(again) is sprites.image("player_red_down_0")
+
+
+def test_the_choice_wraps_around_and_esc_goes_back(app):
+    press(app, pygame.K_RETURN)
+    press(app, pygame.K_LEFT)  # from the first, left goes round to the last
+    assert main.character_entries()[app["menu_index"]] == "red"
+    press(app, pygame.K_d)  # WASD works too
+    assert main.character_entries()[app["menu_index"]] == "green"
+    press(app, pygame.K_ESCAPE)
+    assert app["scene"] == "menu" and app["state"] is None
+    assert save.load_game() is None  # nothing was started
+
+
+def test_restarting_from_the_pause_menu_also_asks_for_a_character(app):
+    """Restart asks first, then the choice; Esc from the choice goes back to the pause menu, game untouched."""
+    start_new_game(app)
+    before = app["state"]
+    press(app, pygame.K_ESCAPE, pygame.K_DOWN, pygame.K_RETURN)  # "Restart"
+    press(app, pygame.K_UP, pygame.K_RETURN)  # "Yes"
+    assert app["scene"] == "character"
+    press(app, pygame.K_ESCAPE)
+    assert app["scene"] == "pause" and app["state"] == before
+    press(app, pygame.K_DOWN, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN, pygame.K_RIGHT, pygame.K_RETURN)
+    assert app["scene"] == "play" and app["state"]["flags"]["character"] == "red"
+
+
+def test_the_two_characters_differ_only_in_the_shirt():
+    """Every picture of the red character is the green one with red where the shirt is green."""
+    for name, rows in sprites.SPRITES.items():
+        if name.startswith("player_") and not name.startswith("player_red_"):
+            red = sprites.SPRITES["player_red_" + name[len("player_"):]]
+            for row, red_row in zip(rows, red):
+                for letter, red_letter in zip(row, red_row):
+                    expected = {"g": "r", "G": "R"}.get(letter, letter)
+                    assert red_letter == expected, name
+
+
+def test_the_choice_screen_can_be_drawn(app):
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    press(app, pygame.K_RETURN)
+    for index in range(len(main.character_entries())):
+        app["menu_index"] = index
+        main.draw(app, screen)
+
+
 ================================================================================
 # FILE: plot_twist/test_graphics.py
 ================================================================================
@@ -8836,7 +9009,8 @@ import story
 def app():
     """The interface just after launching the game, already playing a new game."""
     app = main.new_app(main.load_fonts())
-    main.handle_key(app, pygame.K_RETURN)  # "Nuova partita"
+    main.handle_key(app, pygame.K_RETURN)  # "New game"
+    main.handle_key(app, pygame.K_RETURN)  # the first character
     while app["dialog"]:
         main.handle_key(app, pygame.K_e)
     return app

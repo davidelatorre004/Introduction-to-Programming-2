@@ -1481,6 +1481,10 @@ SPRITES = {
     ],
 }
 
+# The second character: the same pictures as the player, with a red shirt instead of a green one.
+for _name in [name for name in SPRITES if name.startswith("player_")]:
+    SPRITES["player_red_" + _name[len("player_"):]] = [row.translate(str.maketrans("gG", "rR")) for row in SPRITES[_name]]
+
 # Some rooms reuse the wood of the cabin and the planks of the hold.
 SPRITES["floor_galley"] = SPRITES["floor_cabin"]
 SPRITES["wall_galley"] = SPRITES["wall_hold"]

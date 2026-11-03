@@ -7,9 +7,19 @@ changes while the game runs. Ids and texts are in English.
 # Where every new game starts.
 START_ROOM = "deck"
 
+# The characters the player can choose from when a new game starts, in the order
+# the choice shows them. They look the same, except for the colour of the shirt:
+# "sprite" is the start of the names of their pictures in sprites.py.
+CHARACTERS = {
+    "green": {"sprite": "player"},
+    "red": {"sprite": "player_red"},
+}
+
 # What the game remembers about the player's progress and choices, with the
 # value each flag has at the start of a new game.
 FLAGS = {
+    # The character chosen for this game (one of CHARACTERS).
+    "character": "green",
     # The eight generators of the captain's cabin, in a ring: True is on, False is
     # off. The puzzle starts with H, A, C and D off and B, E, F and G on, and goes
     # back to that every time the player walks into the cabin, until the circuit
@@ -1341,6 +1351,9 @@ MESSAGES = {
     "menu_restart": "Restart",
     "menu_main_menu": "Main menu",
     "menu_yes": "Yes",
+    # The choice of the character, after "New game".
+    "choose_character": "Choose your character",
+    "choose_hint": "Left/Right: choose · E: confirm · Esc: back",
     "menu_no": "No",
     "pause": "Paused",
     "hint_inventory": "I: inventory",

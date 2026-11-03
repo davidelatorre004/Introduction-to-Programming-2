@@ -19,7 +19,8 @@ import story
 def app():
     """The interface just after launching the game, already playing a new game."""
     app = main.new_app(main.load_fonts())
-    main.handle_key(app, pygame.K_RETURN)  # "Nuova partita"
+    main.handle_key(app, pygame.K_RETURN)  # "New game"
+    main.handle_key(app, pygame.K_RETURN)  # the first character
     while app["dialog"]:
         main.handle_key(app, pygame.K_e)
     return app

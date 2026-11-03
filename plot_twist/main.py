@@ -541,7 +541,7 @@ def new_app(fonts):
     app = {
         "running": True,
         "fonts": fonts,
-        "scene": "menu",         # "menu", "confirm", "play", "actions", "inventory", "pause" or "ending"
+        "scene": "menu",         # "menu", "confirm", "character", "play", "actions", "inventory", "pause" or "ending"
         "menu_index": 0,         # the highlighted entry of the menu on screen
         "existing": None,        # the saved game found when the main menu opened, or None
         "state": None,           # the game being played (the engine's state), or None in the main menu
@@ -556,6 +556,7 @@ def new_app(fonts):
         "question": "",          # what the confirm scene asks
         "confirming": "new_game",  # what "Yes" does: start a new game, or the action waiting for it
         "confirm_back": "menu",  # the scene to go back to if the answer is no
+        "character_back": "menu",  # the scene Esc goes back to from the choice of the character
         "frame": 0,              # frames since the game started, for everything that moves on screen
         "scene_frames": 0,       # frames since the current scene started
         "walk": 0,               # frames the player has spent walking, for the walking animation
@@ -640,6 +641,8 @@ def go_back(app):
         set_scene(app, app["confirm_back"])
     elif scene == "ending":
         open_main_menu(app)
+    elif scene == "character":
+        set_scene(app, app["character_back"])
 
 
 def progress(app):
@@ -650,20 +653,36 @@ def progress(app):
 
 
 def request_new_game(app):
-    """Start a new game, but ask first if there is progress to lose."""
-    state, outcome = engine.start_new_game(progress(app))
+    """Start a new game, but ask first if there is progress to lose. Then the player chooses a character."""
+    _, outcome = engine.start_new_game(progress(app))
     if outcome["event"] == "needs_confirmation":
         app["question"] = outcome["text"]
         app["confirming"] = "new_game"
         app["confirm_back"] = app["scene"]
         set_scene(app, "confirm", menu_index=1)  # "No" is highlighted: the safe answer
     else:
-        begin_game(app, state, outcome["text"])
+        choose_character(app, app["scene"])
 
 
 def confirm_new_game(app):
-    """The player said yes: replace the progress with a new game."""
-    state, outcome = engine.start_new_game(progress(app), confirmed=True)
+    """The player said yes: the progress can go. Now they choose a character; Esc takes them back."""
+    choose_character(app, app["confirm_back"])
+
+
+def choose_character(app, back):
+    """Show the choice of the character. Nothing is replaced yet: Esc goes back to `back`."""
+    app["character_back"] = back
+    set_scene(app, "character")
+
+
+def character_entries():
+    """The characters the player can choose from, in order."""
+    return list(story.CHARACTERS)
+
+
+def start_with_character(app, character):
+    """The character is chosen: the new game replaces the progress and starts."""
+    state, outcome = engine.start_new_game(progress(app), confirmed=True, character=character)
     begin_game(app, state, outcome["text"])
 
 
@@ -853,8 +872,23 @@ def handle_key(app, key):
     elif scene == "inventory":
         if key == pygame.K_i or key == pygame.K_ESCAPE or key in CONFIRM_KEYS:
             set_scene(app, "play")
+    elif scene == "character":
+        handle_character_key(app, key)
     else:
         handle_menu_key(app, key)
+
+
+def handle_character_key(app, key):
+    """Keys on the choice of the character: left and right to move, E or Enter to choose, Esc to go back."""
+    entries = character_entries()
+    if key in LEFT_KEYS:
+        app["menu_index"] = (app["menu_index"] - 1) % len(entries)
+    elif key in RIGHT_KEYS:
+        app["menu_index"] = (app["menu_index"] + 1) % len(entries)
+    elif key in CONFIRM_KEYS:
+        start_with_character(app, entries[app["menu_index"]])
+    elif key == pygame.K_ESCAPE:
+        go_back(app)
 
 
 def handle_play_key(app, key):
@@ -1126,7 +1160,8 @@ def player_picture(app):
     step = 0
     if app["moving"]:
         step = 1 + (app["walk"] // WALK_STEP_FRAMES) % 2
-    return sprites.image("player_" + direction + "_" + str(step), flip=fx < 0)
+    character = story.CHARACTERS[app["state"]["flags"]["character"]]["sprite"]
+    return sprites.image(character + "_" + direction + "_" + str(step), flip=fx < 0)
 
 
 def draw_player(app, screen):
@@ -1613,6 +1648,37 @@ def draw_ending_screen(app, screen):
             y += font.get_linesize()
 
 
+CHARACTER_ZOOM = 3   # the characters are shown three times bigger on the choice screen
+CHARACTER_GAP = 72   # pixels between the middles of two characters
+
+
+def draw_character_choice(app, screen):
+    """The choice of the character, over the calm sea of the title: the characters side by side,
+    the highlighted one in a frame that blinks."""
+    draw_sea(app, screen, screen.get_rect(), calm=True)
+    font = app["fonts"]["text"]
+    draw_text(screen, app["fonts"]["title"], story.MESSAGES["choose_character"], COLORS["text"], (WIDTH // 2, 36),
+              "center", True)
+    entries = character_entries()
+    first = WIDTH // 2 - (len(entries) - 1) * CHARACTER_GAP // 2
+    for index, character in enumerate(entries):
+        picture = sprites.image(story.CHARACTERS[character]["sprite"] + "_down_0")
+        center = (first + index * CHARACTER_GAP, 118)
+        frame = pygame.Rect(0, 0, 16 * CHARACTER_ZOOM + 12, 16 * CHARACTER_ZOOM + 12)
+        frame.center = center
+        pygame.draw.rect(screen, COLORS["box"], frame)
+        chosen = index == app["menu_index"]
+        border = COLORS["highlight"] if chosen and (app["frame"] // 24) % 2 == 0 else COLORS["dim_text"]
+        pygame.draw.rect(screen, border, frame, 2 if chosen else 1)
+        if picture is not None:
+            big = pygame.transform.scale(picture, (picture.get_width() * CHARACTER_ZOOM, picture.get_height() * CHARACTER_ZOOM))
+            screen.blit(big, big.get_rect(center=center))
+    lines = wrap(story.MESSAGES["choose_hint"], WIDTH - 16, text_width(font))
+    for index, line in enumerate(lines):
+        y = HEIGHT - 6 - (len(lines) - index) * font.get_linesize()
+        draw_text(screen, font, line, COLORS["foam"], (WIDTH // 2, y), "center", True)
+
+
 def draw_question(app, screen):
     font = app["fonts"]["text"]
     lines = wrap(app["question"], DIALOG_TEXT_WIDTH, text_width(font))
@@ -1652,6 +1718,8 @@ def draw(app, screen):
     elif scene == "ending":
         draw_ending_screen(app, screen)
         draw_menu(app, screen, ENDING_MENU_TOP)
+    elif scene == "character":
+        draw_character_choice(app, screen)
     elif scene == "confirm":
         back = app["confirm_back"]
         if back == "menu":

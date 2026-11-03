@@ -38,26 +38,35 @@ STATE_KEYS = {"room", "inventory", "flags", "ending"}
 # --- Starting, restarting and resuming ---------------------------------------
 
 
-def new_game():
-    """Return the state of a brand-new game: on the deck, empty-handed, nothing decided."""
-    return {
+def new_game(character=None):
+    """Return the state of a brand-new game: on the deck, empty-handed, nothing decided.
+
+    `character` is one of story.CHARACTERS; without it, the first one.
+    """
+    state = {
         "room": story.START_ROOM,
         "inventory": [],
         # A copy: changing this game's flags must never change story.FLAGS.
         "flags": copy.deepcopy(story.FLAGS),
         "ending": None,
     }
+    if character is not None:
+        if character not in story.CHARACTERS:
+            raise ValueError(f"Unknown character: {character!r}")
+        state["flags"]["character"] = character
+    return state
 
 
-def start_new_game(existing, confirmed=False):
+def start_new_game(existing, confirmed=False, character=None):
     """Start a new game, asking for confirmation first if there is progress to lose.
 
     `existing` is the current or saved game, or None if there is none. Without
     confirmation it comes back untouched, with the question to ask the player.
+    `character` is the character chosen for the new game.
     """
     if existing is not None and not confirmed:
         return _refuse(existing, "needs_confirmation", story.MESSAGES["confirm_restart"])
-    return _accept(new_game(), "started", story.MESSAGES["intro"])
+    return _accept(new_game(character), "started", story.MESSAGES["intro"])
 
 
 def menu_options(existing):
@@ -902,6 +911,8 @@ def _allowed_values(flag):
     for info in story.ITEMS.values():
         if info.get("sets_flag") == flag:
             values.append(True)
+    if flag == "character":
+        values += list(story.CHARACTERS)
     return values
 
 

@@ -1592,3 +1592,13 @@ def test_entering_a_room_marks_it_on_the_map():
     assert set(engine.visited_rooms(state)) == {"deck", "cabin", "galley"}
     for room in story.ROOMS:
         assert story.FLAGS["visited_" + room] == (room == story.START_ROOM), room
+
+
+def test_a_new_game_remembers_the_character_chosen():
+    assert engine.new_game()["flags"]["character"] == "green"
+    state, outcome = engine.start_new_game(None, character="red")
+    assert outcome["ok"] and state["flags"]["character"] == "red"
+    assert reopen(state)["flags"]["character"] == "red"
+    with pytest.raises(ValueError):
+        engine.new_game("blue")
+    assert engine.restore_state(restorable(flags={"character": "blue"})) is None
