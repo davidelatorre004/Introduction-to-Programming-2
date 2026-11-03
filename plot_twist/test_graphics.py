@@ -38,7 +38,11 @@ TO_THE_CRAB_DOOR = ([("pick_up", "wand", None), ("enter", "deck_to_cabin", None)
                      ("activate", "generator_d", None), ("pick_up", "key", None), ("enter", "cabin_to_deck", None),
                      ("enter", "deck_to_hold", None)]
                     + [("step_on", tile, None) for tile in TILES]
-                    + [("pick_up", "second_key", None), ("use_item", "anvil", "key"), ("enter", "hold_to_deck", None)])
+                    + [("pick_up", "second_key", None), ("enter", "hold_to_infirmary", None)]
+                    + [("pour", tincture, None) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
+                    + [("pick_up", "potion", None), ("use_item", "doctor", "potion"), ("enter", "infirmary_to_hold", None),
+                       ("enter", "hold_to_deck", None), ("enter", "deck_to_cabin", None), ("enter", "cabin_to_galley", None),
+                       ("use_item", "anvil", "key"), ("enter", "galley_to_cabin", None), ("enter", "cabin_to_deck", None)])
 CRAB_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_crab", "fused_key"), ("enter", "deck_to_crab", None),
                                   ("use_item", "crab", "wand")]
 ANGEL_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_angel", "fused_key"), ("enter", "deck_to_angel", None),
@@ -56,8 +60,12 @@ def test_every_sprite_is_a_proper_picture():
             for letter in row:
                 assert letter == "." or letter in sprites.PALETTE, (name, letter)
         size = (len(rows[0]), len(rows))
+        sharing = [thing for thing, info in story.OBJECTS.items() if info.get("picture") == name]
         if name.startswith("door_") or name == "ship":
             assert size == (2 * main.TILE, main.TILE), name
+        elif sharing:  # a shared picture is as big as every piece that uses it
+            for thing in sharing:
+                assert size == main.thing_rect(thing).size, (name, thing)
         elif name in story.OBJECTS:
             assert size == main.thing_rect(name).size, name  # the big characters fill all their tiles
         else:
@@ -72,7 +80,8 @@ def test_everything_on_screen_has_a_picture():
     for item in story.ITEMS:
         assert sprites.image(item) is not None, item
     statuses = {"puzzle": ["solved", "unsolved"], "character": ["present"], "switch": ["on", "off"],
-                "altar": ["present"], "anvil": ["present"], "barrier": ["up"], "tile": ["lit", "dark", "error"], "decor": ["present"]}
+                "altar": ["present"], "anvil": ["present"], "barrier": ["up"], "tile": ["lit", "dark", "error"], "decor": ["present"],
+                "cauldron": ["present"], "ingredient": ["present"], "portal": ["present"]}
     for thing, info in story.OBJECTS.items():
         for status in statuses[info["kind"]]:
             if info["kind"] == "barrier":

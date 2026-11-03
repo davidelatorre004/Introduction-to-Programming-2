@@ -33,7 +33,13 @@ IN_THE_HOLD = FIRST_HALF + [act("enter", "deck_to_hold")]
 TILE_SEQUENCE = ["tile_1", "tile_2", "tile_3", "tile_4", "tile_5", "tile_3", "tile_1", "tile_5", "tile_2", "tile_4", "tile_3"]
 TILES_SOLVED = IN_THE_HOLD + [act("step_on", tile) for tile in TILE_SEQUENCE]
 BOTH_HALVES = TILES_SOLVED + [act("pick_up", "second_key")]  # in the hold, not fused yet
-KEY_FUSED = BOTH_HALVES + [act("use_item", "anvil", "second_key"), act("enter", "hold_to_deck")]  # back on the deck
+DOCTOR_AT_PEACE = (BOTH_HALVES + [act("enter", "hold_to_infirmary")]
+                   + [act("pour", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
+                   + [act("pick_up", "potion"), act("use_item", "doctor", "potion")])  # in the infirmary
+KEY_FUSED = DOCTOR_AT_PEACE + [act("enter", "infirmary_to_hold"), act("enter", "hold_to_deck"),
+                               act("enter", "deck_to_cabin"), act("enter", "cabin_to_galley"),
+                               act("use_item", "anvil", "second_key"),
+                               act("enter", "galley_to_cabin"), act("enter", "cabin_to_deck")]  # back on the deck
 CRAB_DOOR_OPEN = KEY_FUSED + [act("use_item", "deck_to_crab", "fused_key")]
 TO_THE_CRAB_ENDING = CRAB_DOOR_OPEN + [act("enter", "deck_to_crab"), act("use_item", "crab", "wand")]
 TO_THE_ANGEL_ENDING = KEY_FUSED + [act("use_item", "deck_to_angel", "fused_key"), act("enter", "deck_to_angel"),
@@ -169,21 +175,22 @@ def playing(app, actions):
 # --- The layout in story.py -------------------------------------------------------
 
 
-def on_the_floor(tile):
+def on_the_floor(tile, room):
     col, row = tile
-    return 1 <= col <= main.COLUMNS - 2 and 1 <= row <= main.ROWS - 2
+    columns, rows = main.room_size(room)
+    return 1 <= col <= columns - 2 and 1 <= row <= rows - 2
 
 
 def test_layout_everything_stands_on_the_floor():
     for room_id, room in story.ROOMS.items():
-        assert on_the_floor(room["entry"]), room_id
+        assert on_the_floor(room["entry"], room_id), room_id
     for thing_id, info in list(story.ITEMS.items()) + list(story.OBJECTS.items()):
         if info["room"] is None:
             continue  # made at the anvil: it never lies anywhere
-        assert on_the_floor(info["pos"]), thing_id
+        assert on_the_floor(info["pos"], info["room"]), thing_id
         width, height = info.get("size", (1, 1))
         last_tile = (info["pos"][0] + width - 1, info["pos"][1] + height - 1)
-        assert on_the_floor(last_tile), thing_id
+        assert on_the_floor(last_tile, info["room"]), thing_id
 
 
 def test_layout_nothing_shares_a_tile():
@@ -271,10 +278,13 @@ def test_layout_any_tile_leads_to_any_other_without_crossing_a_third():
                 assert end in seen, (start, goal)
 
 
-def test_layout_each_wall_has_at_most_one_door():
+def test_layout_doors_on_the_same_wall_keep_apart():
+    """A wall can have more than one door ("at"), but their openings and the floor in front never overlap."""
     for room in story.ROOMS:
-        sides = [story.DOORS[door]["side"] for door in main.doors_in(room)]
-        assert len(sides) == len(set(sides)), room
+        doors = main.doors_in(room)
+        for index, door in enumerate(doors):
+            for other in doors[index + 1:]:
+                assert not approach(door).inflate(2, 2).colliderect(approach(other)), (room, door, other)
 
 
 def test_layout_the_way_back_is_on_the_opposite_wall():
@@ -316,7 +326,7 @@ def test_layout_every_door_and_thing_can_be_reached():
         solids = main.solid_rects(state)
         barriers = [main.thing_rect(thing) for thing, info in story.OBJECTS.items()
                     if info["room"] == room and info["kind"] == "barrier"]
-        inside = main.tile_rect(0, 0, main.COLUMNS, main.ROWS)  # open doors lead out: stop at the room's edge
+        inside = main.tile_rect(0, 0, *main.room_size(room))  # open doors lead out: stop at the room's edge
         start = main.spawn_at_entry(room)
         seen = {start}
         frontier = [start]
@@ -354,13 +364,17 @@ def test_flat_decor_can_be_walked_over_and_solid_decor_cannot():
 # --- Room geometry ------------------------------------------------------------------
 
 
-def test_doors_are_in_the_middle_of_their_wall():
+def test_doors_are_in_the_middle_of_their_wall_unless_told_otherwise():
     for door_id, door in story.DOORS.items():
         rect = main.door_rect(door_id)
-        if door["side"] in ("N", "S"):
-            assert rect.centerx == main.WIDTH // 2, door_id
+        columns, rows = main.room_size(door["room"])
+        if "at" in door:
+            along = rect.left if door["side"] in ("N", "S") else rect.top - main.HUD_HEIGHT
+            assert along == door["at"] * main.TILE, door_id
+        elif door["side"] in ("N", "S"):
+            assert rect.centerx == columns * main.TILE // 2, door_id
         else:
-            assert rect.centery == main.HUD_HEIGHT + main.ROWS * main.TILE // 2, door_id
+            assert rect.centery == main.HUD_HEIGHT + rows * main.TILE // 2, door_id
 
 
 def test_walls_close_the_room_except_at_the_doors():
@@ -370,9 +384,10 @@ def test_walls_close_the_room_except_at_the_doors():
         openings = [main.door_rect(door) for door in main.doors_in(room)]
         for opening in openings:
             assert opening.collidelist(walls) == -1, room
-        for col in range(main.COLUMNS):
-            for row in range(main.ROWS):
-                if col in (0, main.COLUMNS - 1) or row in (0, main.ROWS - 1):
+        columns, rows = main.room_size(room)
+        for col in range(columns):
+            for row in range(rows):
+                if col in (0, columns - 1) or row in (0, rows - 1):
                     center = main.tile_rect(col, row).center
                     assert pygame.Rect(center, (1, 1)).collidelist(walls + openings) != -1, (room, col, row)
 
@@ -393,7 +408,7 @@ def test_players_appear_on_free_floor():
 def test_player_never_walks_through_walls_or_closed_doors(app):
     """Walking in every direction for five seconds: the player never overlaps anything solid."""
     start_new_game(app)
-    room_area = main.tile_rect(0, 0, main.COLUMNS, main.ROWS)
+    room_area = main.tile_rect(0, 0, *main.room_size("deck"))
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
             app["state"] = engine.new_game()
@@ -730,12 +745,32 @@ def test_a_whole_game_on_screen(app, door, character, ending):
     stand_next_to(app, "second_key")
     press(app, pygame.K_e)
     read_all(app)
+    walk_into(app, "hold_to_infirmary")
+    for tincture in story.POTION_PUZZLES["remedy"]["recipe"]:
+        stand_next_to(app, tincture)
+        press(app, pygame.K_e)
+        choose_in_menu(app, "pour")
+        poured = dialog_text(app)  # the text box tells how the mixture changes
+        read_all(app)
+    assert poured == story.POTION_PUZZLES["remedy"]["solved_text"]
+    stand_next_to(app, "potion")
+    press(app, pygame.K_e)
+    read_all(app)
+    stand_next_to(app, "doctor")
+    press(app, pygame.K_e)
+    choose_in_menu(app, "use_item", "potion")
+    read_all(app)
+    walk_into(app, "infirmary_to_hold")
+    walk_into(app, "hold_to_deck")
+    walk_into(app, "deck_to_cabin")
+    walk_into(app, "cabin_to_galley")
     stand_next_to(app, "anvil")
     press(app, pygame.K_e)
     choose_in_menu(app, "use_item", "key")  # either half fuses both
     assert dialog_text(app) == story.OBJECTS["anvil"]["fuse_text"]
     read_all(app)
-    walk_into(app, "hold_to_deck")
+    walk_into(app, "galley_to_cabin")
+    walk_into(app, "cabin_to_deck")
     app["player"] = main.spawn_in_front_of(door)
     press(app, pygame.K_e)
     choose_in_menu(app, "use_item", "fused_key")
@@ -902,8 +937,9 @@ def test_a_mistake_makes_the_tiles_blink_red_then_go_dark(in_hold):
 
 
 def test_every_floor_outcome_has_a_sound():
-    """The events step_on and leave_zone accept each have a sound, and every sound exists."""
-    assert set(main.EVENT_SOUNDS) == {"tile_lit", "phase_complete", "tiles_complete", "tiles_reset"}
+    """The events step_on, leave_zone, pour and travel accept each have a sound, and every sound exists."""
+    assert set(main.EVENT_SOUNDS) == {"tile_lit", "phase_complete", "tiles_complete", "tiles_reset",
+                                      "potion_poured", "potion_spoiled", "potion_ready", "teleported"}
     for effect in main.EVENT_SOUNDS.values():
         assert effect in sounds.EFFECTS
 
@@ -981,3 +1017,136 @@ def test_arrows_and_wasd_give_the_same_directions():
     assert main.held_direction(held) == (0, 0)  # opposite keys cancel out
 
 
+
+
+# --- The map ----------------------------------------------------------------------
+
+
+def test_map_layout_lines_up_every_door_with_its_way_back():
+    """The search over the doors puts each room against the wall of its door, with the two openings facing."""
+    layout = main.room_layout()
+    assert set(layout) == set(story.ROOMS)
+    for door, info in story.DOORS.items():
+        back = main.return_door(info["to"], info["room"])
+        x, y = layout[info["room"]]
+        col, row, width, height = main.door_tiles(door)
+        other_x, other_y = layout[info["to"]]
+        back_col, back_row, _, _ = main.door_tiles(back)
+        if info["side"] in ("N", "S"):
+            assert x + col == other_x + back_col, door
+        else:
+            assert y + row == other_y + back_row, door
+
+
+def test_map_rooms_never_overlap_on_the_ship():
+    layout = main.room_layout()
+    areas = {room: pygame.Rect(layout[room], main.room_size(room)) for room in story.ROOMS}
+    rooms = list(areas)
+    for index, room in enumerate(rooms):
+        for other in rooms[index + 1:]:
+            assert not areas[room].colliderect(areas[other]), (room, other)
+
+
+def test_map_fits_in_the_corner_of_the_bar():
+    corner = main.map_rect()
+    assert corner.top >= 0 and corner.bottom <= main.HUD_HEIGHT and corner.right <= main.WIDTH
+    for room in story.ROOMS:
+        assert corner.contains(main.map_area(room)), room
+
+
+def test_map_dot_follows_the_player_inside_the_current_room(app):
+    start_new_game(app)
+    for room in ("deck", "corridor", "cabin"):
+        area = main.map_area(room)
+        columns, rows = main.room_size(room)
+        for col, row in ((1, 1), (columns - 2, rows - 2), (columns // 2, rows // 2)):
+            x, y = main.map_dot(room, main.tile_rect(col, row).topleft)
+            assert area.collidepoint(x, y), (room, col, row)
+    top = main.map_dot("deck", main.tile_rect(7, 1).topleft)
+    bottom = main.map_dot("deck", main.tile_rect(7, 22).topleft)
+    assert top[1] < bottom[1]
+
+
+def test_map_points_at_the_anvil_until_the_key_is_fused():
+    assert main.map_markers(play(BOTH_HALVES)) == []
+    assert main.map_markers(play(DOCTOR_AT_PEACE)) == ["galley"]
+    assert main.map_markers(play(KEY_FUSED)) == []
+
+
+def test_map_is_drawn_in_every_room(app):
+    start_new_game(app)
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for room in story.ROOMS:
+        app["state"] = in_room(room)
+        app["player"] = main.spawn_at_entry(room)
+        main.draw_hud(app, screen)
+
+
+# --- Big rooms and the camera -------------------------------------------------------
+
+
+def test_camera_stays_still_in_a_room_the_size_of_the_screen():
+    for col, row in ((1, 1), (14, 10), (7, 5)):
+        assert main.camera("cabin", main.tile_rect(col, row).topleft) == (0, 0)
+
+
+def test_camera_follows_the_player_along_the_tall_deck_and_stops_at_its_edges():
+    top = main.camera("deck", main.tile_rect(7, 1).topleft)
+    middle = main.camera("deck", main.tile_rect(7, 12).topleft)
+    bottom = main.camera("deck", main.tile_rect(7, 22).topleft)
+    columns, rows = main.room_size("deck")
+    assert top == (0, 0)
+    assert bottom == (0, rows * main.TILE - main.VIEW.height)
+    assert top[1] < middle[1] < bottom[1]
+
+
+def test_camera_scrolls_sideways_in_the_corridor_and_centres_its_low_ceiling():
+    columns, rows = main.room_size("corridor")
+    west = main.camera("corridor", main.tile_rect(2, 3).topleft)
+    east = main.camera("corridor", main.tile_rect(columns - 3, 3).topleft)
+    assert west[0] == 0 and east[0] == columns * main.TILE - main.VIEW.width
+    assert west[1] == east[1] == (rows * main.TILE - main.VIEW.height) // 2  # less than a screen: black above and below
+
+
+def test_the_player_is_always_on_screen(app):
+    """Wherever the player stands in a big room, the camera keeps them inside the view."""
+    for room in ("deck", "corridor", "mine"):
+        columns, rows = main.room_size(room)
+        for col in range(1, columns - 1, 3):
+            for row in range(1, rows - 1, 3):
+                position = main.tile_rect(col, row).topleft
+                x, y = main.camera(room, position)
+                body = main.player_rect(position).move(-x, -y)
+                assert main.VIEW.contains(body), (room, col, row)
+
+
+# --- The portal ---------------------------------------------------------------------
+
+
+def test_walking_into_the_portal_leads_to_the_mine_and_back(app):
+    start_new_game(app)
+    app["state"] = in_room("corridor_end")
+    stand_next_to(app, "corridor_portal")  # just below the ring
+    walk_until(app, lambda x, y: app["state"]["room"] == "mine", lambda x, y: (0, -1), limit=60)
+    assert app["player"] == main.spawn_by_portal("mine_portal")
+    assert app["banner"] == story.ROOMS["mine"]["name"]
+    assert engine.restore_state(save.load_game())["room"] == "mine"  # saved at once
+    walk_until(app, lambda x, y: app["state"]["room"] == "corridor_end", lambda x, y: (0, -1), limit=60)
+    assert app["player"] == main.spawn_by_portal("corridor_portal")
+
+
+def test_arriving_by_a_portal_lands_on_free_floor():
+    for portal, info in story.OBJECTS.items():
+        if info["kind"] == "portal":
+            spot = main.player_rect(main.spawn_by_portal(portal))
+            assert spot.collidelist(main.solid_rects(in_room(info["room"]))) == -1, portal
+            assert main.portal_touched(in_room(info["room"]), spot.topleft) is None, portal
+
+
+def test_big_rooms_are_drawn_through_the_camera(app):
+    start_new_game(app)
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for room in story.ROOMS:
+        app["state"] = in_room(room)
+        app["player"] = main.spawn_at_entry(room)
+        main.draw_play_screen(app, screen)

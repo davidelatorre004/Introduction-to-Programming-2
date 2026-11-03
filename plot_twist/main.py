@@ -32,7 +32,8 @@ SCALE = 3                  # the window is three times bigger
 FPS = 60
 TILE = 16
 HUD_HEIGHT = 2 * TILE      # the bar at the top, above the room
-COLUMNS, ROWS = 16, 12     # a room in tiles, walls included
+COLUMNS, ROWS = 16, 12     # the screen in tiles below the bar, and the size of a room unless story.py says otherwise
+VIEW = pygame.Rect(0, HUD_HEIGHT, COLUMNS * TILE, ROWS * TILE)  # where the room is shown on screen
 
 PLAYER_SIZE = 12
 PLAYER_SPEED = 1.5         # pixels per frame
@@ -53,14 +54,6 @@ ENDING_SCENE_HEIGHT = 64   # the picture at the top of the ending screen
 ENDING_HORIZON = 40        # where the sea starts in that picture
 ENDING_MENU_TOP = 186
 EXPLOSION_DELAY = 12       # frames before the ship blows up in the bad ending
-
-# Where the opening of a door is on each wall: first tile (column, row), then width and height in tiles.
-DOOR_OPENINGS = {
-    "N": (7, 0, 2, 1),
-    "S": (7, ROWS - 1, 2, 1),
-    "W": (0, 5, 1, 2),
-    "E": (COLUMNS - 1, 5, 1, 2),
-}
 
 # The direction to walk in to go through a door on each wall.
 TOWARD = {"N": (0, -1), "S": (0, 1), "W": (-1, 0), "E": (1, 0)}
@@ -104,7 +97,7 @@ COLORS = {
 TILE_COLORS = {"lit": COLORS["highlight"], "dark": COLORS["cable"], "error": COLORS["error"]}
 
 # The kinds of object an item can lie on: drawn low, before the item, which sits a little higher.
-HOLDERS = ("altar", "anvil")
+HOLDERS = ("altar", "anvil", "cauldron")
 
 # The sound each outcome of a floor puzzle plays (see sounds.py).
 EVENT_SOUNDS = {
@@ -112,7 +105,18 @@ EVENT_SOUNDS = {
     "phase_complete": "ding",
     "tiles_complete": "fanfare",
     "tiles_reset": "buzz",
+    "potion_poured": "blip",
+    "potion_spoiled": "buzz",
+    "potion_ready": "fanfare",
+    "teleported": "ding",
 }
+
+# --- The map in the corner ------------------------------------------------------------
+
+MAP_SCALE = 3        # one pixel of the map for every three tiles of the ship
+MAP_BLINK = FPS // 3 # frames between two blinks of a marker
+# Things the map points at while they wait for the player: the anvil, until the key is fused.
+MAP_MARKERS = {"anvil": "fused_key"}
 
 # Floor and wall color of each room.
 ROOM_COLORS = {
@@ -124,6 +128,10 @@ ROOM_COLORS = {
     "infirmary": ((200, 210, 205), (110, 125, 120)),
     "galley": ((120, 80, 50), (40, 32, 30)),
     "helm": ((120, 80, 50), (70, 45, 30)),
+    "east_room": ((120, 80, 50), (70, 45, 30)),
+    "corridor": ((70, 60, 55), (40, 32, 30)),
+    "corridor_end": ((70, 60, 55), (40, 32, 30)),
+    "mine": ((90, 70, 55), (50, 40, 35)),
 }
 DEFAULT_ROOM_COLORS = ((100, 100, 100), (50, 50, 50))
 
@@ -164,10 +172,29 @@ def doors_in(room):
     return doors
 
 
+def room_size(room):
+    """A room's size in tiles, walls included: one screen, unless story.py gives it a "size"."""
+    return story.ROOMS[room].get("size", (COLUMNS, ROWS))
+
+
+def door_tiles(door):
+    """The opening of a door in tiles: (column, row, width, height) in its room.
+
+    Two tiles wide, in the middle of its wall, or from tile "at" along the wall.
+    """
+    info = story.DOORS[door]
+    columns, rows = room_size(info["room"])
+    side = info["side"]
+    if side == "N" or side == "S":
+        start = info.get("at", (columns - 2) // 2)
+        return (start, 0 if side == "N" else rows - 1, 2, 1)
+    start = info.get("at", (rows - 2) // 2)
+    return (0 if side == "W" else columns - 1, start, 1, 2)
+
+
 def door_rect(door):
-    """The opening of a door, in the middle of its wall."""
-    col, row, width, height = DOOR_OPENINGS[story.DOORS[door]["side"]]
-    return tile_rect(col, row, width, height)
+    """The opening of a door, in pixels."""
+    return tile_rect(*door_tiles(door))
 
 
 def thing_rect(thing):
@@ -182,27 +209,31 @@ def thing_rect(thing):
 
 
 def wall_rects(room):
-    """The solid parts of the walls of a room: the four sides, with a gap where each door is."""
+    """The solid parts of the walls of a room: the four sides, with a gap where each door is.
+
+    A wall is cut into pieces at its doors, from one end to the other.
+    """
+    columns, rows = room_size(room)
     sides = {
-        "N": tile_rect(0, 0, COLUMNS, 1),
-        "S": tile_rect(0, ROWS - 1, COLUMNS, 1),
-        "W": tile_rect(0, 0, 1, ROWS),
-        "E": tile_rect(COLUMNS - 1, 0, 1, ROWS),
+        "N": tile_rect(0, 0, columns, 1),
+        "S": tile_rect(0, rows - 1, columns, 1),
+        "W": tile_rect(0, 0, 1, rows),
+        "E": tile_rect(columns - 1, 0, 1, rows),
     }
     walls = []
     for side, wall in sides.items():
-        opening = None
-        for door in doors_in(room):
-            if story.DOORS[door]["side"] == side:
-                opening = door_rect(door)
-        if opening is None:
-            walls.append(wall)
-        elif side == "N" or side == "S":
-            walls.append(pygame.Rect(wall.left, wall.top, opening.left - wall.left, wall.height))
-            walls.append(pygame.Rect(opening.right, wall.top, wall.right - opening.right, wall.height))
-        else:
-            walls.append(pygame.Rect(wall.left, wall.top, wall.width, opening.top - wall.top))
-            walls.append(pygame.Rect(wall.left, opening.bottom, wall.width, wall.bottom - opening.bottom))
+        openings = sorted(door_rect(door) for door in doors_in(room) if story.DOORS[door]["side"] == side)
+        across = side == "N" or side == "S"  # the wall runs left to right, else top to bottom
+        start = wall.left if across else wall.top
+        for opening in openings + [None]:
+            end = (wall.right if across else wall.bottom) if opening is None else (opening.left if across else opening.top)
+            if end > start:
+                if across:
+                    walls.append(pygame.Rect(start, wall.top, end - start, wall.height))
+                else:
+                    walls.append(pygame.Rect(wall.left, start, wall.width, end - start))
+            if opening is not None:
+                start = opening.right if across else opening.bottom
     return walls
 
 
@@ -224,9 +255,11 @@ def solid_rects(state):
 
 
 def is_flat(thing):
-    """True for decor lying on the floor, like a coil of rope: the player walks over it."""
+    """True for what lies on the floor and is walked over: a portal, or flat decor like a coil of rope."""
     info = story.OBJECTS.get(thing)
-    return info is not None and info["kind"] == "decor" and not info["solid"]
+    if info is None:
+        return False
+    return info["kind"] == "portal" or (info["kind"] == "decor" and not info["solid"])
 
 
 def player_rect(position):
@@ -303,6 +336,40 @@ def spawn_in_front_of(door):
     else:
         rect.midright = (opening.left - SPAWN_GAP, opening.centery)
     return (rect.x, rect.y)
+
+
+def spawn_by_portal(portal):
+    """Where the player appears after a portal: just below the portal they arrive at, not touching it."""
+    ring = thing_rect(portal)
+    rect = pygame.Rect(0, 0, PLAYER_SIZE, PLAYER_SIZE)
+    rect.midtop = (ring.centerx, ring.bottom + SPAWN_GAP)
+    return (rect.x, rect.y)
+
+
+def portal_touched(state, position):
+    """The portal the player has stepped into, or None: their middle is inside its ring."""
+    center = player_rect(position).center
+    for thing in engine.things_here(state):
+        if thing["kind"] == "portal" and thing_rect(thing["id"]).inflate(-8, -8).collidepoint(center):
+            return thing["id"]
+    return None
+
+
+def camera(room, position):
+    """The top-left corner, in room pixels, of the part of the room on screen.
+
+    A room the size of the screen does not move. A bigger one follows the player
+    and stops at its edges; a smaller one is centred, with black around it.
+    """
+    columns, rows = room_size(room)
+    center = player_rect(position).center
+    corner = []
+    for size, view, middle in ((columns * TILE, VIEW.width, center[0]), (rows * TILE, VIEW.height, center[1] - HUD_HEIGHT)):
+        if size <= view:
+            corner.append((size - view) // 2)
+        else:
+            corner.append(min(max(middle - view // 2, 0), size - view))
+    return (corner[0], corner[1])
 
 
 def spawn_at_entry(room):
@@ -678,6 +745,21 @@ def go_through(app, door):
     show_banner(app, outcome["text"])
 
 
+def go_through_portal(app, portal):
+    """The player steps into a portal: the engine moves them, and they appear by the twin portal."""
+    state, outcome = engine.perform(app["state"], {"verb": "travel", "target": portal})
+    if not outcome["ok"]:
+        return
+    sounds.play(EVENT_SOUNDS.get(outcome["event"]))
+    app["state"] = state
+    save_progress(app)
+    app["player"] = spawn_by_portal(story.OBJECTS[portal]["to"])
+    app["touching"] = None
+    settle_on_floor(app)
+    app["fade"] = FADE_FRAMES
+    show_banner(app, story.ROOMS[state["room"]]["name"])
+
+
 def floor_triggers(app):
     """The movement triggers of the room, checked in every frame after the player moves.
 
@@ -749,6 +831,7 @@ def do_action(app, action):
         go_through(app, action["target"])
         return
     state, outcome = engine.perform(app["state"], action)
+    sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     if outcome["event"] == "toggled":
         show_banner(app, outcome["text"])  # a generator clicks: no text box to close every time
     else:
@@ -854,6 +937,9 @@ def update(app, dx, dy):
         app["touching"] = door
         go_through(app, door)
     floor_triggers(app)
+    portal = portal_touched(app["state"], app["player"])
+    if portal is not None:
+        go_through_portal(app, portal)
 
 
 # --- Drawing -------------------------------------------------------------------------
@@ -1053,9 +1139,10 @@ def draw_player(app, screen):
         pygame.draw.rect(screen, COLORS["black"], eye)
 
 
-def draw_railing(screen):
+def draw_railing(screen, room):
     """The ship's wooden railing around the deck, with a post on every tile."""
-    rail = tile_rect(1, 1, COLUMNS - 2, ROWS - 2).inflate(4, 4)
+    columns, rows = room_size(room)
+    rail = tile_rect(1, 1, columns - 2, rows - 2).inflate(4, 4)
     pygame.draw.rect(screen, COLORS["railing"], rail, 2)
     for x in range(rail.left + TILE - 1, rail.right - 2, TILE):
         pygame.draw.rect(screen, COLORS["railing"], (x, rail.top - 2, 2, 4))
@@ -1149,16 +1236,17 @@ def draw_room(app, screen):
     if wall is None:
         wall = sprites.image("wall_" + room)
     screen.fill(COLORS["black"])
-    for col in range(COLUMNS):
-        for row in range(ROWS):
-            inside = 1 <= col <= COLUMNS - 2 and 1 <= row <= ROWS - 2
+    columns, rows = room_size(room)
+    for col in range(columns):
+        for row in range(rows):
+            inside = 1 <= col <= columns - 2 and 1 <= row <= rows - 2
             picture = floor if inside else wall
             if picture is None:
                 pygame.draw.rect(screen, floor_color if inside else wall_color, tile_rect(col, row))
             else:
                 screen.blit(picture, tile_rect(col, row))
     if story.ROOMS[room]["outdoor"]:
-        draw_railing(screen)
+        draw_railing(screen, room)
     things = engine.things_here(state)
     draw_floor_puzzles(app, screen, things)
     draw_cables(screen, state)
@@ -1167,7 +1255,7 @@ def draw_room(app, screen):
         if thing["kind"] == "door":
             draw_door(screen, thing["id"], thing["status"])
         elif thing["kind"] in HOLDERS or is_flat(thing["id"]):
-            draw_thing(screen, thing)  # low furniture and flat decor, drawn before what lies on it
+            draw_thing(screen, thing)  # low furniture, portals and flat decor, drawn before what lies on it
         elif thing["kind"] not in ("item", "tile"):
             standing.append(thing)
     for thing in things:
@@ -1199,18 +1287,22 @@ def draw_standing(app, screen, thing):
 
 
 def draw_hud(app, screen):
-    """The bar at the top: the room and the inventory key, then what E does here and the items carried."""
+    """The bar at the top: the room and the inventory key, then what E does here and the items carried.
+
+    The map of the ship takes the top right corner.
+    """
     font = app["fonts"]["text"]
     state = app["state"]
     pygame.draw.rect(screen, COLORS["hud"], (0, 0, WIDTH, HUD_HEIGHT))
     pygame.draw.line(screen, COLORS["dim_text"], (0, HUD_HEIGHT - 1), (WIDTH, HUD_HEIGHT - 1))
     draw_text(screen, font, story.ROOMS[state["room"]]["name"], COLORS["text"], (8, 4))
-    draw_text(screen, font, story.MESSAGES["hint_inventory"], COLORS["dim_text"], (WIDTH - 8, 4), "right")
+    right = map_rect().left - 6  # the map takes the right corner: the rest moves left of it
+    draw_text(screen, font, story.MESSAGES["hint_inventory"], COLORS["dim_text"], (right, 4), "right")
     if app["scene"] == "play" and not app["dialog"]:
         hint = prompt(state, app["player"])
         if hint:
             draw_text(screen, font, hint, COLORS["highlight"], (8, 18))
-    x = WIDTH - 4
+    x = right + 4
     for item in reversed(state["inventory"]):
         x -= 18
         picture = sprites.image(item)
@@ -1218,6 +1310,126 @@ def draw_hud(app, screen):
             pygame.draw.rect(screen, THING_COLORS.get(item, MISSING_COLOR), (x + 4, 19, 8, 8))
         else:
             screen.blit(picture, (x, 14))
+    draw_map(app, screen)
+
+
+def room_layout():
+    """Where each room lies on the ship, in tiles: the top-left corner of each one.
+
+    Nobody writes it down: a search from the starting room follows the doors and
+    puts the next room against the wall of the door, so that the two openings
+    meet. A new room in story.py lands on the map by itself. A room only a portal
+    leads to has no door to follow: story.py gives its "map_pos".
+    """
+    places = {story.START_ROOM: (0, 0)}
+    waiting = [story.START_ROOM]
+    while waiting:
+        room = waiting.pop(0)
+        x, y = places[room]
+        columns, rows = room_size(room)
+        for door in doors_in(room):
+            info = story.DOORS[door]
+            other = info["to"]
+            back = return_door(other, room)
+            if other in places or back is None:
+                continue
+            col, row, _, _ = door_tiles(door)
+            back_col, back_row, _, _ = door_tiles(back)
+            other_columns, other_rows = room_size(other)
+            if info["side"] == "N":
+                places[other] = (x + col - back_col, y - other_rows)
+            elif info["side"] == "S":
+                places[other] = (x + col - back_col, y + rows)
+            elif info["side"] == "W":
+                places[other] = (x - other_columns, y + row - back_row)
+            else:
+                places[other] = (x + columns, y + row - back_row)
+            waiting.append(other)
+    for room, info in story.ROOMS.items():
+        if room not in places:
+            places[room] = info["map_pos"]
+    return places
+
+
+def map_rect():
+    """The whole map, in the top right corner of the bar."""
+    layout = room_layout()
+    left = min(x for x, y in layout.values())
+    top = min(y for x, y in layout.values())
+    right = max(x + room_size(room)[0] for room, (x, y) in layout.items())
+    bottom = max(y + room_size(room)[1] for room, (x, y) in layout.items())
+    width = (right - left + MAP_SCALE - 1) // MAP_SCALE
+    height = (bottom - top + MAP_SCALE - 1) // MAP_SCALE
+    return pygame.Rect(WIDTH - 4 - width, (HUD_HEIGHT - height) // 2, width, height)
+
+
+def map_area(room):
+    """The little rectangle of a room on the map: its place on the ship, made MAP_SCALE times smaller.
+
+    One pixel less on the right and at the bottom leaves a gap between rooms that touch.
+    """
+    layout = room_layout()
+    left = min(x for x, y in layout.values())
+    top = min(y for x, y in layout.values())
+    corner = map_rect()
+    x, y = layout[room]
+    columns, rows = room_size(room)
+    x0 = corner.left + (x - left) // MAP_SCALE
+    y0 = corner.top + (y - top) // MAP_SCALE
+    x1 = corner.left + (x - left + columns) // MAP_SCALE
+    y1 = corner.top + (y - top + rows) // MAP_SCALE
+    return pygame.Rect(x0, y0, max(x1 - x0 - 1, 1), max(y1 - y0 - 1, 1))
+
+
+def map_dot(room, position):
+    """Where the player is on the map: inside the room's rectangle, where they stand in the room."""
+    area = map_area(room)
+    columns, rows = room_size(room)
+    floor = tile_rect(1, 1, columns - 2, rows - 2)
+    body = player_rect(position)
+    across = min(max((body.centerx - floor.left) / floor.width, 0), 1)
+    down = min(max((body.centery - floor.top) / floor.height, 0), 1)
+    return (area.left + round(across * (area.width - 1)), area.top + round(down * (area.height - 1)))
+
+
+def map_markers(state):
+    """The rooms the map points at: where a thing waits that the player still needs."""
+    rooms = []
+    for thing, needed in MAP_MARKERS.items():
+        if engine.is_standing(state, thing) and not engine.has_item(state, needed):
+            rooms.append(story.OBJECTS[thing]["room"])
+    return rooms
+
+
+def draw_map(app, screen):
+    """The map of the ship: only the rooms visited so far, the doors out of them, and the player."""
+    state = app["state"]
+    visited = engine.visited_rooms(state)
+    for room in visited:
+        color = COLORS["highlight"] if room == state["room"] else COLORS["dim_text"]
+        pygame.draw.rect(screen, color, map_area(room))
+    for door, info in story.DOORS.items():
+        if info["room"] in visited:  # an exit out of a known room, even towards an unknown one
+            area = map_area(info["room"])
+            columns, rows = room_size(info["room"])
+            col, row, width, height = door_tiles(door)
+            x = area.left + (col * area.width) // columns  # where the door is along its wall
+            y = area.top + (row * area.height) // rows
+            side = info["side"]
+            if side == "N":
+                y = area.top - 1
+            elif side == "S":
+                y = area.bottom
+            elif side == "W":
+                x = area.left - 1
+            else:
+                x = area.right
+            pygame.draw.rect(screen, COLORS["dim_text"], (x, y, 1, 1))
+    if (app["frame"] // MAP_BLINK) % 2 == 0:
+        for room in map_markers(state):
+            pygame.draw.rect(screen, COLORS["error"], map_area(room).inflate(2, 2), 1)
+    x, y = map_dot(state["room"], app["player"])
+    pygame.draw.rect(screen, COLORS["black"], (x, y, 1, 1))
 
 
 def draw_banner(app, screen):
@@ -1246,11 +1458,36 @@ def draw_dialog(app, screen):
         pygame.draw.polygon(screen, COLORS["highlight"], [(x - 3, y - 4), (x + 3, y - 4), (x, y - 1)])
 
 
+# One drawing surface per room size, kept from frame to frame.
+_room_surfaces = {}
+
+
+def room_surface(room):
+    """A surface as big as the whole room (with the bar's height above it, like the screen)."""
+    columns, rows = room_size(room)
+    size = (columns * TILE, HUD_HEIGHT + rows * TILE)
+    if size not in _room_surfaces:
+        _room_surfaces[size] = pygame.Surface(size)
+    return _room_surfaces[size]
+
+
 def draw_play_screen(app, screen):
-    draw_room(app, screen)
+    """The room, seen through the camera, then the bar on top.
+
+    The whole room is drawn on its own surface, in room pixels, so nothing else
+    needs to know about the camera: walls, things and the player keep their places.
+    """
+    room = app["state"]["room"]
+    whole = room_surface(room)
+    draw_room(app, whole)
+    x, y = camera(room, app["player"])
+    screen.fill(COLORS["black"])
+    screen.set_clip(VIEW)
+    screen.blit(whole, (-x, -y))
+    screen.set_clip(None)
     if app["fade"] > 0:
         # Just through a door: the room comes out of the dark.
-        shade(screen, tile_rect(0, 0, COLUMNS, ROWS), 255 * app["fade"] // FADE_FRAMES)
+        shade(screen, VIEW, 255 * app["fade"] // FADE_FRAMES)
     draw_hud(app, screen)
 
 

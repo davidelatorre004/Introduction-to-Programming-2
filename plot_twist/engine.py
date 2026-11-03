@@ -102,12 +102,18 @@ def restore_state(data):
     if ending is not None and not _is_id(ending, story.ENDINGS):
         return None
 
+    for item in inventory:
+        gone_if = story.ITEMS[item].get("gone_if")
+        if gone_if is not None and flags.get(gone_if, story.FLAGS[gone_if]):
+            return None  # an item used up for good cannot be carried
     state = new_game()
     state["room"] = data["room"]
     state["inventory"] = list(inventory)
     state["flags"].update(flags)
     state["ending"] = ending
     if not _floor_puzzles_consistent(state["flags"]):
+        return None
+    if not _potion_puzzles_consistent(state["flags"]):
         return None
     return state
 
@@ -194,8 +200,11 @@ def actions_for(state, target):
     if kind == "switch":
         label = story.MESSAGES["label_activate"].format(name=story.OBJECTS[target]["name"])
         return [_action("activate", target, label)]
-    if kind == "decor":
-        return [_action("examine", target, story.MESSAGES["label_examine"])]  # only to look at
+    if kind == "decor" or kind == "portal":
+        return [_action("examine", target, story.MESSAGES["label_examine"])]  # a portal is for the feet
+    if kind == "ingredient":
+        label = story.MESSAGES["label_pour"].format(name=story.OBJECTS[target]["name"])
+        return [_action("pour", target, label), _action("examine", target, story.MESSAGES["label_examine"])]
     if kind == "door" and door_status(state, target) == "open":
         destination = story.ROOMS[story.DOORS[target]["to"]]["name"]
         label = story.MESSAGES["label_enter"].format(room=destination)
@@ -261,6 +270,7 @@ def enter(state, door):
     new = copy.deepcopy(state)
     _leave_floor_puzzles(new)  # walking out of a room is walking out of its tile zones
     new["room"] = info["to"]
+    new["flags"]["visited_" + info["to"]] = True  # for the map
     _reset_circuits(new)
     return _accept(new, "entered", story.ROOMS[info["to"]]["name"])
 
@@ -414,11 +424,80 @@ def examine(state, target):
     return _accept(state, "info", text)
 
 
+def pour(state, ingredient):
+    """Pour an ingredient into the cauldron of its potion puzzle.
+
+    Like the tiles, it is a small state machine, with one flag: how many
+    ingredients of the recipe are in, in the right order. Pouring:
+    - the next one of the recipe adds it ("potion_poured");
+    - the last one of the recipe makes the remedy ("potion_ready"): it appears in
+      the cauldron, and the puzzle is done;
+    - any other one spoils the mixture ("potion_spoiled"): the cauldron is empty
+      again, and the recipe starts over.
+    """
+    _expect(ingredient, "ingredient")
+    if is_over(state):
+        return _refuse(state, "game_over", story.MESSAGES["game_over"])
+    if not _is_here(state, ingredient):
+        return _refuse(state, "not_here", story.MESSAGES["not_here"])
+    puzzle = story.POTION_PUZZLES[story.OBJECTS[ingredient]["puzzle"]]
+    if state["flags"][puzzle["solved_flag"]]:
+        return _refuse(state, "already_done", story.MESSAGES["potion_done"])
+    recipe = puzzle["recipe"]
+    step = state["flags"][puzzle["step_flag"]]
+    new = copy.deepcopy(state)
+    if ingredient != recipe[step]:
+        new["flags"][puzzle["step_flag"]] = 0
+        name = story.OBJECTS[ingredient]["name"].lower()
+        return _accept(new, "potion_spoiled", puzzle["wrong_text"].format(name=name))
+    step += 1
+    if step == len(recipe):
+        new["flags"][puzzle["step_flag"]] = 0  # the cauldron is empty: the remedy is in the bottle
+        new["flags"][puzzle["solved_flag"]] = True
+        return _accept(new, "potion_ready", puzzle["solved_text"])
+    new["flags"][puzzle["step_flag"]] = step
+    return _accept(new, "potion_poured", story.OBJECTS[ingredient]["pour_text"])
+
+
+def travel(state, portal):
+    """The player walks into a portal: main.py calls this when it happens.
+
+    It takes them to the room of the portal it is linked to ("to"), as a door
+    would: the floor puzzles they were in start over, and the room goes on the map.
+    """
+    _expect(portal, "portal")
+    if is_over(state):
+        return _refuse(state, "game_over", story.MESSAGES["game_over"])
+    if not _is_here(state, portal):
+        return _refuse(state, "not_here", story.MESSAGES["not_here"])
+    destination = story.OBJECTS[story.OBJECTS[portal]["to"]]["room"]
+    new = copy.deepcopy(state)
+    _leave_floor_puzzles(new)
+    new["room"] = destination
+    new["flags"]["visited_" + destination] = True
+    _reset_circuits(new)
+    return _accept(new, "teleported", story.MESSAGES["portal_text"])
+
+
+def visited_rooms(state):
+    """The rooms the player has been in, the current one included: what the map shows."""
+    rooms = []
+    for room in story.ROOMS:
+        if state["flags"]["visited_" + room] or room == state["room"]:
+            rooms.append(room)
+    return rooms
+
+
+def is_standing(state, thing):
+    """True if an object stands in its room right now: it has appeared and it is not gone."""
+    return _is_standing(state, thing)
+
+
 def perform(state, action):
     """Carry out an action given as data, such as one returned by actions_for().
 
     The action is a dict with a "verb" ("pick_up", "enter", "use_item",
-    "examine", "activate", "step_on" or "leave_zone"), a "target" and, for
+    "examine", "activate", "step_on", "leave_zone", "pour" or "travel"), a "target" and, for
     "use_item", an "item". The target of "leave_zone" is a floor puzzle.
     """
     verb = action["verb"]
@@ -436,6 +515,10 @@ def perform(state, action):
         return step_on(state, action["target"])
     if verb == "leave_zone":
         return leave_zone(state, action["target"])
+    if verb == "pour":
+        return pour(state, action["target"])
+    if verb == "travel":
+        return travel(state, action["target"])
     raise ValueError(f"Unknown verb: {verb!r}")
 
 
@@ -519,6 +602,8 @@ def _on_floor(state, item):
         return False
     if info["appears_if"] is not None and not state["flags"][info["appears_if"]]:
         return False
+    if info.get("gone_if") is not None and state["flags"][info["gone_if"]]:
+        return False  # used up for good, like the remedy once drunk
     return not _has_or_fused(state, item)
 
 
@@ -542,10 +627,18 @@ def _is_free(state, item):
 
 
 def _is_standing(state, thing):
-    """True if an object is in its room now. Only a barrier can go: it is gone once open."""
+    """True if an object is in its room now.
+
+    A barrier is gone once open. Any object can also wait for a flag before it
+    appears ("appears_if", the anvil) or go away once a flag is set ("gone_if", the doctor).
+    """
     info = story.OBJECTS[thing]
     if info["kind"] == "barrier":
         return not state["flags"][info["open_if"]]
+    if info.get("appears_if") is not None and not state["flags"][info["appears_if"]]:
+        return False
+    if info.get("gone_if") is not None and state["flags"][info["gone_if"]]:
+        return False
     return True
 
 
@@ -631,6 +724,14 @@ def _floor_puzzles_consistent(flags):
     return True
 
 
+def _potion_puzzles_consistent(flags):
+    """True if a solved potion puzzle has an empty cauldron: the remedy has been bottled."""
+    for puzzle in story.POTION_PUZZLES.values():
+        if flags[puzzle["solved_flag"]] and flags[puzzle["step_flag"]] != 0:
+            return False
+    return True
+
+
 def _door_text(state, door):
     """What the player reads when examining a door."""
     info = story.DOORS[door]
@@ -690,7 +791,10 @@ def _use_on_anvil(state, item, anvil):
 
 
 def _use_on_object(state, item, thing):
-    """Apply the reaction a puzzle or a character has to this item, if it has one."""
+    """Apply the reaction a puzzle or a character has to this item, if it has one.
+
+    A reaction with "consumes" takes the item out of the inventory (the doctor drinks the remedy).
+    """
     reaction = story.OBJECTS[thing]["reactions"].get(item)
     if reaction is None:
         return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
@@ -702,6 +806,8 @@ def _use_on_object(state, item, thing):
         return _refuse(state, "already_done", story.MESSAGES["already_done"])
     new = copy.deepcopy(state)
     new["flags"][reaction["set_flag"]] = reaction["value"]
+    if reaction.get("consumes"):
+        new["inventory"].remove(item)  # drunk, eaten, used up: it is gone
     return _accept(new, "flag_set", reaction["text"])
 
 
@@ -730,7 +836,7 @@ def _is_choice_door(door):
 
 def _allowed_values(flag):
     """Every value a flag can take in valid play: its starting value, and what doors, reactions,
-    switches, circuits and floor puzzles write."""
+    switches, circuits, floor and potion puzzles and the map write."""
     values = [story.FLAGS[flag]]
     for door, info in story.DOORS.items():
         if info["choice_flag"] == flag:
@@ -751,6 +857,14 @@ def _allowed_values(flag):
             longest = max(len(phase["steps"]) for phase in puzzle["phases"])
             values += list(range(longest + 1))
         if puzzle["solved_flag"] == flag:
+            values.append(True)
+    for puzzle in story.POTION_PUZZLES.values():
+        if puzzle["step_flag"] == flag:
+            values += list(range(len(puzzle["recipe"])))  # never the whole recipe: then it is solved
+        if puzzle["solved_flag"] == flag:
+            values.append(True)
+    for room in story.ROOMS:
+        if flag == "visited_" + room:
             values.append(True)
     return values
 

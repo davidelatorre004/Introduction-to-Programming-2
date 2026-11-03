@@ -36,6 +36,12 @@ TO_ANGEL = act("enter", "deck_to_angel")
 CABIN_TO_DECK = act("enter", "cabin_to_deck")
 HOLD_TO_DECK = act("enter", "hold_to_deck")
 CRAB_TO_DECK = act("enter", "crab_to_deck")
+TO_INFIRMARY = act("enter", "hold_to_infirmary")
+INFIRMARY_TO_HOLD = act("enter", "infirmary_to_hold")
+CABIN_TO_GALLEY = act("enter", "cabin_to_galley")
+GALLEY_TO_CABIN = act("enter", "galley_to_cabin")
+TAKE_POTION = act("pick_up", "potion")
+GIVE_TO_DOCTOR = act("use_item", "doctor", item="potion")
 ACTIVATE_A = act("activate", "generator_a")
 ACTIVATE_B = act("activate", "generator_b")
 ACTIVATE_C = act("activate", "generator_c")
@@ -63,17 +69,24 @@ PHASE_1 = [step(1), step(2), step(3), step(4), step(5)]
 PHASE_2 = [step(3), step(1)]
 PHASE_3 = [step(5), step(2), step(4), step(3)]
 SOLVE_TILES = PHASE_1 + PHASE_2 + PHASE_3
+# The remedy, from the hold: the tinctures in the right order, then the doctor drinks it.
+RECIPE = [act("pour", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
+CALM_THE_DOCTOR = [TO_INFIRMARY] + RECIPE + [TAKE_POTION, GIVE_TO_DOCTOR, INFIRMARY_TO_HOLD]
+# From the deck to the galley and back: the anvil is there once the doctor is at peace.
+FUSE_IN_THE_GALLEY = [TO_CABIN, CABIN_TO_GALLEY, FUSE, GALLEY_TO_CABIN, CABIN_TO_DECK]
 # Wand, cabin puzzle, the first half of the key, and back on the deck.
 GET_KEY = [TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK]
-# Then the hold, no longer barred: the tiles, the second half, the two halves
-# fused on the anvil, and back on the deck.
-GET_FUSED_KEY = GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY, FUSE, HOLD_TO_DECK]
+# Then the hold, no longer barred: the tiles, the second half, the remedy for the
+# doctor, back on the deck, and the two halves fused on the anvil in the galley.
+GET_FUSED_KEY = (GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR
+                 + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
 # The shortest way to each ending: the barrel of the hold is optional.
 CRAB_ENDING = GET_FUSED_KEY + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
 ANGEL_ENDING = GET_FUSED_KEY + [OPEN_ANGEL, TO_ANGEL, GIVE_TO_ANGEL]
 # The long way: read the clue on the barrel too.
 CLUE_THEN_CRAB = (GET_KEY + [TO_HOLD, WAND_ON_BARREL] + SOLVE_TILES
-                  + [TAKE_SECOND_KEY, FUSE, HOLD_TO_DECK, OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB])
+                  + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY
+                  + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB])
 # Open both doors, go in one, come back and wander around without ending the game.
 CHOOSE_AND_WANDER = GET_FUSED_KEY + [OPEN_CRAB, OPEN_ANGEL, TO_CRAB, CRAB_TO_DECK, TO_CABIN]
 # Flip some generators, walk out and back in (they start over), flip another one.
@@ -130,6 +143,10 @@ def every_action():
             actions.append(act("activate", thing))
         if info["kind"] == "tile":
             actions.append(act("step_on", thing))
+        if info["kind"] == "ingredient":
+            actions.append(act("pour", thing))
+        if info["kind"] == "portal":
+            actions.append(act("travel", thing))
     for puzzle in story.FLOOR_PUZZLES:
         actions.append(act("leave_zone", puzzle))
     for target in targets:
@@ -231,14 +248,14 @@ def test_a3_revisited_cabin_offers_no_second_key():
 
 
 def test_a3_revisited_hold_offers_no_third_key():
-    """A3: back in the hold, the anvil is empty, and the tiles and the anvil do not make another key."""
+    """A3: back in the hold, the altar is empty, and the tiles and the altar do not make another key."""
     state = play(GET_FUSED_KEY + [TO_HOLD])
     assert "second_key" not in [thing["id"] for thing in engine.things_here(state)]
     _, outcome = engine.pick_up(state, "second_key")
     assert not outcome["ok"]
     after, outcome = engine.step_on(state, "tile_1")
     assert outcome["event"] == "already_done"
-    after, outcome = engine.use_item(state, "fused_key", "anvil")
+    after, outcome = engine.use_item(state, "fused_key", "hold_altar")
     assert outcome["event"] == "nothing_happens"
     assert after["inventory"] == ["wand", "fused_key"]
 
@@ -417,7 +434,8 @@ def test_pt03_the_halves_do_not_open_the_doors(steps, half):
 
 def test_pt03_the_anvil_fuses_the_two_halves():
     """Either half on the anvil, with both in hand: the halves become the fused key, in the first half's place."""
-    with_both = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY])
+    with_both = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR
+                     + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY])
     assert with_both["inventory"] == ["wand", "key", "second_key"]
     for half in ("key", "second_key"):
         fused, outcome = engine.use_item(with_both, half, "anvil")
@@ -427,13 +445,13 @@ def test_pt03_the_anvil_fuses_the_two_halves():
     _, outcome = engine.use_item(with_both, "wand", "anvil")
     assert outcome["event"] == "nothing_happens"
     halves_first = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TAKE_WAND, TO_HOLD] + SOLVE_TILES
-                        + [TAKE_SECOND_KEY, FUSE])
+                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
     assert halves_first["inventory"] == ["fused_key", "wand"]  # the order things were found in is kept
 
 
 def test_pt03_one_half_alone_cannot_be_fused():
     """The anvil needs both halves: the refusal says the other one is missing, and nothing changes."""
-    state = play(GET_KEY + [TO_HOLD])
+    state = play(GET_KEY + [TO_HOLD] + CALM_THE_DOCTOR + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY])
     after, outcome = engine.use_item(state, "key", "anvil")
     assert outcome["event"] == "missing_item"
     assert outcome["text"] == story.MESSAGES["missing_item"]
@@ -455,7 +473,7 @@ def test_pt03_a_lock_needing_several_items_wants_them_all(monkeypatch):
     """The engine's rule for any lock: every item it requires must be carried, or it explains what is missing."""
     monkeypatch.setitem(story.DOORS["deck_to_crab"], "requires", ["fused_key", "wand"])
     without_wand = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TO_HOLD] + SOLVE_TILES
-                        + [TAKE_SECOND_KEY, FUSE, HOLD_TO_DECK])
+                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
     after, outcome = engine.use_item(without_wand, "fused_key", "deck_to_crab")
     assert outcome["event"] == "missing_item"
     assert after == without_wand
@@ -643,13 +661,13 @@ def test_r2_an_item_can_wait_for_a_flag_to_appear(monkeypatch):
 
 
 def test_r3_revisited_hold_remembers_the_solved_tiles():
-    """Back in the hold: every tile still lit, the barrier still gone, the anvil empty."""
+    """Back in the hold: every tile still lit, the barrier still gone, the altar empty."""
     state = play(GET_FUSED_KEY + [TO_HOLD])
     here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
     assert [here[f"tile_{number}"] for number in range(1, 6)] == ["lit"] * 5
     assert "hold_barrier" not in here
     assert "second_key" not in here
-    assert here["anvil"] == "present"
+    assert here["hold_altar"] == "present"
 
 
 def test_r3_found_clue_is_remembered():
@@ -1229,15 +1247,42 @@ def test_story_every_door_has_a_way_back():
 
 
 def test_story_every_room_can_be_reached():
+    """Through doors or portals, every room can be reached from the start."""
+    links = [(door["room"], door["to"]) for door in story.DOORS.values()]
+    for info in story.OBJECTS.values():
+        if info["kind"] == "portal":
+            links.append((info["room"], story.OBJECTS[info["to"]]["room"]))
     reached = {story.START_ROOM}
     grew = True
     while grew:
         grew = False
-        for door in story.DOORS.values():
-            if door["room"] in reached and door["to"] not in reached:
-                reached.add(door["to"])
+        for room, to in links:
+            if room in reached and to not in reached:
+                reached.add(to)
                 grew = True
     assert reached == set(story.ROOMS)
+
+
+def test_story_portals_come_in_pairs():
+    """Each portal leads to another portal, in another room, that leads back."""
+    for portal, info in story.OBJECTS.items():
+        if info["kind"] == "portal":
+            twin = story.OBJECTS[info["to"]]
+            assert twin["kind"] == "portal" and twin["to"] == portal, portal
+            assert twin["room"] != info["room"], portal
+
+
+def test_travel_through_the_portal_and_back():
+    state = engine.new_game()
+    state["room"] = "corridor_end"
+    there, outcome = engine.travel(state, "corridor_portal")
+    assert outcome["event"] == "teleported" and there["room"] == "mine"
+    assert "mine" in engine.visited_rooms(there)
+    back, _ = engine.travel(there, "mine_portal")
+    assert back["room"] == "corridor_end"
+    _, outcome = engine.travel(state, "mine_portal")
+    assert outcome["event"] == "not_here"
+    assert offered(state, "corridor_portal") == [("examine", None)]
 
 
 def test_story_locked_doors_are_complete():
@@ -1263,7 +1308,13 @@ def test_story_locked_doors_are_complete():
 
 def test_story_objects_are_well_formed():
     for thing_id, thing in story.OBJECTS.items():
-        assert thing["kind"] in ("puzzle", "character", "switch", "tile", "barrier", "altar", "anvil", "decor"), thing_id
+        assert thing["kind"] in ("puzzle", "character", "switch", "tile", "barrier", "altar", "anvil", "decor",
+                                 "cauldron", "ingredient", "portal"), thing_id
+        for key in ("appears_if", "gone_if"):
+            assert thing.get(key) is None or thing[key] in story.FLAGS, (thing_id, key)
+        if thing["kind"] == "ingredient":
+            assert thing["puzzle"] in story.POTION_PUZZLES, thing_id
+            assert thing["pour_text"].strip(), thing_id
         if thing["kind"] == "decor":
             assert isinstance(thing["solid"], bool), thing_id
             assert thing["picture"].startswith("decor_"), thing_id
@@ -1336,3 +1387,90 @@ def test_story_texts_are_not_empty():
         assert text.strip()
 
 
+
+
+# --- The infirmary: the remedy, the doctor and his gift ----------------------------
+
+IN_INFIRMARY = GET_KEY + [TO_HOLD, TO_INFIRMARY]
+
+
+def test_potion_the_recipe_in_order_makes_the_remedy():
+    """Each tincture of the recipe moves the cauldron on; the last one makes the remedy appear in it."""
+    puzzle = story.POTION_PUZZLES["remedy"]
+    state = play(IN_INFIRMARY)
+    assert "potion" not in [thing["id"] for thing in engine.things_here(state)]
+    for number, tincture in enumerate(puzzle["recipe"], start=1):
+        state, outcome = engine.pour(state, tincture)
+        if number < len(puzzle["recipe"]):
+            assert outcome["event"] == "potion_poured"
+            assert outcome["text"] == story.OBJECTS[tincture]["pour_text"]
+            assert state["flags"]["potion_step"] == number
+    assert outcome["event"] == "potion_ready"
+    assert state["flags"]["potion_solved"] and state["flags"]["potion_step"] == 0
+    assert "potion" in [thing["id"] for thing in engine.things_here(state)]
+
+
+def test_potion_a_wrong_tincture_spoils_the_mixture():
+    """Out of order, the cauldron empties and the recipe starts over; nothing appears."""
+    green, red, gold, blue = story.POTION_PUZZLES["remedy"]["recipe"]
+    state = play(IN_INFIRMARY + [act("pour", green), act("pour", red)])
+    after, outcome = engine.pour(state, blue)  # the gold had to come first
+    assert outcome["ok"] and outcome["event"] == "potion_spoiled"
+    assert after["flags"]["potion_step"] == 0
+    assert not after["flags"]["potion_solved"]
+    _, outcome = engine.pour(play(IN_INFIRMARY), red)  # a wrong first one spoils it too
+    assert outcome["event"] == "potion_spoiled"
+
+
+def test_potion_the_cauldron_is_done_once_the_remedy_is_made():
+    state = play(IN_INFIRMARY + RECIPE)
+    for tincture in story.POTION_PUZZLES["remedy"]["recipe"]:
+        after, outcome = engine.pour(state, tincture)
+        assert outcome["event"] == "already_done"
+        assert after == state
+
+
+def test_potion_pouring_is_offered_on_every_tincture_only_in_the_infirmary():
+    state = play(IN_INFIRMARY)
+    for tincture in story.POTION_PUZZLES["remedy"]["recipe"]:
+        assert offered(state, tincture) == [("pour", None), ("examine", None)]
+    _, outcome = engine.pour(play(GET_KEY), "green_tincture")
+    assert outcome["event"] == "not_here"
+
+
+def test_doctor_drinks_the_remedy_vanishes_and_the_anvil_appears_in_the_galley():
+    before = play(IN_INFIRMARY + RECIPE + [TAKE_POTION])
+    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY], before)
+    assert "anvil" not in [thing["id"] for thing in engine.things_here(in_galley)]
+    after, outcome = engine.use_item(before, "potion", "doctor")
+    assert outcome["event"] == "flag_set" and after["flags"]["doctor_at_peace"]
+    here = [thing["id"] for thing in engine.things_here(after)]
+    assert "doctor" not in here and "potion" not in here  # gone, and the cauldron gives no second remedy
+    assert "potion" not in after["inventory"]  # drunk
+    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY], after)
+    assert "anvil" in [thing["id"] for thing in engine.things_here(in_galley)]
+
+
+def test_doctor_wants_nothing_but_the_remedy():
+    state = play(IN_INFIRMARY)
+    after, outcome = engine.use_item(state, "wand", "doctor")
+    assert outcome["event"] == "nothing_happens"
+    assert after == state
+
+
+def test_restore_rejects_an_impossible_cauldron_or_remedy():
+    good = play(IN_INFIRMARY + RECIPE + [TAKE_POTION])
+    assert engine.restore_state(good) == good
+    for flags in ({"potion_step": 4}, {"potion_step": 2, "potion_solved": True}, {"doctor_at_peace": True}):
+        broken = copy.deepcopy(good)
+        broken["flags"].update(flags)
+        assert engine.restore_state(broken) is None, flags
+
+
+def test_entering_a_room_marks_it_on_the_map():
+    state = engine.new_game()
+    assert engine.visited_rooms(state) == ["deck"]
+    state = play([TO_CABIN, CABIN_TO_GALLEY], state)
+    assert set(engine.visited_rooms(state)) == {"deck", "cabin", "galley"}
+    for room in story.ROOMS:
+        assert story.FLAGS["visited_" + room] == (room == story.START_ROOM), room
