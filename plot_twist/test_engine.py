@@ -395,18 +395,27 @@ def test_pt02_the_scene_lists_its_things_and_their_actions():
     }
     assert offered(state, "wand") == [("pick_up", None)]
     assert offered(state, "deck_to_cabin") == [("enter", None)]
-    assert offered(state, "deck") == [("examine", None)]
+    assert offered(state, "deck") == []  # far from everything, E does nothing
 
 
-def test_decor_can_only_be_examined():
-    """Decor is there to look at: even with items in hand, E offers "Examine" and nothing else."""
+def test_e_ignores_decor_except_the_notes_to_read():
+    """Furniture is not part of the story: even with items in hand, E offers nothing on it.
+
+    The notes ("clue") can still be read: they tell the order of the tinctures.
+    """
     state = play([TAKE_WAND])
+    clues = []
     for thing, info in story.OBJECTS.items():
         if info["kind"] == "decor":
             state["room"] = info["room"]
-            assert offered(state, thing) == [("examine", None)], thing
-            _, outcome = engine.examine(state, thing)
-            assert outcome["ok"] and outcome["text"] == info["look_text"], thing
+            if info.get("clue"):
+                clues.append(thing)
+                assert offered(state, thing) == [("examine", None)], thing
+                _, outcome = engine.examine(state, thing)
+                assert outcome["ok"] and outcome["text"] == info["look_text"], thing
+            else:
+                assert offered(state, thing) == [], thing
+    assert sorted(clues) == ["cabin_notes", "galley_notes", "infirmary_notes"]
 
 
 def test_pt02_accepted_actions_show_a_result():

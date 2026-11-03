@@ -197,13 +197,17 @@ def actions_for(state, target):
     "irreversible", and perform() accepts it as it is. Using or giving is offered
     for every item in the inventory, not only the right one, so the menu does not
     give the solution away. After an ending nothing is offered.
+
+    E only acts on what matters to the story: the room itself and decor offer
+    nothing, so E does nothing there. Decor that is a "clue" (the doctor's notes)
+    can still be read.
     """
     kind = _kind(target)
     if kind == "floor" or is_over(state) or not _is_here(state, target):
         return []  # a floor puzzle is not for E: the player's feet act on its tiles
 
     if kind == "room":
-        return [_action("examine", target, story.MESSAGES["label_look_around"])]
+        return []  # far from everything, E does nothing
     if kind == "item":
         if not _is_free(state, target):
             return [_action("examine", target, story.MESSAGES["label_examine"])]
@@ -214,7 +218,11 @@ def actions_for(state, target):
         return [_action("activate", target, label)]
     if kind == "portal" and story.OBJECTS[target]["to"] is None:
         return []  # a portal that only receives: nothing happens near it
-    if kind == "decor" or kind == "portal":
+    if kind == "decor":
+        if story.OBJECTS[target].get("clue"):
+            return [_action("examine", target, story.MESSAGES["label_examine"])]  # a note to read
+        return []  # just furniture: E ignores it
+    if kind == "portal":
         return [_action("examine", target, story.MESSAGES["label_examine"])]  # a portal is for the feet
     if kind == "door" and door_status(state, target) == "open":
         destination = story.ROOMS[story.DOORS[target]["to"]]["name"]

@@ -454,9 +454,10 @@ DOORS = {
 # - "portal" is a ring of light on the floor: walking into it takes the player
 #   to the portal named in "to", in another room, wherever that is. A portal
 #   whose "to" is None only receives: nothing happens near it.
-# - "decor" is only there to look at: E offers "Examine" and nothing else. It
-#   blocks the way if "solid" is true; if not, the player walks over it (a rope on
-#   the floor). "picture" names its sprite, so many pieces can share one.
+# - "decor" is furniture: E ignores it, unless it is a "clue" (a note to read),
+#   which E offers to "Examine". It blocks the way if "solid" is true; if not, the
+#   player walks over it (a rope on the floor). "picture" names its sprite, so
+#   many pieces can share one.
 # The barrel of the hold is still a simple puzzle: it only asks for the wand.
 OBJECTS = {
     # The generators of the cabin, in a ring around a square: A top left, B top
@@ -936,7 +937,7 @@ OBJECTS = {
     },
     "infirmary_notes": {
         "kind": "decor", "name": "Doctor's notes", "room": "infirmary", "pos": (8, 1),
-        "picture": "decor_notes", "solid": True,
+        "picture": "decor_notes", "solid": True, "clue": True,
         "look_text": "The doctor's notes, in a shaky hand: \"Fever remedy. Begin with the green. The blue must always go in last.\"",
         "done_text": None, "reactions": {},
     },
@@ -978,7 +979,7 @@ OBJECTS = {
     },
     "galley_notes": {
         "kind": "decor", "name": "Recipe", "room": "galley", "pos": (11, 1),
-        "picture": "decor_notes", "solid": True,
+        "picture": "decor_notes", "solid": True, "clue": True,
         "look_text": "A page pinned to the wall, in the doctor's hand: \"As with pepper and honey: the red goes in before the gold.\"",
         "done_text": None, "reactions": {},
     },
@@ -1243,7 +1244,7 @@ OBJECTS = {
     },
     "cabin_notes": {
         "kind": "decor", "name": "Captain's log", "room": "cabin", "pos": (5, 1),
-        "picture": "decor_notes", "solid": True,
+        "picture": "decor_notes", "solid": True, "clue": True,
         "look_text": "The captain's log. The last entry reads: \"The wand must not fall into the wrong hands.\"",
         "done_text": None, "reactions": {},
     },
@@ -1647,7 +1648,6 @@ MESSAGES = {
     # Labels of the actions offered by the E key.
     "label_pick_up": "Pick up: {item}",
     "label_enter": "Enter: {room}",
-    "label_look_around": "Look around",
     "label_examine": "Examine",
     "label_pour": "Pour: {name}",
     "portal_text": "The light swallows you, and spits you out somewhere else.",

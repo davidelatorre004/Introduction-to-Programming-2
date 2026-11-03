@@ -458,9 +458,10 @@ DOORS = {
 # - "portal" is a ring of light on the floor: walking into it takes the player
 #   to the portal named in "to", in another room, wherever that is. A portal
 #   whose "to" is None only receives: nothing happens near it.
-# - "decor" is only there to look at: E offers "Examine" and nothing else. It
-#   blocks the way if "solid" is true; if not, the player walks over it (a rope on
-#   the floor). "picture" names its sprite, so many pieces can share one.
+# - "decor" is furniture: E ignores it, unless it is a "clue" (a note to read),
+#   which E offers to "Examine". It blocks the way if "solid" is true; if not, the
+#   player walks over it (a rope on the floor). "picture" names its sprite, so
+#   many pieces can share one.
 # The barrel of the hold is still a simple puzzle: it only asks for the wand.
 OBJECTS = {
     # The generators of the cabin, in a ring around a square: A top left, B top
@@ -940,7 +941,7 @@ OBJECTS = {
     },
     "infirmary_notes": {
         "kind": "decor", "name": "Doctor's notes", "room": "infirmary", "pos": (8, 1),
-        "picture": "decor_notes", "solid": True,
+        "picture": "decor_notes", "solid": True, "clue": True,
         "look_text": "The doctor's notes, in a shaky hand: \"Fever remedy. Begin with the green. The blue must always go in last.\"",
         "done_text": None, "reactions": {},
     },
@@ -982,7 +983,7 @@ OBJECTS = {
     },
     "galley_notes": {
         "kind": "decor", "name": "Recipe", "room": "galley", "pos": (11, 1),
-        "picture": "decor_notes", "solid": True,
+        "picture": "decor_notes", "solid": True, "clue": True,
         "look_text": "A page pinned to the wall, in the doctor's hand: \"As with pepper and honey: the red goes in before the gold.\"",
         "done_text": None, "reactions": {},
     },
@@ -1247,7 +1248,7 @@ OBJECTS = {
     },
     "cabin_notes": {
         "kind": "decor", "name": "Captain's log", "room": "cabin", "pos": (5, 1),
-        "picture": "decor_notes", "solid": True,
+        "picture": "decor_notes", "solid": True, "clue": True,
         "look_text": "The captain's log. The last entry reads: \"The wand must not fall into the wrong hands.\"",
         "done_text": None, "reactions": {},
     },
@@ -1651,7 +1652,6 @@ MESSAGES = {
     # Labels of the actions offered by the E key.
     "label_pick_up": "Pick up: {item}",
     "label_enter": "Enter: {room}",
-    "label_look_around": "Look around",
     "label_examine": "Examine",
     "label_pour": "Pour: {name}",
     "portal_text": "The light swallows you, and spits you out somewhere else.",
@@ -1899,13 +1899,17 @@ def actions_for(state, target):
     "irreversible", and perform() accepts it as it is. Using or giving is offered
     for every item in the inventory, not only the right one, so the menu does not
     give the solution away. After an ending nothing is offered.
+
+    E only acts on what matters to the story: the room itself and decor offer
+    nothing, so E does nothing there. Decor that is a "clue" (the doctor's notes)
+    can still be read.
     """
     kind = _kind(target)
     if kind == "floor" or is_over(state) or not _is_here(state, target):
         return []  # a floor puzzle is not for E: the player's feet act on its tiles
 
     if kind == "room":
-        return [_action("examine", target, story.MESSAGES["label_look_around"])]
+        return []  # far from everything, E does nothing
     if kind == "item":
         if not _is_free(state, target):
             return [_action("examine", target, story.MESSAGES["label_examine"])]
@@ -1916,7 +1920,11 @@ def actions_for(state, target):
         return [_action("activate", target, label)]
     if kind == "portal" and story.OBJECTS[target]["to"] is None:
         return []  # a portal that only receives: nothing happens near it
-    if kind == "decor" or kind == "portal":
+    if kind == "decor":
+        if story.OBJECTS[target].get("clue"):
+            return [_action("examine", target, story.MESSAGES["label_examine"])]  # a note to read
+        return []  # just furniture: E ignores it
+    if kind == "portal":
         return [_action("examine", target, story.MESSAGES["label_examine"])]  # a portal is for the feet
     if kind == "door" and door_status(state, target) == "open":
         destination = story.ROOMS[story.DOORS[target]["to"]]["name"]
@@ -3107,14 +3115,16 @@ def reach_rect(thing):
 def nearest_target(state, position):
     """The thing within reach of the player that is closest to them, or None.
 
-    The numbered tiles do not count: they are part of the floor, and the feet act on them.
+    Only things E can act on count: not the numbered tiles (the feet act on them),
+    nor plain decor or a portal that only receives. So a barrel next to the
+    generator never gets in the way of the lever.
     """
     body = player_rect(position)
     reach = body.inflate(2 * REACH, 2 * REACH)
     nearest = None
     nearest_distance = 0
     for thing in engine.things_here(state):
-        if thing["kind"] == "tile":
+        if thing["kind"] == "tile" or not engine.actions_for(state, thing["id"]):
             continue
         rect = reach_rect(thing["id"])
         if not reach.colliderect(rect):
@@ -3127,7 +3137,7 @@ def nearest_target(state, position):
 
 
 def target_and_actions(state, position):
-    """What E would act on, and the actions it offers: the nearest thing, or else the room itself."""
+    """What E would act on, and the actions it offers: the nearest thing, or else the room (which offers nothing)."""
     target = nearest_target(state, position)
     if target is None:
         target = state["room"]
@@ -6701,18 +6711,27 @@ def test_pt02_the_scene_lists_its_things_and_their_actions():
     }
     assert offered(state, "wand") == [("pick_up", None)]
     assert offered(state, "deck_to_cabin") == [("enter", None)]
-    assert offered(state, "deck") == [("examine", None)]
+    assert offered(state, "deck") == []  # far from everything, E does nothing
 
 
-def test_decor_can_only_be_examined():
-    """Decor is there to look at: even with items in hand, E offers "Examine" and nothing else."""
+def test_e_ignores_decor_except_the_notes_to_read():
+    """Furniture is not part of the story: even with items in hand, E offers nothing on it.
+
+    The notes ("clue") can still be read: they tell the order of the tinctures.
+    """
     state = play([TAKE_WAND])
+    clues = []
     for thing, info in story.OBJECTS.items():
         if info["kind"] == "decor":
             state["room"] = info["room"]
-            assert offered(state, thing) == [("examine", None)], thing
-            _, outcome = engine.examine(state, thing)
-            assert outcome["ok"] and outcome["text"] == info["look_text"], thing
+            if info.get("clue"):
+                clues.append(thing)
+                assert offered(state, thing) == [("examine", None)], thing
+                _, outcome = engine.examine(state, thing)
+                assert outcome["ok"] and outcome["text"] == info["look_text"], thing
+            else:
+                assert offered(state, thing) == [], thing
+    assert sorted(clues) == ["cabin_notes", "galley_notes", "infirmary_notes"]
 
 
 def test_pt02_accepted_actions_show_a_result():
@@ -8626,7 +8645,7 @@ def test_prompt_says_what_e_does_here():
         return story.MESSAGES["prompt"].format(action=action)
 
     state = engine.new_game()
-    assert main.prompt(state, main.spawn_at_entry("deck")) == hint(story.MESSAGES["label_look_around"])
+    assert main.prompt(state, main.spawn_at_entry("deck")) == ""  # nothing near: no hint, E does nothing
     wand = main.thing_rect("wand")
     on_the_wand = (wand.centerx - main.PLAYER_SIZE // 2, wand.centery - main.PLAYER_SIZE // 2)
     pick_up_label = story.MESSAGES["label_pick_up"].format(item=story.ITEMS["wand"]["name"])
@@ -8659,10 +8678,27 @@ def test_the_nearest_thing_is_the_one_e_acts_on(app):
     assert main.nearest_target(solved, app["player"]) == "key"
 
 
-def test_e_with_nothing_near_describes_the_room(app):
+def test_e_with_nothing_near_does_nothing(app):
+    """Far from everything, E does nothing at all: no text box, nothing saved, the player keeps walking."""
     start_new_game(app)
+    saved = save.load_game()
     press(app, pygame.K_e)
-    assert dialog_text(app) == story.ROOMS["deck"]["description"]
+    assert app["scene"] == "play" and app["dialog"] == []
+    assert save.load_game() == saved
+
+
+def test_e_ignores_furniture_and_reaches_what_matters_behind_it(app):
+    """Next to a barrel, E does nothing: no barrel ever comes before something that matters. A note is still read."""
+    start_new_game(app)
+    stand_next_to(app, "deck_barrel_1")
+    assert main.nearest_target(app["state"], app["player"]) is None
+    press(app, pygame.K_e)
+    assert app["dialog"] == []
+    app["state"]["room"] = "infirmary"
+    stand_next_to(app, "infirmary_notes")
+    assert main.nearest_target(app["state"], app["player"]) == "infirmary_notes"  # a note is still read
+    press(app, pygame.K_e)
+    assert dialog_text(app) == story.OBJECTS["infirmary_notes"]["look_text"]
 
 
 def test_e_picks_up_an_item_at_once_and_saves(app):
@@ -8963,16 +8999,15 @@ def test_the_triggers_remember_where_the_player_already_is(in_hold, heard):
 
 
 def test_tiles_are_floor_not_things(in_hold):
-    """The player walks over the tiles, and E never acts on them: standing on one, E looks around."""
+    """The player walks over the tiles, and E never acts on them: standing on one, E does nothing."""
     state = in_hold["state"]
     solids = main.solid_rects(state)
-    look_around = story.MESSAGES["prompt"].format(action=story.MESSAGES["label_look_around"])
     for tile in puzzle_tiles("hold_tiles"):
         rect = main.thing_rect(tile)
         assert rect.collidelist(solids) == -1, tile
         on_it = (rect.centerx - main.PLAYER_SIZE // 2, rect.centery - main.PLAYER_SIZE // 2)
         assert main.nearest_target(state, on_it) is None, tile
-        assert main.prompt(state, on_it) == look_around, tile
+        assert main.prompt(state, on_it) == "", tile
 
 
 def test_a_mistake_makes_the_tiles_blink_red_then_go_dark(in_hold):

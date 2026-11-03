@@ -602,7 +602,7 @@ def test_prompt_says_what_e_does_here():
         return story.MESSAGES["prompt"].format(action=action)
 
     state = engine.new_game()
-    assert main.prompt(state, main.spawn_at_entry("deck")) == hint(story.MESSAGES["label_look_around"])
+    assert main.prompt(state, main.spawn_at_entry("deck")) == ""  # nothing near: no hint, E does nothing
     wand = main.thing_rect("wand")
     on_the_wand = (wand.centerx - main.PLAYER_SIZE // 2, wand.centery - main.PLAYER_SIZE // 2)
     pick_up_label = story.MESSAGES["label_pick_up"].format(item=story.ITEMS["wand"]["name"])
@@ -635,10 +635,27 @@ def test_the_nearest_thing_is_the_one_e_acts_on(app):
     assert main.nearest_target(solved, app["player"]) == "key"
 
 
-def test_e_with_nothing_near_describes_the_room(app):
+def test_e_with_nothing_near_does_nothing(app):
+    """Far from everything, E does nothing at all: no text box, nothing saved, the player keeps walking."""
     start_new_game(app)
+    saved = save.load_game()
     press(app, pygame.K_e)
-    assert dialog_text(app) == story.ROOMS["deck"]["description"]
+    assert app["scene"] == "play" and app["dialog"] == []
+    assert save.load_game() == saved
+
+
+def test_e_ignores_furniture_and_reaches_what_matters_behind_it(app):
+    """Next to a barrel, E does nothing: no barrel ever comes before something that matters. A note is still read."""
+    start_new_game(app)
+    stand_next_to(app, "deck_barrel_1")
+    assert main.nearest_target(app["state"], app["player"]) is None
+    press(app, pygame.K_e)
+    assert app["dialog"] == []
+    app["state"]["room"] = "infirmary"
+    stand_next_to(app, "infirmary_notes")
+    assert main.nearest_target(app["state"], app["player"]) == "infirmary_notes"  # a note is still read
+    press(app, pygame.K_e)
+    assert dialog_text(app) == story.OBJECTS["infirmary_notes"]["look_text"]
 
 
 def test_e_picks_up_an_item_at_once_and_saves(app):
@@ -939,16 +956,15 @@ def test_the_triggers_remember_where_the_player_already_is(in_hold, heard):
 
 
 def test_tiles_are_floor_not_things(in_hold):
-    """The player walks over the tiles, and E never acts on them: standing on one, E looks around."""
+    """The player walks over the tiles, and E never acts on them: standing on one, E does nothing."""
     state = in_hold["state"]
     solids = main.solid_rects(state)
-    look_around = story.MESSAGES["prompt"].format(action=story.MESSAGES["label_look_around"])
     for tile in puzzle_tiles("hold_tiles"):
         rect = main.thing_rect(tile)
         assert rect.collidelist(solids) == -1, tile
         on_it = (rect.centerx - main.PLAYER_SIZE // 2, rect.centery - main.PLAYER_SIZE // 2)
         assert main.nearest_target(state, on_it) is None, tile
-        assert main.prompt(state, on_it) == look_around, tile
+        assert main.prompt(state, on_it) == "", tile
 
 
 def test_a_mistake_makes_the_tiles_blink_red_then_go_dark(in_hold):

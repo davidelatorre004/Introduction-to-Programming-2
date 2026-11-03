@@ -430,14 +430,16 @@ def reach_rect(thing):
 def nearest_target(state, position):
     """The thing within reach of the player that is closest to them, or None.
 
-    The numbered tiles do not count: they are part of the floor, and the feet act on them.
+    Only things E can act on count: not the numbered tiles (the feet act on them),
+    nor plain decor or a portal that only receives. So a barrel next to the
+    generator never gets in the way of the lever.
     """
     body = player_rect(position)
     reach = body.inflate(2 * REACH, 2 * REACH)
     nearest = None
     nearest_distance = 0
     for thing in engine.things_here(state):
-        if thing["kind"] == "tile":
+        if thing["kind"] == "tile" or not engine.actions_for(state, thing["id"]):
             continue
         rect = reach_rect(thing["id"])
         if not reach.colliderect(rect):
@@ -450,7 +452,7 @@ def nearest_target(state, position):
 
 
 def target_and_actions(state, position):
-    """What E would act on, and the actions it offers: the nearest thing, or else the room itself."""
+    """What E would act on, and the actions it offers: the nearest thing, or else the room (which offers nothing)."""
     target = nearest_target(state, position)
     if target is None:
         target = state["room"]

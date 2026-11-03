@@ -4,6 +4,8 @@ Un breve gioco 8-bit, in inglese: ti svegli sul ponte di una nave alla deriva, c
 
 Il gioco ha qualche effetto sonoro: tieni l'audio acceso.
 
+Cosa è cambiato in ogni versione, in inglese: [CHANGELOG.md](CHANGELOG.md), con una pagina per versione nella cartella [versions](versions/).
+
 ## 1. Cosa ti serve
 
 - **uv**, lo strumento che installa Python e pygame al posto tuo. Se l'hai già usato per il corso, sei a posto. Altrimenti installalo:
@@ -63,7 +65,7 @@ La prima volta uv installa pygame: ci vuole qualche secondo. Poi si apre la fine
 | Su, giù e Invio (o E) | Scegliere nei menu |
 
 Qualche aiuto:
-- **Cosa fa E:** te lo dice la barra in alto, sulla seconda riga, per esempio "E: Pick up: Magic wand". Se vicino non c'è niente, E descrive la stanza.
+- **Cosa fa E:** te lo dice la barra in alto, sulla seconda riga, per esempio "E: Pick up: Magic wand". E agisce solo su ciò che conta per la storia: vicino ai mobili (barili, casse, lanterne...) o lontano da tutto non fa nulla. Gli appunti appesi invece si leggono.
 - **Più azioni possibili:** E apre un piccolo menu, per esempio Examine, "Use: …", "Give: …".
 - **Porte:** per passare basta camminarci contro. Se una porta è chiusa, te lo dice.
 - **Scelte definitive:** il gioco chiede conferma, con "No" già selezionato. Per confermare scegli "Yes".
@@ -79,7 +81,7 @@ Qualche aiuto:
 - **Indizio per la cabina:** gli otto generatori sono collegati da cavi in un anello, e attivarne uno cambia anche i due vicini. Devi accenderli tutti insieme.
 - **Indizio per l'infermeria:** il rimedio del dottore si fa con quattro fialette, in un ordine preciso. La prima è in infermeria; quando la raccogli, le altre compaiono in giro per la nave: cercale. Gli appunti del dottore dicono l'ordine.
 - **La miniera:** il portale in fondo al corridoio porta in una miniera. In fondo alla miniera un secondo portale riporta sulla nave, ma solo all'andata.
-- **Indizio per la stiva:** le cinque piastrelle numerate si calpestano, in tre prove una dopo l'altra. Una piastrella sbagliata, o uscire dalla grata intorno, fa ricominciare la prova in corso: "BZZZ!". I nomi delle prove sono incisi sull'incudine: esamina la barriera che la avvolge.
+- **Indizio per la stiva:** le cinque piastrelle numerate si calpestano, in tre prove una dopo l'altra. Una piastrella sbagliata, o uscire dalla grata intorno, fa ricominciare la prova in corso: "BZZZ!". I nomi delle prove sono incisi sulla barriera intorno all'altare in fondo alla stiva: esaminala.
 
 ## 6. Il salvataggio
 
