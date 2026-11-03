@@ -25,7 +25,7 @@ FLAGS = {
     "cabin_solved": False,
     # The numbered tiles of the hold: the phase being played (1, 2 or 3) and how
     # many tiles of its sequence are lit. Then all three phases are done: the
-    # barrier around the anvil has dissolved.
+    # barrier around the altar of the second key has dissolved.
     "hold_phase": 1,
     "hold_step": 0,
     "hold_solved": False,
@@ -35,6 +35,25 @@ FLAGS = {
     # opened, None while it is locked. Opening one does not seal the other.
     "crab_door": None,
     "angel_door": None,
+    # The cauldron of the infirmary: how many ingredients of the recipe are in it,
+    # in the right order; then the remedy is ready (and the cauldron empty again).
+    "potion_step": 0,
+    "potion_solved": False,
+    # The doctor drank the remedy: his ghost is gone, and the anvil has appeared in the galley.
+    "doctor_at_peace": False,
+    # The rooms the player has been in, for the map in the corner of the screen.
+    "visited_deck": True,
+    "visited_cabin": False,
+    "visited_hold": False,
+    "visited_crab_room": False,
+    "visited_angel_room": False,
+    "visited_infirmary": False,
+    "visited_galley": False,
+    "visited_helm": False,
+    "visited_east_room": False,
+    "visited_corridor": False,
+    "visited_corridor_end": False,
+    "visited_mine": False,
 }
 
 # "outdoor" tells the screen to draw the sea around the room. "entry" is the tile
@@ -46,16 +65,18 @@ ROOMS = {
         "description": (
             "The deck of a ship adrift. All around, nothing but ocean. "
             "One door leads to the captain's cabin and one to the hold; "
-            "two more have a lock."
+            "two more have a lock. In the middle stands a stone statue of a giant crab."
         ),
         "outdoor": True,
         "entry": (6, 5),
+        "size": (16, 24),  # twice as tall as the screen: the view scrolls with the player
     },
     "cabin": {
         "name": "Captain's cabin",
         "description": (
             "Sea charts scattered on the floor, and four generators humming at the corners of a square, "
-            "joined by cables. At the back, an energy barrier guards a small altar."
+            "joined by cables. At the back, an energy barrier guards a small altar. "
+            "Doors lead to the galley, to an empty room and, up a ladder, to the helm."
         ),
         "outdoor": False,
         "entry": (7, 9),
@@ -64,8 +85,8 @@ ROOMS = {
         "name": "Hold",
         "description": (
             "Dark, overturned crates and the smell of brine. Five numbered tiles shine in the floor, "
-            "from 1 to 5. At the back, an anvil wrapped in a barrier; "
-            "in a corner, a barrel covered in symbols."
+            "from 1 to 5. At the back, an altar wrapped in a barrier; "
+            "in a corner, a barrel covered in symbols. A narrow door leads to the infirmary."
         ),
         "outdoor": False,
         "entry": (7, 2),
@@ -82,11 +103,62 @@ ROOMS = {
         "outdoor": False,
         "entry": (13, 5),
     },
+    "infirmary": {
+        "name": "Infirmary",
+        "description": (
+            "Empty beds with grey sheets, a cabinet full of bottles. "
+            "The air is cold, and something in here does not want you to stay. "
+            "A low passage opens in the south wall."
+        ),
+        "outdoor": False,
+        "entry": (13, 5),
+    },
+    "galley": {
+        "name": "Galley",
+        "description": "Pots hanging from the ceiling, a cold stove and a table laid for a meal nobody ate.",
+        "outdoor": False,
+        "entry": (13, 5),
+    },
+    "helm": {
+        "name": "Helm",
+        "description": "The ship's wheel turns slowly on its own. Through the windows, only fog.",
+        "outdoor": False,
+        "entry": (11, 8),
+    },
+    "east_room": {
+        "name": "Empty room",
+        "description": "An empty room. Marks on the floor show where furniture used to stand.",
+        "outdoor": False,
+        "entry": (2, 5),
+    },
+    "corridor": {
+        "name": "Corridor",
+        "description": "A long, low corridor under the hold. Water drips from the ceiling.",
+        "outdoor": False,
+        "entry": (12, 3),
+        "size": (48, 8),  # long and narrow: the view scrolls sideways
+    },
+    "corridor_end": {
+        "name": "End of the corridor",
+        "description": "The corridor ends here, in front of a ring of purple light that hums softly.",
+        "outdoor": False,
+        "entry": (7, 8),
+    },
+    "mine": {
+        "name": "Mine",
+        "description": "A mine dug deep into the rock, far from the sea. Rails lead into the dark.",
+        "outdoor": False,
+        "entry": (7, 7),
+        "size": (16, 24),
+        # Only a portal leads here: no door says where it lies, so the map is told.
+        "map_pos": (34, 20),
+    },
 }
 
 # Items the player can collect. An item lies in its room, on tile "pos", until it
 # is picked up. If "appears_if" names a flag, it shows up only once that flag is true.
 # If "free_if" names a flag, it can be seen but not picked up until that flag is true.
+# An item with "gone_if" is used up for good once that flag is set.
 # An item that is "part_of" another one is fused into it at the anvil: then the
 # parts leave the inventory for good, and the whole item takes their place. An
 # item that only comes from fusing has no room and no "pos".
@@ -119,14 +191,26 @@ ITEMS = {
         "name": "Second key",
         "description": "The other half of the brass key. It matches the central key.",
         "room": "hold",
-        "pos": (7, 10),  # on the anvil, behind the barrier
+        "pos": (7, 10),  # on the altar, behind the barrier
         "appears_if": None,
         "part_of": "fused_key",
         "free_if": "hold_solved",
         "pickup_text": (
-            "You take the second key from the anvil. It matches the central key: "
-            "on the anvil the two can be fused together."
+            "You take the second key from the altar. It matches the central key: "
+            "somewhere on this ship there must be an anvil to fuse the two together."
         ),
+    },
+    # The remedy brewed in the infirmary's cauldron: the doctor's ghost is waiting for it.
+    "potion": {
+        "name": "Remedy",
+        "description": "A small bottle of clear, softly glowing liquid. It smells of the sea and of honey.",
+        "room": "infirmary",
+        "pos": (7, 6),  # in the cauldron
+        "appears_if": "potion_solved",
+        "gone_if": "doctor_at_peace",  # drunk: it never comes back
+        "part_of": None,
+        "free_if": None,
+        "pickup_text": "You fill a small bottle with the remedy. It is warm in your hand.",
     },
     # The two halves fused at the anvil: the key of the final doors.
     "fused_key": {
@@ -198,7 +282,70 @@ DOORS = {
         "requires": [], "choice_flag": None, "opens_with": None,
         "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
     },
+    "hold_to_infirmary": {
+        "room": "hold", "to": "infirmary", "side": "W",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "infirmary_to_hold": {
+        "room": "infirmary", "to": "hold", "side": "E",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "cabin_to_galley": {
+        "room": "cabin", "to": "galley", "side": "W",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "galley_to_cabin": {
+        "room": "galley", "to": "cabin", "side": "E",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "cabin_to_east_room": {
+        "room": "cabin", "to": "east_room", "side": "E",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "east_room_to_cabin": {
+        "room": "east_room", "to": "cabin", "side": "W",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "cabin_to_helm": {
+        "room": "cabin", "to": "helm", "side": "N", "at": 11,
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "helm_to_cabin": {
+        "room": "helm", "to": "cabin", "side": "S", "at": 11,
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "infirmary_to_corridor": {
+        "room": "infirmary", "to": "corridor", "side": "S", "at": 12,
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "corridor_to_infirmary": {
+        "room": "corridor", "to": "infirmary", "side": "N", "at": 12,
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "corridor_to_end": {
+        "room": "corridor", "to": "corridor_end", "side": "N", "at": 39,
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "end_to_corridor": {
+        "room": "corridor_end", "to": "corridor", "side": "S",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
 }
+
+# A door is in the middle of its wall, unless "at" says on which tile its
+# opening starts (counted along the wall): a wall can then have more than one door.
 
 # The things that stand in the rooms. Each one stands on tile "pos" (and the
 # tiles "size" covers, if it is bigger than one) and blocks the way, except the
@@ -215,6 +362,16 @@ DOORS = {
 # - "altar" holds an item: the cabin's altar.
 # - "anvil" holds an item too, and fuses the parts of an item (see "part_of" in
 #   ITEMS) when one of them is used on it while the player carries them all.
+# - "cauldron" is where a potion puzzle is brewed; the remedy lies in it when ready.
+# - "ingredient" is a bottle on a shelf: E pours it into the cauldron of its
+#   "puzzle" (see POTION_PUZZLES), with its "pour_text".
+# - Any object can have "appears_if" (it stands only once the flag is set, like
+#   the anvil) and "gone_if" (it is gone once the flag is set, like the doctor).
+# - "portal" is a ring of light on the floor: walking into it takes the player
+#   to the portal named in "to", in another room, wherever that is.
+# - "decor" is only there to look at: E offers "Examine" and nothing else. It
+#   blocks the way if "solid" is true; if not, the player walks over it (a rope on
+#   the floor). "picture" names its sprite, so many pieces can share one.
 # The barrel of the hold is still a simple puzzle: it only asks for the wand.
 OBJECTS = {
     # The generators of the cabin, at the corners of a square: A top left, B top
@@ -345,7 +502,7 @@ OBJECTS = {
         "done_text": None,
         "reactions": {},
     },
-    # The barrier fed by the tiles, around the anvil against the bottom wall.
+    # The barrier fed by the tiles, around the altar against the bottom wall.
     "hold_barrier": {
         "kind": "barrier",
         "name": "Energy barrier",
@@ -354,18 +511,32 @@ OBJECTS = {
         "size": (3, 2),
         "open_if": "hold_solved",
         "look_text": (
-            "An energy barrier wraps the anvil. Carved in its block: "
+            "An energy barrier wraps a small altar. Carved in its block: "
             "\"The Wave, The Return, The Short Circuit.\""
         ),
         "done_text": None,
         "reactions": {},
     },
+    "hold_altar": {
+        "kind": "altar",
+        "name": "Altar",
+        "room": "hold",
+        "pos": (7, 10),
+        "look_text": "A small stone altar, carved with waves.",
+        "done_text": None,
+        "reactions": {},
+    },
+    # The doctor's gift: it appears in the galley once he is at peace.
     "anvil": {
         "kind": "anvil",
         "name": "Anvil",
-        "room": "hold",
-        "pos": (7, 10),
-        "look_text": "A black anvil, still warm. Here two halves of something could become one again.",
+        "room": "galley",
+        "pos": (10, 8),
+        "appears_if": "doctor_at_peace",
+        "look_text": (
+            "A black anvil, still warm, with a tag tied to it: \"For the one who finished my remedy.\" "
+            "Here two halves of something could become one again."
+        ),
         "fuse_text": (
             "You lay the two halves on the anvil and strike them hard: the brass welds. "
             "Now you have a single, whole key: the fused key."
@@ -417,6 +588,485 @@ OBJECTS = {
                 "text": "You hand the wand to the angel. Its smile widens.",
             },
         },
+    },
+    # The infirmary: the doctor's ghost, his cauldron and the four tinctures.
+    "doctor": {
+        "kind": "character",
+        "name": "The doctor",
+        "room": "infirmary",
+        "pos": (3, 5),
+        "size": (1, 2),
+        "gone_if": "doctor_at_peace",
+        "look_text": (
+            "The ghost of the ship's doctor, pale and shaking with fever. He mutters over and over: "
+            "\"The remedy... I never finished the remedy...\""
+        ),
+        "done_text": None,
+        "reactions": {
+            "potion": {
+                "set_flag": "doctor_at_peace",
+                "value": True,
+                "consumes": True,
+                "text": (
+                    "The doctor drinks. The fever leaves his face, and for the first time he smiles. "
+                    "\"Thank you. I have left you a gift, in the galley.\" "
+                    "He fades like breath on a window. Far away, towards the galley, something heavy lands with a clang."
+                ),
+            },
+        },
+    },
+    "cauldron": {
+        "kind": "cauldron",
+        "name": "Cauldron",
+        "room": "infirmary",
+        "pos": (7, 6),
+        "look_text": "A copper cauldron over a weak blue flame. Four tinctures wait on the shelf nearby.",
+        "done_text": None,
+        "reactions": {},
+    },
+    "green_tincture": {
+        "kind": "ingredient", "name": "Green tincture", "room": "infirmary", "pos": (5, 9),
+        "puzzle": "remedy",
+        "look_text": "A bottle of green tincture. It smells of seaweed.",
+        "pour_text": "You pour the green tincture. The mixture bubbles and turns the colour of seaweed.",
+        "done_text": None, "reactions": {},
+    },
+    "red_tincture": {
+        "kind": "ingredient", "name": "Red tincture", "room": "infirmary", "pos": (7, 9),
+        "puzzle": "remedy",
+        "look_text": "A bottle of red tincture. It burns the nose like pepper.",
+        "pour_text": "You pour the red tincture. The mixture hisses and turns brown.",
+        "done_text": None, "reactions": {},
+    },
+    "gold_tincture": {
+        "kind": "ingredient", "name": "Gold tincture", "room": "infirmary", "pos": (9, 9),
+        "puzzle": "remedy",
+        "look_text": "A bottle of gold tincture, thick and sweet like honey.",
+        "pour_text": "You pour the gold tincture. The mixture thickens and starts to shine.",
+        "done_text": None, "reactions": {},
+    },
+    "blue_tincture": {
+        "kind": "ingredient", "name": "Blue tincture", "room": "infirmary", "pos": (11, 9),
+        "puzzle": "remedy",
+        "look_text": "A bottle of blue tincture. It is cold, like sea water at night.",
+        "pour_text": "You pour the blue tincture.",
+        "done_text": None, "reactions": {},
+    },
+    # The portal at the end of the corridor and its twin in the mine.
+    "corridor_portal": {
+        "kind": "portal", "name": "Portal", "room": "corridor_end", "pos": (7, 4), "size": (2, 2),
+        "picture": "portal", "to": "mine_portal",
+        "look_text": "A ring of purple light, humming softly. Through it you glimpse rock and rails.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_portal": {
+        "kind": "portal", "name": "Portal", "room": "mine", "pos": (7, 3), "size": (2, 2),
+        "picture": "portal", "to": "corridor_portal",
+        "look_text": "The way back: through the light you can see the corridor of the ship.",
+        "done_text": None, "reactions": {},
+    },
+    # Decor: nothing to solve, but the rooms feel lived in.
+    "deck_barrel_1": {
+        "kind": "decor", "name": "Barrel", "room": "deck", "pos": (2, 2),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of fresh water. Empty.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_barrel_2": {
+        "kind": "decor", "name": "Barrel", "room": "deck", "pos": (3, 2),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of salted fish. The smell is terrible.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_crate_1": {
+        "kind": "decor", "name": "Crate", "room": "deck", "pos": (12, 2),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate from the port of Lisbon.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_crate_2": {
+        "kind": "decor", "name": "Crate", "room": "deck", "pos": (13, 2),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate nailed shut. Something inside rattles.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_barrel_3": {
+        "kind": "decor", "name": "Barrel", "room": "deck", "pos": (2, 21),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of tar, sticky to the touch.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_rope": {
+        "kind": "decor", "name": "Coiled rope", "room": "deck", "pos": (12, 21),
+        "picture": "decor_rope", "solid": False,
+        "look_text": "A coil of wet rope. Nobody tied up the sails.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_shelf_1": {
+        "kind": "decor", "name": "Bookshelf", "room": "cabin", "pos": (1, 1),
+        "picture": "decor_bookshelf", "solid": True,
+        "look_text": "Logbooks. The last page of each one is torn out.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_shelf_2": {
+        "kind": "decor", "name": "Bookshelf", "room": "cabin", "pos": (2, 1),
+        "picture": "decor_bookshelf", "solid": True,
+        "look_text": "Old atlases, swollen with damp.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_table": {
+        "kind": "decor", "name": "Chart table", "room": "cabin", "pos": (13, 1),
+        "picture": "decor_table", "solid": True,
+        "look_text": "A sea chart, pinned down by a compass. The course is marked in red.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_crate_1": {
+        "kind": "decor", "name": "Crate", "room": "hold", "pos": (1, 1),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "Overturned crates of ship's biscuits.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_crate_2": {
+        "kind": "decor", "name": "Crate", "room": "hold", "pos": (2, 1),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate of candles, all burned down.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_crate_3": {
+        "kind": "decor", "name": "Crate", "room": "hold", "pos": (13, 1),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A heavy crate. It will not move.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_sack": {
+        "kind": "decor", "name": "Sack", "room": "hold", "pos": (14, 1),
+        "picture": "decor_sack", "solid": True,
+        "look_text": "A sack of flour, chewed open by rats.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_rock_1": {
+        "kind": "decor", "name": "Rock", "room": "crab_room", "pos": (13, 2),
+        "picture": "decor_rock", "solid": True,
+        "look_text": "A rock covered in barnacles.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_rock_2": {
+        "kind": "decor", "name": "Rock", "room": "crab_room", "pos": (13, 9),
+        "picture": "decor_rock", "solid": True,
+        "look_text": "A slippery rock. Something lives under it.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_shells_1": {
+        "kind": "decor", "name": "Shells", "room": "crab_room", "pos": (5, 2),
+        "picture": "decor_shells", "solid": False,
+        "look_text": "Empty shells, cracked open.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_shells_2": {
+        "kind": "decor", "name": "Shells", "room": "crab_room", "pos": (6, 9),
+        "picture": "decor_shells", "solid": False,
+        "look_text": "A heap of shells, arranged almost like a spiral.",
+        "done_text": None, "reactions": {},
+    },
+    "angel_candle_1": {
+        "kind": "decor", "name": "Candle", "room": "angel_room", "pos": (3, 2),
+        "picture": "decor_candle", "solid": True,
+        "look_text": "A tall candle. Its flame does not move.",
+        "done_text": None, "reactions": {},
+    },
+    "angel_candle_2": {
+        "kind": "decor", "name": "Candle", "room": "angel_room", "pos": (3, 9),
+        "picture": "decor_candle", "solid": True,
+        "look_text": "A tall candle. It gives no heat.",
+        "done_text": None, "reactions": {},
+    },
+    "angel_candle_3": {
+        "kind": "decor", "name": "Candle", "room": "angel_room", "pos": (8, 2),
+        "picture": "decor_candle", "solid": True,
+        "look_text": "A tall candle. The wax flows upwards.",
+        "done_text": None, "reactions": {},
+    },
+    "angel_candle_4": {
+        "kind": "decor", "name": "Candle", "room": "angel_room", "pos": (8, 9),
+        "picture": "decor_candle", "solid": True,
+        "look_text": "A tall candle, white as bone.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_bed_1": {
+        "kind": "decor", "name": "Bed", "room": "infirmary", "pos": (2, 1),
+        "picture": "decor_bed", "solid": True,
+        "look_text": "A narrow bed. The sheets are cold.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_bed_2": {
+        "kind": "decor", "name": "Bed", "room": "infirmary", "pos": (4, 1),
+        "picture": "decor_bed", "solid": True,
+        "look_text": "A narrow bed. Someone left a dent in the pillow.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_bed_3": {
+        "kind": "decor", "name": "Bed", "room": "infirmary", "pos": (6, 1),
+        "picture": "decor_bed", "solid": True,
+        "look_text": "A narrow bed, its sheets torn to strips.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_notes": {
+        "kind": "decor", "name": "Doctor's notes", "room": "infirmary", "pos": (8, 1),
+        "picture": "decor_notes", "solid": True,
+        "look_text": "The doctor's notes, in a shaky hand: \"Fever remedy. Begin with the green. The blue must always go in last.\"",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_cabinet_1": {
+        "kind": "decor", "name": "Medicine cabinet", "room": "infirmary", "pos": (10, 1),
+        "picture": "decor_cabinet", "solid": True,
+        "look_text": "Bottles with faded labels. Most are empty.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_cabinet_2": {
+        "kind": "decor", "name": "Medicine cabinet", "room": "infirmary", "pos": (11, 1),
+        "picture": "decor_cabinet", "solid": True,
+        "look_text": "Bandages, scissors, a broken syringe.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_stove_1": {
+        "kind": "decor", "name": "Stove", "room": "galley", "pos": (2, 1),
+        "picture": "decor_stove", "solid": True,
+        "look_text": "A cast-iron stove. The ashes are still warm.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_stove_2": {
+        "kind": "decor", "name": "Stove", "room": "galley", "pos": (3, 1),
+        "picture": "decor_stove", "solid": True,
+        "look_text": "A pot of soup, gone cold long ago.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_table_1": {
+        "kind": "decor", "name": "Table", "room": "galley", "pos": (6, 5),
+        "picture": "decor_table", "solid": True,
+        "look_text": "Plates for six. Six chairs pushed back in a hurry.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_table_2": {
+        "kind": "decor", "name": "Table", "room": "galley", "pos": (7, 5),
+        "picture": "decor_table", "solid": True,
+        "look_text": "Someone carved a wing and a claw into the wood.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_notes": {
+        "kind": "decor", "name": "Recipe", "room": "galley", "pos": (11, 1),
+        "picture": "decor_notes", "solid": True,
+        "look_text": "A page pinned to the wall, in the doctor's hand: \"As with pepper and honey: the red goes in before the gold.\"",
+        "done_text": None, "reactions": {},
+    },
+    "galley_barrel": {
+        "kind": "decor", "name": "Barrel", "room": "galley", "pos": (14, 1),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of wine. Half empty.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_sack_1": {
+        "kind": "decor", "name": "Sack", "room": "galley", "pos": (1, 10),
+        "picture": "decor_sack", "solid": True,
+        "look_text": "A sack of potatoes, sprouting.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_sack_2": {
+        "kind": "decor", "name": "Sack", "room": "galley", "pos": (2, 10),
+        "picture": "decor_sack", "solid": True,
+        "look_text": "A sack of salt.",
+        "done_text": None, "reactions": {},
+    },
+    "helm_wheel": {
+        "kind": "decor", "name": "Ship's wheel", "room": "helm", "pos": (13, 5),
+        "picture": "decor_wheel", "solid": True,
+        "look_text": "The wheel turns by itself, a little at a time. It will not obey you.",
+        "done_text": None, "reactions": {},
+    },
+    "helm_table": {
+        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (13, 1),
+        "picture": "decor_table", "solid": True,
+        "look_text": "A compass whose needle spins and spins.",
+        "done_text": None, "reactions": {},
+    },
+    "helm_shelf": {
+        "kind": "decor", "name": "Bookshelf", "room": "helm", "pos": (14, 1),
+        "picture": "decor_bookshelf", "solid": True,
+        "look_text": "Signal flags, folded with care.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_statue": {
+        "kind": "decor", "name": "Crab statue", "room": "deck", "pos": (7, 11), "size": (2, 2),
+        "picture": "decor_crab_statue", "solid": True,
+        "look_text": "A stone statue of a giant crab, taller than you. Its eyes seem to follow you around the deck.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_crate_3": {
+        "kind": "decor", "name": "Crate", "room": "deck", "pos": (13, 21),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate full of rusty chains.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_barrel_4": {
+        "kind": "decor", "name": "Barrel", "room": "deck", "pos": (3, 21),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of rainwater. Something moves at the bottom.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_rope_2": {
+        "kind": "decor", "name": "Coiled rope", "room": "deck", "pos": (3, 15),
+        "picture": "decor_rope", "solid": False,
+        "look_text": "More rope, tangled into knots nobody could untie.",
+        "done_text": None, "reactions": {},
+    },
+    "corridor_barrel_1": {
+        "kind": "decor", "name": "Barrel", "room": "corridor", "pos": (5, 1),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "An empty barrel, its staves split open.",
+        "done_text": None, "reactions": {},
+    },
+    "corridor_crate_1": {
+        "kind": "decor", "name": "Crate", "room": "corridor", "pos": (20, 6),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate marked with a skull. You leave it closed.",
+        "done_text": None, "reactions": {},
+    },
+    "corridor_lantern_1": {
+        "kind": "decor", "name": "Lantern", "room": "corridor", "pos": (28, 1),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A lantern that burns without oil.",
+        "done_text": None, "reactions": {},
+    },
+    "corridor_crate_2": {
+        "kind": "decor", "name": "Crate", "room": "corridor", "pos": (33, 6),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "Empty bottles packed in straw.",
+        "done_text": None, "reactions": {},
+    },
+    "corridor_lantern_2": {
+        "kind": "decor", "name": "Lantern", "room": "corridor", "pos": (45, 1),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A lantern. Its flame leans towards the portal.",
+        "done_text": None, "reactions": {},
+    },
+    "end_lantern_1": {
+        "kind": "decor", "name": "Lantern", "room": "corridor_end", "pos": (4, 2),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A lantern with a purple flame.",
+        "done_text": None, "reactions": {},
+    },
+    "end_lantern_2": {
+        "kind": "decor", "name": "Lantern", "room": "corridor_end", "pos": (11, 2),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A lantern with a purple flame.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rails_1": {
+        "kind": "decor", "name": "Rails", "room": "mine", "pos": (7, 9),
+        "picture": "decor_rails", "solid": False,
+        "look_text": "Rusty rails, still shiny where something passed recently.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rails_2": {
+        "kind": "decor", "name": "Rails", "room": "mine", "pos": (7, 10),
+        "picture": "decor_rails", "solid": False,
+        "look_text": "Rusty rails.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rails_3": {
+        "kind": "decor", "name": "Rails", "room": "mine", "pos": (7, 11),
+        "picture": "decor_rails", "solid": False,
+        "look_text": "Rusty rails.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rails_4": {
+        "kind": "decor", "name": "Rails", "room": "mine", "pos": (7, 12),
+        "picture": "decor_rails", "solid": False,
+        "look_text": "Rusty rails.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rails_5": {
+        "kind": "decor", "name": "Rails", "room": "mine", "pos": (7, 13),
+        "picture": "decor_rails", "solid": False,
+        "look_text": "Rusty rails.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rails_6": {
+        "kind": "decor", "name": "Rails", "room": "mine", "pos": (7, 14),
+        "picture": "decor_rails", "solid": False,
+        "look_text": "Rusty rails.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rails_7": {
+        "kind": "decor", "name": "Rails", "room": "mine", "pos": (7, 15),
+        "picture": "decor_rails", "solid": False,
+        "look_text": "Rusty rails.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rails_8": {
+        "kind": "decor", "name": "Rails", "room": "mine", "pos": (7, 16),
+        "picture": "decor_rails", "solid": False,
+        "look_text": "Rusty rails, vanishing into the rock.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_cart": {
+        "kind": "decor", "name": "Mine cart", "room": "mine", "pos": (7, 17),
+        "picture": "decor_minecart", "solid": True,
+        "look_text": "A mine cart full of black stones that are warm to the touch.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_lantern_1": {
+        "kind": "decor", "name": "Lantern", "room": "mine", "pos": (2, 2),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A miner's lantern, hanging from a beam.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_lantern_2": {
+        "kind": "decor", "name": "Lantern", "room": "mine", "pos": (13, 2),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A miner's lantern, swinging slowly.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_crystal_1": {
+        "kind": "decor", "name": "Crystal", "room": "mine", "pos": (2, 12),
+        "picture": "decor_crystal", "solid": True,
+        "look_text": "A purple crystal, the same colour as the portal.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_crystal_2": {
+        "kind": "decor", "name": "Crystal", "room": "mine", "pos": (13, 8),
+        "picture": "decor_crystal", "solid": True,
+        "look_text": "A purple crystal. It hums when you get close.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_crystal_3": {
+        "kind": "decor", "name": "Crystal", "room": "mine", "pos": (12, 19),
+        "picture": "decor_crystal", "solid": True,
+        "look_text": "A cluster of crystals growing out of the wall.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rock_1": {
+        "kind": "decor", "name": "Rock", "room": "mine", "pos": (3, 18),
+        "picture": "decor_rock", "solid": True,
+        "look_text": "A boulder fallen from the ceiling.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rock_2": {
+        "kind": "decor", "name": "Rock", "room": "mine", "pos": (11, 13),
+        "picture": "decor_rock", "solid": True,
+        "look_text": "A rock with a pickaxe stuck in it.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_crate_1": {
+        "kind": "decor", "name": "Crate", "room": "mine", "pos": (2, 21),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate of candles and matches.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_crate_2": {
+        "kind": "decor", "name": "Crate", "room": "mine", "pos": (13, 21),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate of dynamite. Very, very old dynamite.",
+        "done_text": None, "reactions": {},
     },
 }
 
@@ -488,6 +1138,29 @@ ENDINGS = {
     },
 }
 
+# Potion puzzles. The ingredients go into the cauldron one at a time, and the
+# order matters: the next one of the "recipe" moves the "step_flag" on; any
+# other spoils the mixture, and it starts over from an empty cauldron. With the
+# whole recipe in, the "solved_flag" is set: the remedy appears in the cauldron
+# (an item with "appears_if" on that flag), and the cauldron stays done.
+POTION_PUZZLES = {
+    "remedy": {
+        "room": "infirmary",
+        "cauldron": "cauldron",
+        "recipe": ["green_tincture", "red_tincture", "gold_tincture", "blue_tincture"],
+        "step_flag": "potion_step",
+        "solved_flag": "potion_solved",
+        "wrong_text": (
+            "The {name} hits the mixture with a hiss, and the cauldron spits everything out. "
+            "It is empty again: you have to start over."
+        ),
+        "solved_text": (
+            "You pour the blue tincture last. The mixture goes still, turns clear, and glows softly. "
+            "The remedy is ready, in the cauldron."
+        ),
+    },
+}
+
 # Clues shown in the inventory once their flag is true.
 CLUES = {
     "crab_truthful": "The crab never lies.",
@@ -523,6 +1196,9 @@ MESSAGES = {
     "label_enter": "Enter: {room}",
     "label_look_around": "Look around",
     "label_examine": "Examine",
+    "label_pour": "Pour: {name}",
+    "portal_text": "The light swallows you, and spits you out somewhere else.",
+    "potion_done": "The remedy is ready: the cauldron needs nothing more.",
     "label_talk": "Talk",
     "label_use": "Use: {item}",
     "label_give": "Give: {item}",
@@ -668,12 +1344,18 @@ def restore_state(data):
     if ending is not None and not _is_id(ending, story.ENDINGS):
         return None
 
+    for item in inventory:
+        gone_if = story.ITEMS[item].get("gone_if")
+        if gone_if is not None and flags.get(gone_if, story.FLAGS[gone_if]):
+            return None  # an item used up for good cannot be carried
     state = new_game()
     state["room"] = data["room"]
     state["inventory"] = list(inventory)
     state["flags"].update(flags)
     state["ending"] = ending
     if not _floor_puzzles_consistent(state["flags"]):
+        return None
+    if not _potion_puzzles_consistent(state["flags"]):
         return None
     return state
 
@@ -760,6 +1442,11 @@ def actions_for(state, target):
     if kind == "switch":
         label = story.MESSAGES["label_activate"].format(name=story.OBJECTS[target]["name"])
         return [_action("activate", target, label)]
+    if kind == "decor" or kind == "portal":
+        return [_action("examine", target, story.MESSAGES["label_examine"])]  # a portal is for the feet
+    if kind == "ingredient":
+        label = story.MESSAGES["label_pour"].format(name=story.OBJECTS[target]["name"])
+        return [_action("pour", target, label), _action("examine", target, story.MESSAGES["label_examine"])]
     if kind == "door" and door_status(state, target) == "open":
         destination = story.ROOMS[story.DOORS[target]["to"]]["name"]
         label = story.MESSAGES["label_enter"].format(room=destination)
@@ -825,6 +1512,7 @@ def enter(state, door):
     new = copy.deepcopy(state)
     _leave_floor_puzzles(new)  # walking out of a room is walking out of its tile zones
     new["room"] = info["to"]
+    new["flags"]["visited_" + info["to"]] = True  # for the map
     _reset_circuits(new)
     return _accept(new, "entered", story.ROOMS[info["to"]]["name"])
 
@@ -978,11 +1666,80 @@ def examine(state, target):
     return _accept(state, "info", text)
 
 
+def pour(state, ingredient):
+    """Pour an ingredient into the cauldron of its potion puzzle.
+
+    Like the tiles, it is a small state machine, with one flag: how many
+    ingredients of the recipe are in, in the right order. Pouring:
+    - the next one of the recipe adds it ("potion_poured");
+    - the last one of the recipe makes the remedy ("potion_ready"): it appears in
+      the cauldron, and the puzzle is done;
+    - any other one spoils the mixture ("potion_spoiled"): the cauldron is empty
+      again, and the recipe starts over.
+    """
+    _expect(ingredient, "ingredient")
+    if is_over(state):
+        return _refuse(state, "game_over", story.MESSAGES["game_over"])
+    if not _is_here(state, ingredient):
+        return _refuse(state, "not_here", story.MESSAGES["not_here"])
+    puzzle = story.POTION_PUZZLES[story.OBJECTS[ingredient]["puzzle"]]
+    if state["flags"][puzzle["solved_flag"]]:
+        return _refuse(state, "already_done", story.MESSAGES["potion_done"])
+    recipe = puzzle["recipe"]
+    step = state["flags"][puzzle["step_flag"]]
+    new = copy.deepcopy(state)
+    if ingredient != recipe[step]:
+        new["flags"][puzzle["step_flag"]] = 0
+        name = story.OBJECTS[ingredient]["name"].lower()
+        return _accept(new, "potion_spoiled", puzzle["wrong_text"].format(name=name))
+    step += 1
+    if step == len(recipe):
+        new["flags"][puzzle["step_flag"]] = 0  # the cauldron is empty: the remedy is in the bottle
+        new["flags"][puzzle["solved_flag"]] = True
+        return _accept(new, "potion_ready", puzzle["solved_text"])
+    new["flags"][puzzle["step_flag"]] = step
+    return _accept(new, "potion_poured", story.OBJECTS[ingredient]["pour_text"])
+
+
+def travel(state, portal):
+    """The player walks into a portal: main.py calls this when it happens.
+
+    It takes them to the room of the portal it is linked to ("to"), as a door
+    would: the floor puzzles they were in start over, and the room goes on the map.
+    """
+    _expect(portal, "portal")
+    if is_over(state):
+        return _refuse(state, "game_over", story.MESSAGES["game_over"])
+    if not _is_here(state, portal):
+        return _refuse(state, "not_here", story.MESSAGES["not_here"])
+    destination = story.OBJECTS[story.OBJECTS[portal]["to"]]["room"]
+    new = copy.deepcopy(state)
+    _leave_floor_puzzles(new)
+    new["room"] = destination
+    new["flags"]["visited_" + destination] = True
+    _reset_circuits(new)
+    return _accept(new, "teleported", story.MESSAGES["portal_text"])
+
+
+def visited_rooms(state):
+    """The rooms the player has been in, the current one included: what the map shows."""
+    rooms = []
+    for room in story.ROOMS:
+        if state["flags"]["visited_" + room] or room == state["room"]:
+            rooms.append(room)
+    return rooms
+
+
+def is_standing(state, thing):
+    """True if an object stands in its room right now: it has appeared and it is not gone."""
+    return _is_standing(state, thing)
+
+
 def perform(state, action):
     """Carry out an action given as data, such as one returned by actions_for().
 
     The action is a dict with a "verb" ("pick_up", "enter", "use_item",
-    "examine", "activate", "step_on" or "leave_zone"), a "target" and, for
+    "examine", "activate", "step_on", "leave_zone", "pour" or "travel"), a "target" and, for
     "use_item", an "item". The target of "leave_zone" is a floor puzzle.
     """
     verb = action["verb"]
@@ -1000,6 +1757,10 @@ def perform(state, action):
         return step_on(state, action["target"])
     if verb == "leave_zone":
         return leave_zone(state, action["target"])
+    if verb == "pour":
+        return pour(state, action["target"])
+    if verb == "travel":
+        return travel(state, action["target"])
     raise ValueError(f"Unknown verb: {verb!r}")
 
 
@@ -1083,6 +1844,8 @@ def _on_floor(state, item):
         return False
     if info["appears_if"] is not None and not state["flags"][info["appears_if"]]:
         return False
+    if info.get("gone_if") is not None and state["flags"][info["gone_if"]]:
+        return False  # used up for good, like the remedy once drunk
     return not _has_or_fused(state, item)
 
 
@@ -1106,10 +1869,18 @@ def _is_free(state, item):
 
 
 def _is_standing(state, thing):
-    """True if an object is in its room now. Only a barrier can go: it is gone once open."""
+    """True if an object is in its room now.
+
+    A barrier is gone once open. Any object can also wait for a flag before it
+    appears ("appears_if", the anvil) or go away once a flag is set ("gone_if", the doctor).
+    """
     info = story.OBJECTS[thing]
     if info["kind"] == "barrier":
         return not state["flags"][info["open_if"]]
+    if info.get("appears_if") is not None and not state["flags"][info["appears_if"]]:
+        return False
+    if info.get("gone_if") is not None and state["flags"][info["gone_if"]]:
+        return False
     return True
 
 
@@ -1195,6 +1966,14 @@ def _floor_puzzles_consistent(flags):
     return True
 
 
+def _potion_puzzles_consistent(flags):
+    """True if a solved potion puzzle has an empty cauldron: the remedy has been bottled."""
+    for puzzle in story.POTION_PUZZLES.values():
+        if flags[puzzle["solved_flag"]] and flags[puzzle["step_flag"]] != 0:
+            return False
+    return True
+
+
 def _door_text(state, door):
     """What the player reads when examining a door."""
     info = story.DOORS[door]
@@ -1254,7 +2033,10 @@ def _use_on_anvil(state, item, anvil):
 
 
 def _use_on_object(state, item, thing):
-    """Apply the reaction a puzzle or a character has to this item, if it has one."""
+    """Apply the reaction a puzzle or a character has to this item, if it has one.
+
+    A reaction with "consumes" takes the item out of the inventory (the doctor drinks the remedy).
+    """
     reaction = story.OBJECTS[thing]["reactions"].get(item)
     if reaction is None:
         return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
@@ -1266,6 +2048,8 @@ def _use_on_object(state, item, thing):
         return _refuse(state, "already_done", story.MESSAGES["already_done"])
     new = copy.deepcopy(state)
     new["flags"][reaction["set_flag"]] = reaction["value"]
+    if reaction.get("consumes"):
+        new["inventory"].remove(item)  # drunk, eaten, used up: it is gone
     return _accept(new, "flag_set", reaction["text"])
 
 
@@ -1294,7 +2078,7 @@ def _is_choice_door(door):
 
 def _allowed_values(flag):
     """Every value a flag can take in valid play: its starting value, and what doors, reactions,
-    switches, circuits and floor puzzles write."""
+    switches, circuits, floor and potion puzzles and the map write."""
     values = [story.FLAGS[flag]]
     for door, info in story.DOORS.items():
         if info["choice_flag"] == flag:
@@ -1315,6 +2099,14 @@ def _allowed_values(flag):
             longest = max(len(phase["steps"]) for phase in puzzle["phases"])
             values += list(range(longest + 1))
         if puzzle["solved_flag"] == flag:
+            values.append(True)
+    for puzzle in story.POTION_PUZZLES.values():
+        if puzzle["step_flag"] == flag:
+            values += list(range(len(puzzle["recipe"])))  # never the whole recipe: then it is solved
+        if puzzle["solved_flag"] == flag:
+            values.append(True)
+    for room in story.ROOMS:
+        if flag == "visited_" + room:
             values.append(True)
     return values
 
@@ -1423,7 +2215,8 @@ SCALE = 3                  # the window is three times bigger
 FPS = 60
 TILE = 16
 HUD_HEIGHT = 2 * TILE      # the bar at the top, above the room
-COLUMNS, ROWS = 16, 12     # a room in tiles, walls included
+COLUMNS, ROWS = 16, 12     # the screen in tiles below the bar, and the size of a room unless story.py says otherwise
+VIEW = pygame.Rect(0, HUD_HEIGHT, COLUMNS * TILE, ROWS * TILE)  # where the room is shown on screen
 
 PLAYER_SIZE = 12
 PLAYER_SPEED = 1.5         # pixels per frame
@@ -1444,14 +2237,6 @@ ENDING_SCENE_HEIGHT = 64   # the picture at the top of the ending screen
 ENDING_HORIZON = 40        # where the sea starts in that picture
 ENDING_MENU_TOP = 186
 EXPLOSION_DELAY = 12       # frames before the ship blows up in the bad ending
-
-# Where the opening of a door is on each wall: first tile (column, row), then width and height in tiles.
-DOOR_OPENINGS = {
-    "N": (7, 0, 2, 1),
-    "S": (7, ROWS - 1, 2, 1),
-    "W": (0, 5, 1, 2),
-    "E": (COLUMNS - 1, 5, 1, 2),
-}
 
 # The direction to walk in to go through a door on each wall.
 TOWARD = {"N": (0, -1), "S": (0, 1), "W": (-1, 0), "E": (1, 0)}
@@ -1495,7 +2280,7 @@ COLORS = {
 TILE_COLORS = {"lit": COLORS["highlight"], "dark": COLORS["cable"], "error": COLORS["error"]}
 
 # The kinds of object an item can lie on: drawn low, before the item, which sits a little higher.
-HOLDERS = ("altar", "anvil")
+HOLDERS = ("altar", "anvil", "cauldron")
 
 # The sound each outcome of a floor puzzle plays (see sounds.py).
 EVENT_SOUNDS = {
@@ -1503,7 +2288,18 @@ EVENT_SOUNDS = {
     "phase_complete": "ding",
     "tiles_complete": "fanfare",
     "tiles_reset": "buzz",
+    "potion_poured": "blip",
+    "potion_spoiled": "buzz",
+    "potion_ready": "fanfare",
+    "teleported": "ding",
 }
+
+# --- The map in the corner ------------------------------------------------------------
+
+MAP_SCALE = 3        # one pixel of the map for every three tiles of the ship
+MAP_BLINK = FPS // 3 # frames between two blinks of a marker
+# Things the map points at while they wait for the player: the anvil, until the key is fused.
+MAP_MARKERS = {"anvil": "fused_key"}
 
 # Floor and wall color of each room.
 ROOM_COLORS = {
@@ -1512,6 +2308,13 @@ ROOM_COLORS = {
     "hold": ((70, 60, 55), (40, 32, 30)),
     "crab_room": ((60, 110, 110), (30, 60, 65)),
     "angel_room": ((225, 220, 200), (170, 165, 150)),
+    "infirmary": ((200, 210, 205), (110, 125, 120)),
+    "galley": ((120, 80, 50), (40, 32, 30)),
+    "helm": ((120, 80, 50), (70, 45, 30)),
+    "east_room": ((120, 80, 50), (70, 45, 30)),
+    "corridor": ((70, 60, 55), (40, 32, 30)),
+    "corridor_end": ((70, 60, 55), (40, 32, 30)),
+    "mine": ((90, 70, 55), (50, 40, 35)),
 }
 DEFAULT_ROOM_COLORS = ((100, 100, 100), (50, 50, 50))
 
@@ -1552,10 +2355,29 @@ def doors_in(room):
     return doors
 
 
+def room_size(room):
+    """A room's size in tiles, walls included: one screen, unless story.py gives it a "size"."""
+    return story.ROOMS[room].get("size", (COLUMNS, ROWS))
+
+
+def door_tiles(door):
+    """The opening of a door in tiles: (column, row, width, height) in its room.
+
+    Two tiles wide, in the middle of its wall, or from tile "at" along the wall.
+    """
+    info = story.DOORS[door]
+    columns, rows = room_size(info["room"])
+    side = info["side"]
+    if side == "N" or side == "S":
+        start = info.get("at", (columns - 2) // 2)
+        return (start, 0 if side == "N" else rows - 1, 2, 1)
+    start = info.get("at", (rows - 2) // 2)
+    return (0 if side == "W" else columns - 1, start, 1, 2)
+
+
 def door_rect(door):
-    """The opening of a door, in the middle of its wall."""
-    col, row, width, height = DOOR_OPENINGS[story.DOORS[door]["side"]]
-    return tile_rect(col, row, width, height)
+    """The opening of a door, in pixels."""
+    return tile_rect(*door_tiles(door))
 
 
 def thing_rect(thing):
@@ -1570,27 +2392,31 @@ def thing_rect(thing):
 
 
 def wall_rects(room):
-    """The solid parts of the walls of a room: the four sides, with a gap where each door is."""
+    """The solid parts of the walls of a room: the four sides, with a gap where each door is.
+
+    A wall is cut into pieces at its doors, from one end to the other.
+    """
+    columns, rows = room_size(room)
     sides = {
-        "N": tile_rect(0, 0, COLUMNS, 1),
-        "S": tile_rect(0, ROWS - 1, COLUMNS, 1),
-        "W": tile_rect(0, 0, 1, ROWS),
-        "E": tile_rect(COLUMNS - 1, 0, 1, ROWS),
+        "N": tile_rect(0, 0, columns, 1),
+        "S": tile_rect(0, rows - 1, columns, 1),
+        "W": tile_rect(0, 0, 1, rows),
+        "E": tile_rect(columns - 1, 0, 1, rows),
     }
     walls = []
     for side, wall in sides.items():
-        opening = None
-        for door in doors_in(room):
-            if story.DOORS[door]["side"] == side:
-                opening = door_rect(door)
-        if opening is None:
-            walls.append(wall)
-        elif side == "N" or side == "S":
-            walls.append(pygame.Rect(wall.left, wall.top, opening.left - wall.left, wall.height))
-            walls.append(pygame.Rect(opening.right, wall.top, wall.right - opening.right, wall.height))
-        else:
-            walls.append(pygame.Rect(wall.left, wall.top, wall.width, opening.top - wall.top))
-            walls.append(pygame.Rect(wall.left, opening.bottom, wall.width, wall.bottom - opening.bottom))
+        openings = sorted(door_rect(door) for door in doors_in(room) if story.DOORS[door]["side"] == side)
+        across = side == "N" or side == "S"  # the wall runs left to right, else top to bottom
+        start = wall.left if across else wall.top
+        for opening in openings + [None]:
+            end = (wall.right if across else wall.bottom) if opening is None else (opening.left if across else opening.top)
+            if end > start:
+                if across:
+                    walls.append(pygame.Rect(start, wall.top, end - start, wall.height))
+                else:
+                    walls.append(pygame.Rect(wall.left, start, wall.width, end - start))
+            if opening is not None:
+                start = opening.right if across else opening.bottom
     return walls
 
 
@@ -1599,16 +2425,24 @@ def solid_rects(state):
 
     That is puzzles, characters, generators, altars, and a barrier until it dissolves.
 
-    Items on the floor and the numbered tiles are not solid: the player walks over them.
+    Items on the floor, the numbered tiles and flat decor are not solid: the player walks over them.
     """
     solids = wall_rects(state["room"])
     for thing in engine.things_here(state):
         if thing["kind"] == "door":
             if thing["status"] != "open":
                 solids.append(door_rect(thing["id"]))
-        elif thing["kind"] not in ("item", "tile"):
+        elif thing["kind"] not in ("item", "tile") and not is_flat(thing["id"]):
             solids.append(thing_rect(thing["id"]))
     return solids
+
+
+def is_flat(thing):
+    """True for what lies on the floor and is walked over: a portal, or flat decor like a coil of rope."""
+    info = story.OBJECTS.get(thing)
+    if info is None:
+        return False
+    return info["kind"] == "portal" or (info["kind"] == "decor" and not info["solid"])
 
 
 def player_rect(position):
@@ -1685,6 +2519,40 @@ def spawn_in_front_of(door):
     else:
         rect.midright = (opening.left - SPAWN_GAP, opening.centery)
     return (rect.x, rect.y)
+
+
+def spawn_by_portal(portal):
+    """Where the player appears after a portal: just below the portal they arrive at, not touching it."""
+    ring = thing_rect(portal)
+    rect = pygame.Rect(0, 0, PLAYER_SIZE, PLAYER_SIZE)
+    rect.midtop = (ring.centerx, ring.bottom + SPAWN_GAP)
+    return (rect.x, rect.y)
+
+
+def portal_touched(state, position):
+    """The portal the player has stepped into, or None: their middle is inside its ring."""
+    center = player_rect(position).center
+    for thing in engine.things_here(state):
+        if thing["kind"] == "portal" and thing_rect(thing["id"]).inflate(-8, -8).collidepoint(center):
+            return thing["id"]
+    return None
+
+
+def camera(room, position):
+    """The top-left corner, in room pixels, of the part of the room on screen.
+
+    A room the size of the screen does not move. A bigger one follows the player
+    and stops at its edges; a smaller one is centred, with black around it.
+    """
+    columns, rows = room_size(room)
+    center = player_rect(position).center
+    corner = []
+    for size, view, middle in ((columns * TILE, VIEW.width, center[0]), (rows * TILE, VIEW.height, center[1] - HUD_HEIGHT)):
+        if size <= view:
+            corner.append((size - view) // 2)
+        else:
+            corner.append(min(max(middle - view // 2, 0), size - view))
+    return (corner[0], corner[1])
 
 
 def spawn_at_entry(room):
@@ -2060,6 +2928,21 @@ def go_through(app, door):
     show_banner(app, outcome["text"])
 
 
+def go_through_portal(app, portal):
+    """The player steps into a portal: the engine moves them, and they appear by the twin portal."""
+    state, outcome = engine.perform(app["state"], {"verb": "travel", "target": portal})
+    if not outcome["ok"]:
+        return
+    sounds.play(EVENT_SOUNDS.get(outcome["event"]))
+    app["state"] = state
+    save_progress(app)
+    app["player"] = spawn_by_portal(story.OBJECTS[portal]["to"])
+    app["touching"] = None
+    settle_on_floor(app)
+    app["fade"] = FADE_FRAMES
+    show_banner(app, story.ROOMS[state["room"]]["name"])
+
+
 def floor_triggers(app):
     """The movement triggers of the room, checked in every frame after the player moves.
 
@@ -2131,6 +3014,7 @@ def do_action(app, action):
         go_through(app, action["target"])
         return
     state, outcome = engine.perform(app["state"], action)
+    sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     if outcome["event"] == "toggled":
         show_banner(app, outcome["text"])  # a generator clicks: no text box to close every time
     else:
@@ -2236,6 +3120,9 @@ def update(app, dx, dy):
         app["touching"] = door
         go_through(app, door)
     floor_triggers(app)
+    portal = portal_touched(app["state"], app["player"])
+    if portal is not None:
+        go_through_portal(app, portal)
 
 
 # --- Drawing -------------------------------------------------------------------------
@@ -2366,10 +3253,15 @@ def draw_door(screen, door, status):
 def thing_picture(thing):
     """The sprite of a thing as it is now, or None.
 
-    It tries the id with the status ("hold_puzzle_solved"), the id alone ("crab"),
-    the kind with the status ("switch_on") and the kind alone ("altar").
+    It tries the shared "picture" of decor ("decor_barrel"), the id with the status
+    ("hold_puzzle_solved"), the id alone ("crab"), the kind with the status
+    ("switch_on") and the kind alone ("altar").
     """
-    for name in (thing["id"] + "_" + thing["status"], thing["id"], thing["kind"] + "_" + thing["status"], thing["kind"]):
+    names = [thing["id"] + "_" + thing["status"], thing["id"], thing["kind"] + "_" + thing["status"], thing["kind"]]
+    shared = story.OBJECTS.get(thing["id"], {}).get("picture")
+    if shared is not None:
+        names.insert(0, shared)  # decor: many pieces share one picture
+    for name in names:
         picture = sprites.image(name)
         if picture is not None:
             return picture
@@ -2430,9 +3322,10 @@ def draw_player(app, screen):
         pygame.draw.rect(screen, COLORS["black"], eye)
 
 
-def draw_railing(screen):
+def draw_railing(screen, room):
     """The ship's wooden railing around the deck, with a post on every tile."""
-    rail = tile_rect(1, 1, COLUMNS - 2, ROWS - 2).inflate(4, 4)
+    columns, rows = room_size(room)
+    rail = tile_rect(1, 1, columns - 2, rows - 2).inflate(4, 4)
     pygame.draw.rect(screen, COLORS["railing"], rail, 2)
     for x in range(rail.left + TILE - 1, rail.right - 2, TILE):
         pygame.draw.rect(screen, COLORS["railing"], (x, rail.top - 2, 2, 4))
@@ -2526,16 +3419,17 @@ def draw_room(app, screen):
     if wall is None:
         wall = sprites.image("wall_" + room)
     screen.fill(COLORS["black"])
-    for col in range(COLUMNS):
-        for row in range(ROWS):
-            inside = 1 <= col <= COLUMNS - 2 and 1 <= row <= ROWS - 2
+    columns, rows = room_size(room)
+    for col in range(columns):
+        for row in range(rows):
+            inside = 1 <= col <= columns - 2 and 1 <= row <= rows - 2
             picture = floor if inside else wall
             if picture is None:
                 pygame.draw.rect(screen, floor_color if inside else wall_color, tile_rect(col, row))
             else:
                 screen.blit(picture, tile_rect(col, row))
     if story.ROOMS[room]["outdoor"]:
-        draw_railing(screen)
+        draw_railing(screen, room)
     things = engine.things_here(state)
     draw_floor_puzzles(app, screen, things)
     draw_cables(screen, state)
@@ -2543,8 +3437,8 @@ def draw_room(app, screen):
     for thing in things:
         if thing["kind"] == "door":
             draw_door(screen, thing["id"], thing["status"])
-        elif thing["kind"] in HOLDERS:
-            draw_thing(screen, thing)  # low furniture, drawn before what lies on it
+        elif thing["kind"] in HOLDERS or is_flat(thing["id"]):
+            draw_thing(screen, thing)  # low furniture, portals and flat decor, drawn before what lies on it
         elif thing["kind"] not in ("item", "tile"):
             standing.append(thing)
     for thing in things:
@@ -2576,18 +3470,22 @@ def draw_standing(app, screen, thing):
 
 
 def draw_hud(app, screen):
-    """The bar at the top: the room and the inventory key, then what E does here and the items carried."""
+    """The bar at the top: the room and the inventory key, then what E does here and the items carried.
+
+    The map of the ship takes the top right corner.
+    """
     font = app["fonts"]["text"]
     state = app["state"]
     pygame.draw.rect(screen, COLORS["hud"], (0, 0, WIDTH, HUD_HEIGHT))
     pygame.draw.line(screen, COLORS["dim_text"], (0, HUD_HEIGHT - 1), (WIDTH, HUD_HEIGHT - 1))
     draw_text(screen, font, story.ROOMS[state["room"]]["name"], COLORS["text"], (8, 4))
-    draw_text(screen, font, story.MESSAGES["hint_inventory"], COLORS["dim_text"], (WIDTH - 8, 4), "right")
+    right = map_rect().left - 6  # the map takes the right corner: the rest moves left of it
+    draw_text(screen, font, story.MESSAGES["hint_inventory"], COLORS["dim_text"], (right, 4), "right")
     if app["scene"] == "play" and not app["dialog"]:
         hint = prompt(state, app["player"])
         if hint:
             draw_text(screen, font, hint, COLORS["highlight"], (8, 18))
-    x = WIDTH - 4
+    x = right + 4
     for item in reversed(state["inventory"]):
         x -= 18
         picture = sprites.image(item)
@@ -2595,6 +3493,126 @@ def draw_hud(app, screen):
             pygame.draw.rect(screen, THING_COLORS.get(item, MISSING_COLOR), (x + 4, 19, 8, 8))
         else:
             screen.blit(picture, (x, 14))
+    draw_map(app, screen)
+
+
+def room_layout():
+    """Where each room lies on the ship, in tiles: the top-left corner of each one.
+
+    Nobody writes it down: a search from the starting room follows the doors and
+    puts the next room against the wall of the door, so that the two openings
+    meet. A new room in story.py lands on the map by itself. A room only a portal
+    leads to has no door to follow: story.py gives its "map_pos".
+    """
+    places = {story.START_ROOM: (0, 0)}
+    waiting = [story.START_ROOM]
+    while waiting:
+        room = waiting.pop(0)
+        x, y = places[room]
+        columns, rows = room_size(room)
+        for door in doors_in(room):
+            info = story.DOORS[door]
+            other = info["to"]
+            back = return_door(other, room)
+            if other in places or back is None:
+                continue
+            col, row, _, _ = door_tiles(door)
+            back_col, back_row, _, _ = door_tiles(back)
+            other_columns, other_rows = room_size(other)
+            if info["side"] == "N":
+                places[other] = (x + col - back_col, y - other_rows)
+            elif info["side"] == "S":
+                places[other] = (x + col - back_col, y + rows)
+            elif info["side"] == "W":
+                places[other] = (x - other_columns, y + row - back_row)
+            else:
+                places[other] = (x + columns, y + row - back_row)
+            waiting.append(other)
+    for room, info in story.ROOMS.items():
+        if room not in places:
+            places[room] = info["map_pos"]
+    return places
+
+
+def map_rect():
+    """The whole map, in the top right corner of the bar."""
+    layout = room_layout()
+    left = min(x for x, y in layout.values())
+    top = min(y for x, y in layout.values())
+    right = max(x + room_size(room)[0] for room, (x, y) in layout.items())
+    bottom = max(y + room_size(room)[1] for room, (x, y) in layout.items())
+    width = (right - left + MAP_SCALE - 1) // MAP_SCALE
+    height = (bottom - top + MAP_SCALE - 1) // MAP_SCALE
+    return pygame.Rect(WIDTH - 4 - width, (HUD_HEIGHT - height) // 2, width, height)
+
+
+def map_area(room):
+    """The little rectangle of a room on the map: its place on the ship, made MAP_SCALE times smaller.
+
+    One pixel less on the right and at the bottom leaves a gap between rooms that touch.
+    """
+    layout = room_layout()
+    left = min(x for x, y in layout.values())
+    top = min(y for x, y in layout.values())
+    corner = map_rect()
+    x, y = layout[room]
+    columns, rows = room_size(room)
+    x0 = corner.left + (x - left) // MAP_SCALE
+    y0 = corner.top + (y - top) // MAP_SCALE
+    x1 = corner.left + (x - left + columns) // MAP_SCALE
+    y1 = corner.top + (y - top + rows) // MAP_SCALE
+    return pygame.Rect(x0, y0, max(x1 - x0 - 1, 1), max(y1 - y0 - 1, 1))
+
+
+def map_dot(room, position):
+    """Where the player is on the map: inside the room's rectangle, where they stand in the room."""
+    area = map_area(room)
+    columns, rows = room_size(room)
+    floor = tile_rect(1, 1, columns - 2, rows - 2)
+    body = player_rect(position)
+    across = min(max((body.centerx - floor.left) / floor.width, 0), 1)
+    down = min(max((body.centery - floor.top) / floor.height, 0), 1)
+    return (area.left + round(across * (area.width - 1)), area.top + round(down * (area.height - 1)))
+
+
+def map_markers(state):
+    """The rooms the map points at: where a thing waits that the player still needs."""
+    rooms = []
+    for thing, needed in MAP_MARKERS.items():
+        if engine.is_standing(state, thing) and not engine.has_item(state, needed):
+            rooms.append(story.OBJECTS[thing]["room"])
+    return rooms
+
+
+def draw_map(app, screen):
+    """The map of the ship: only the rooms visited so far, the doors out of them, and the player."""
+    state = app["state"]
+    visited = engine.visited_rooms(state)
+    for room in visited:
+        color = COLORS["highlight"] if room == state["room"] else COLORS["dim_text"]
+        pygame.draw.rect(screen, color, map_area(room))
+    for door, info in story.DOORS.items():
+        if info["room"] in visited:  # an exit out of a known room, even towards an unknown one
+            area = map_area(info["room"])
+            columns, rows = room_size(info["room"])
+            col, row, width, height = door_tiles(door)
+            x = area.left + (col * area.width) // columns  # where the door is along its wall
+            y = area.top + (row * area.height) // rows
+            side = info["side"]
+            if side == "N":
+                y = area.top - 1
+            elif side == "S":
+                y = area.bottom
+            elif side == "W":
+                x = area.left - 1
+            else:
+                x = area.right
+            pygame.draw.rect(screen, COLORS["dim_text"], (x, y, 1, 1))
+    if (app["frame"] // MAP_BLINK) % 2 == 0:
+        for room in map_markers(state):
+            pygame.draw.rect(screen, COLORS["error"], map_area(room).inflate(2, 2), 1)
+    x, y = map_dot(state["room"], app["player"])
+    pygame.draw.rect(screen, COLORS["black"], (x, y, 1, 1))
 
 
 def draw_banner(app, screen):
@@ -2623,11 +3641,36 @@ def draw_dialog(app, screen):
         pygame.draw.polygon(screen, COLORS["highlight"], [(x - 3, y - 4), (x + 3, y - 4), (x, y - 1)])
 
 
+# One drawing surface per room size, kept from frame to frame.
+_room_surfaces = {}
+
+
+def room_surface(room):
+    """A surface as big as the whole room (with the bar's height above it, like the screen)."""
+    columns, rows = room_size(room)
+    size = (columns * TILE, HUD_HEIGHT + rows * TILE)
+    if size not in _room_surfaces:
+        _room_surfaces[size] = pygame.Surface(size)
+    return _room_surfaces[size]
+
+
 def draw_play_screen(app, screen):
-    draw_room(app, screen)
+    """The room, seen through the camera, then the bar on top.
+
+    The whole room is drawn on its own surface, in room pixels, so nothing else
+    needs to know about the camera: walls, things and the player keep their places.
+    """
+    room = app["state"]["room"]
+    whole = room_surface(room)
+    draw_room(app, whole)
+    x, y = camera(room, app["player"])
+    screen.fill(COLORS["black"])
+    screen.set_clip(VIEW)
+    screen.blit(whole, (-x, -y))
+    screen.set_clip(None)
     if app["fade"] > 0:
         # Just through a door: the room comes out of the dark.
-        shade(screen, tile_rect(0, 0, COLUMNS, ROWS), 255 * app["fade"] // FADE_FRAMES)
+        shade(screen, VIEW, 255 * app["fade"] // FADE_FRAMES)
     draw_hud(app, screen)
 
 
@@ -2843,6 +3886,8 @@ Names follow what main.py looks for:
   (left is right mirrored);
 - the room tiles as "floor_<room>" and "wall_<room>", with "_0" and "_1" for the
   two frames of a moving tile (the sea around the deck).
+- decor as "decor_<picture>", shared by every piece that names it in story.py
+  (as big as the piece: the crab statue is 2 x 2 tiles), and the "portal";
 A picture missing here is drawn as a colored rectangle by main.py.
 """
 
@@ -3602,7 +4647,625 @@ SPRITES = {
         "ssssssssssssssss",
         "ssssssssssssssss",
     ],
+    "decor_barrel": [
+        "................",
+        "....kkkkkkkk....",
+        "...kbbbbbbbbk...",
+        "..kbBnnnnnnBbk..",
+        "..kbnBBBBBBnbk..",
+        "..kbnBBBBBBnbk..",
+        "..kddddddddddk..",
+        "..kBbBBBBBBbBk..",
+        "..kBbBBBBBBbBk..",
+        "..kddddddddddk..",
+        "..kBbBBBBBBbBk..",
+        "..kBbBBBBBBbBk..",
+        "..kddddddddddk..",
+        "...kBBBBBBBBk...",
+        "....kkkkkkkk....",
+        "................",
+    ],
+    "decor_crate": [
+        "................",
+        ".kkkkkkkkkkkkkk.",
+        ".kbbbbbbbbbbbbk.",
+        ".kbnnnnnnnnnnbk.",
+        ".kbnbBBBBBBbnbk.",
+        ".kbnBbBBBBbBnbk.",
+        ".kbnBBbBBbBBnbk.",
+        ".kbnBBBbbBBBnbk.",
+        ".kbnBBBbbBBBnbk.",
+        ".kbnBBbBBbBBnbk.",
+        ".kbnBbBBBBbBnbk.",
+        ".kbnbBBBBBBbnbk.",
+        ".kbnnnnnnnnnnbk.",
+        ".kbbbbbbbbbbbbk.",
+        ".kkkkkkkkkkkkkk.",
+        "................",
+    ],
+    "decor_rope": [
+        "................",
+        "................",
+        "................",
+        ".....kkkkkk.....",
+        "...kkbbbbbbkk...",
+        "..kbbkkkkkkbbk..",
+        "..kbkbbbbbbkbk..",
+        ".kbkbkkkkkkbkbk.",
+        ".kbkbkbbbbkbkbk.",
+        ".kbkbkkkkkkbkbk.",
+        "..kbkbbbbbbkbk..",
+        "..kbbkkkkkkbbkk.",
+        "...kkbbbbbbkkbk.",
+        ".....kkkkkk..kk.",
+        "................",
+        "................",
+    ],
+    "decor_bookshelf": [
+        "kkkkkkkkkkkkkkkk",
+        "knnnnnnnnnnnnnnk",
+        "knrRjjgGyYrRjjnk",
+        "knrRjjgGyYrRjjnk",
+        "knrRjjgGyYrRjjnk",
+        "knrRjjgGyYrRjjnk",
+        "knnnnnnnnnnnnnnk",
+        "knyYgGrRjjyYggnk",
+        "knyYgGrRjjyYggnk",
+        "knyYgGrRjjyYggnk",
+        "knyYgGrRjjyYggnk",
+        "knnnnnnnnnnnnnnk",
+        "kBBBBBBBBBBBBBBk",
+        "knnnnnnnnnnnnnnk",
+        "kkkkkkkkkkkkkkkk",
+        "................",
+    ],
+    "decor_table": [
+        "................",
+        "................",
+        "kkkkkkkkkkkkkkkk",
+        "kbbbbbbbbbbbbbbk",
+        "kbwwwwwwbbbbbbbk",
+        "kbwmmMwwbbYYbbbk",
+        "kbwwrwwwbYkkYbbk",
+        "kbwwwwwwbYkkYbbk",
+        "kbbbbbbbbbYYbbbk",
+        "kbbbbbbbbbbbbbbk",
+        "kBBBBBBBBBBBBBBk",
+        "kkkkkkkkkkkkkkkk",
+        ".kn..........nk.",
+        ".kn..........nk.",
+        ".kk..........kk.",
+        "................",
+    ],
+    "decor_sack": [
+        "................",
+        "......kkkk......",
+        "......kbbk......",
+        ".....kkkkkk.....",
+        "....kmmmmmmk....",
+        "...kmmmmmmmmk...",
+        "..kmmmmmmmmmmk..",
+        "..kmmMMmmmmmmk..",
+        "..kmmMMmmmmmmk..",
+        "..kmmmmmmmmMmk..",
+        "..kmmmmmmmmMmk..",
+        "..kMmmmmmmmmMk..",
+        "...kMMMMMMMMk...",
+        "....kkkkkkkk....",
+        "................",
+        "................",
+    ],
+    "decor_rock": [
+        "................",
+        "................",
+        ".....kkkkk......",
+        "....kllllldk....",
+        "...klllwllddk...",
+        "..kllllllllddk..",
+        "..klldllllllddk.",
+        ".kllllllllllldk.",
+        ".klwlllldllllddk",
+        ".kllllllllllldk.",
+        ".kdllllllllldddk",
+        "..kddlllllldddk.",
+        "...kddddddddkk..",
+        "....kkkkkkkk....",
+        "................",
+        "................",
+    ],
+    "decor_shells": [
+        "................",
+        "................",
+        "..kk............",
+        ".kzok......kk...",
+        ".kozk.....kzzk..",
+        "..kk.....kzozk..",
+        "..........kkk...",
+        "....kkk.........",
+        "...kmmMk...kk...",
+        "...kMmmk..kozk..",
+        "....kkk...kzok..",
+        "...........kk...",
+        ".kk.............",
+        "kzok....kkk.....",
+        ".kk....kmMmk....",
+        "........kkk.....",
+    ],
+    "decor_candle": [
+        ".......kk.......",
+        "......kyyk......",
+        "......kwyk......",
+        ".......kk.......",
+        "......kwwk......",
+        "......kwwk......",
+        "......kwmk......",
+        "......kwmk......",
+        "......kwmk......",
+        "......kwmk......",
+        "......kwmk......",
+        ".....kkkkkk.....",
+        "....kYYYYYYk....",
+        "...kYyyyyyyYk...",
+        "....kkkkkkkk....",
+        "................",
+    ],
+    "decor_bed": [
+        "kkkkkkkkkkkkkkkk",
+        "knnnnnnnnnnnnnnk",
+        "knwwwwwwwwwwwwnk",
+        "knwwwmmmmmmwwwnk",
+        "knwwwwwwwwwwwwnk",
+        "knllllllllllllnk",
+        "knlddldllldlllnk",
+        "knllllllllllllnk",
+        "knllldllldllllnk",
+        "knllllllllllllnk",
+        "knlldllldllldlnk",
+        "knllllllllllllnk",
+        "knllllllllllllnk",
+        "knnnnnnnnnnnnnnk",
+        "kkkkkkkkkkkkkkkk",
+        "................",
+    ],
+    "decor_cabinet": [
+        "kkkkkkkkkkkkkkkk",
+        "kwwwwwwwwwwwwwwk",
+        "kwkkkkkkkkkkkkwk",
+        "kwkcCkgGkpPktTwk",
+        "kwkcCkgGkpPktTwk",
+        "kwkkkkkkkkkkkkwk",
+        "kwkrRkcCkyYkgGwk",
+        "kwkrRkcCkyYkgGwk",
+        "kwkkkkkkkkkkkkwk",
+        "kwwwwwwwwwwwwwwk",
+        "kwwwwwrrwwwwwwwk",
+        "kwwwwrrrrwwwwwwk",
+        "kwwwwwrrwwwwwwwk",
+        "kwwwwwwwwwwwwwwk",
+        "kkkkkkkkkkkkkkkk",
+        "................",
+    ],
+    "decor_stove": [
+        "....kkkkkkkk....",
+        "...kddddddddk...",
+        "..kkkkkkkkkkkk..",
+        ".kddddddddddddk.",
+        ".kdkkkkddkkkkdk.",
+        ".kdkRRkddkRRkdk.",
+        ".kdkkkkddkkkkdk.",
+        ".kddddddddddddk.",
+        ".kdkkkkkkkkkkdk.",
+        ".kdkoorroorrkdk.",
+        ".kdkrooRroRokdk.",
+        ".kdkkkkkkkkkkdk.",
+        ".kddddddddddddk.",
+        ".kkkkkkkkkkkkkk.",
+        ".kk..........kk.",
+        "................",
+    ],
+    "decor_wheel": [
+        ".......kk.......",
+        ".......nk.......",
+        "....kkknkkk.....",
+        "...kBbbnbbBk....",
+        "..kBk..n..kBk...",
+        ".kBk...n...kBk..",
+        "kkbk..kkk..kbkk.",
+        "nnnnnnkYknnnnnnk",
+        "kkbk..kkk..kbkk.",
+        ".kBk...n...kBk..",
+        "..kBk..n..kBk...",
+        "...kBbbnbbBk....",
+        "....kkknkkk.....",
+        ".......nk.......",
+        ".......kk.......",
+        "................",
+    ],
+    "floor_infirmary": [
+        "mmmmmmmMmmmmmmmM",
+        "mwwwwwwMmwwwwwwM",
+        "mwwwwwwMmwwwwwwM",
+        "mwwwwwwMmwwwwwwM",
+        "mwwwwwwMmwwwwwwM",
+        "mwwwwwwMmwwwwwwM",
+        "mwwwwwwMmwwwwwwM",
+        "MMMMMMMMMMMMMMMM",
+        "mmmmmmmMmmmmmmmM",
+        "mwwwwwwMmwwwwwwM",
+        "mwwwwwwMmwwtwwwM",
+        "mwwwwwwMmwwwwwwM",
+        "mwwwwwwMmwwwwwwM",
+        "mwwwwwwMmwwwwwwM",
+        "mwwwwwwMmwwwwwwM",
+        "MMMMMMMMMMMMMMMM",
+    ],
+    "wall_infirmary": [
+        "TTTTTTTTTTTTTTTT",
+        "tttttttttttttttt",
+        "tttttttttttttttt",
+        "TTTTTTTTTTTTTTTT",
+        "tttttttttttttttt",
+        "tttttttttttttttt",
+        "tttttttttttttttt",
+        "TTTTTTTTTTTTTTTT",
+        "tttttttttttttttt",
+        "tttttttttttttttt",
+        "tttttttttttttttt",
+        "TTTTTTTTTTTTTTTT",
+        "tttttttttttttttt",
+        "tttttttttttttttt",
+        "tttttttttttttttt",
+        "TTTTTTTTTTTTTTTT",
+    ],
+    "green_tincture": [
+        "................",
+        "................",
+        "......kkkk......",
+        "......knnk......",
+        "......kwwk......",
+        ".....kwggwk.....",
+        "....kggggggk....",
+        "...kgwggggggk...",
+        "...kgwggggggk...",
+        "...kggggggggk...",
+        "...kgggggggGk...",
+        "...kGggggggGk...",
+        "....kGGGGGGk....",
+        ".....kkkkkk.....",
+        "................",
+        "................",
+    ],
+    "red_tincture": [
+        "................",
+        "................",
+        "......kkkk......",
+        "......knnk......",
+        "......kwwk......",
+        ".....kwrrwk.....",
+        "....krrrrrrk....",
+        "...krwrrrrrrk...",
+        "...krwrrrrrrk...",
+        "...krrrrrrrrk...",
+        "...krrrrrrrRk...",
+        "...kRrrrrrrRk...",
+        "....kRRRRRRk....",
+        ".....kkkkkk.....",
+        "................",
+        "................",
+    ],
+    "gold_tincture": [
+        "................",
+        "................",
+        "......kkkk......",
+        "......knnk......",
+        "......kwwk......",
+        ".....kwyywk.....",
+        "....kyyyyyyk....",
+        "...kywyyyyyyk...",
+        "...kywyyyyyyk...",
+        "...kyyyyyyyyk...",
+        "...kyyyyyyyYk...",
+        "...kYyyyyyyYk...",
+        "....kYYYYYYk....",
+        ".....kkkkkk.....",
+        "................",
+        "................",
+    ],
+    "blue_tincture": [
+        "................",
+        "................",
+        "......kkkk......",
+        "......knnk......",
+        "......kwwk......",
+        ".....kwsswk.....",
+        "....kssssssk....",
+        "...kswssssssk...",
+        "...kswssssssk...",
+        "...kssssssssk...",
+        "...ksssssssSk...",
+        "...kSssssssSk...",
+        "....kSSSSSSk....",
+        ".....kkkkkk.....",
+        "................",
+        "................",
+    ],
+    "potion": [
+        "................",
+        "................",
+        "................",
+        ".......kk.......",
+        "......knnk......",
+        "......kwwk......",
+        ".....kwccwk.....",
+        "....kcwcccck....",
+        "....kcwccccCk...",
+        "....kccccccCk...",
+        "....kCccccCCk...",
+        ".....kCCCCCk....",
+        "......kkkkk.....",
+        "................",
+        "................",
+        "................",
+    ],
+    "cauldron": [
+        "................",
+        "................",
+        "..kkkkkkkkkkkk..",
+        ".kddddddddddddk.",
+        ".kdgGgGgggGggdk.",
+        "kddddddddddddddk",
+        "kdYddddddddddYdk",
+        "kddddddddddddddk",
+        ".kddddddddddddk.",
+        ".kdddddddddddddk",
+        "..kddddddddddk..",
+        "...kkkkkkkkkk...",
+        "...kk.CccC.kk...",
+        "...kk.cwwc.kk...",
+        "......CccC......",
+        "................",
+    ],
+    "decor_notes": [
+        "kkkkkkkkkkkkkkkk",
+        "knnnnnnnnnnnnnnk",
+        "knwwwwwrwwwwwwnk",
+        "knwkkkkkkkkkwwnk",
+        "knwwwwwwwwwwwwnk",
+        "knwkkkkkkkkwwwnk",
+        "knwwwwwwwwwwwwnk",
+        "knwkkkkkkkkkkwnk",
+        "knwwwwwwwwwwwwnk",
+        "knwkkkkkwwwwwwnk",
+        "knwwwwwwwwwwwwnk",
+        "knwkkkkkkkkkwwnk",
+        "knwwwwwwwwwwwwnk",
+        "knnnnnnnnnnnnnnk",
+        "kkkkkkkkkkkkkkkk",
+        "................",
+    ],
+    "doctor": [
+        "................",
+        "................",
+        ".....kkkkkk.....",
+        "....kccccccck...",
+        "...kcccccccck...",
+        "...kcCkcckCck...",
+        "...kcCkcckCck...",
+        "...kccccccccck..",
+        "...kcccCCccck...",
+        "....kcccccck....",
+        "...kkccccccckk..",
+        "..kcwwwlwwwwck..",
+        ".kcwwwwlwwwwwck.",
+        ".kcwwwwlwwrwwck.",
+        ".kcwwwwlwrrrwck.",
+        ".kcwwwwlwwrwwck.",
+        ".kcwwwwlwwwwwck.",
+        "..kcwwwlwwwwck..",
+        "..kcwwwlwwwwck..",
+        "..kcwwwlwwwwck..",
+        "...kcwwlwwwck...",
+        "...kcwwlwwwck...",
+        "...kcwwwwwwck...",
+        "....kcwwwwck....",
+        "....kcwcwcwk....",
+        ".....kc.kc.k....",
+        "......k..k......",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
+    "decor_crab_statue": [
+        "................................",
+        "................................",
+        "...kkk......................kkk.",
+        "..kMMMk....................kMMMk",
+        ".kMmmmMk..................kMmmmM",
+        ".kMmkkmMk................kMmkkmM",
+        ".kMmk.kmMk..............kMmk.kmM",
+        "..kMk..kMk..............kMk..kMk",
+        "..kMMk.kMk..............kMk.kMMk",
+        "...kMMkkMk..............kMkkMMk.",
+        "....kMMMMk...kk....kk...kMMMMk..",
+        ".....kMMMk..kmmk..kmmk..kMMMk...",
+        "......kMMMk.kmkk..kkmk.kMMMk....",
+        ".......kMMMkkkk....kkkkMMMk.....",
+        "........kMMMMMMMMMMMMMMMMk......",
+        ".......kMmmmmmmmmmmmmmmmmMk.....",
+        "......kMmmmmmmmmmmmmmmmmmmMk....",
+        ".....kMmmmmMmmmmmmmmMmmmmmmMk...",
+        ".....kMmmmmmmmmmmmmmmmmmmmmMk...",
+        ".....kMmmmMmmmmMMmmmmmMmmmmMk...",
+        ".....kMMmmmmmmmmmmmmmmmmmmMMk...",
+        "......kMMmmmmmmmmmmmmmmmmMMk....",
+        ".....kkkMMMMMMMMMMMMMMMMMMkkk...",
+        "....kMk.kkkkkkkkkkkkkkkkkk.kMk..",
+        "...kMk..kMk..kMk..kMk..kMk..kMk.",
+        "..kMk..kMk..kMk....kMk..kMk..kMk",
+        "..kk...kk...kk......kk...kk...kk",
+        "..kddddddddddddddddddddddddddddk",
+        "..kddddddddddddddddddddddddddddk",
+        "..kllllllllllllllllllllllllllllk",
+        "..kkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+        "................................",
+    ],
+    "portal": [
+        "................................",
+        "................................",
+        "...........kkkkkkkkkk...........",
+        "........kkkPPPPPPPPPPkkk........",
+        "......kkPPPppppppppppPPPkk......",
+        ".....kPPppppPPPPPPPPppppPPk.....",
+        "....kPpppPPPkkkkkkkkPPPpppPk....",
+        "...kPppPPkk..........kkPPppPk...",
+        "...kPpPPk..............kPPpPk...",
+        "..kPppPk......c.........kPppPk..",
+        "..kPpPk...c.......c......kPpPk..",
+        ".kPppPk..................kPppPk.",
+        ".kPpPk.....c......c.......kPpPk.",
+        ".kPpPk....................kPpPk.",
+        ".kPpPk......c...c.........kPpPk.",
+        ".kPpPk..........c.........kPpPk.",
+        ".kPpPk......c......c......kPpPk.",
+        ".kPpPk....................kPpPk.",
+        ".kPpPk.....c.....c........kPpPk.",
+        ".kPppPk..................kPppPk.",
+        "..kPpPk...c.......c......kPpPk..",
+        "..kPppPk......c.........kPppPk..",
+        "...kPpPPk..............kPPpPk...",
+        "...kPppPPkk..........kkPPppPk...",
+        "....kPpppPPPkkkkkkkkPPPpppPk....",
+        ".....kPPppppPPPPPPPPppppPPk.....",
+        "......kkPPPppppppppppPPPkk......",
+        "........kkkPPPPPPPPPPkkk........",
+        "...........kkkkkkkkkk...........",
+        "................................",
+        "................................",
+        "................................",
+    ],
+    "decor_lantern": [
+        ".......kk.......",
+        "......kddk......",
+        ".......kk.......",
+        ".....kkkkkk.....",
+        "....kddddddk....",
+        "....kyoyyoyk....",
+        "....kyyowyyk....",
+        "....koyywyok....",
+        "....kyoyyoyk....",
+        "....kyyoyyyk....",
+        "....kddddddk....",
+        ".....kkkkkk.....",
+        "......kddk......",
+        "......kddk......",
+        ".....kddddk.....",
+        "....kkkkkkkk....",
+    ],
+    "decor_rails": [
+        "..kdk......kdk..",
+        "..kdk......kdk..",
+        "nnnnnnnnnnnnnnnn",
+        "BBkdkBBBBBBkdkBB",
+        "..kdk......kdk..",
+        "..kdk......kdk..",
+        "..kdk......kdk..",
+        "..kdk......kdk..",
+        "..kdk......kdk..",
+        "..kdk......kdk..",
+        "nnnnnnnnnnnnnnnn",
+        "BBkdkBBBBBBkdkBB",
+        "..kdk......kdk..",
+        "..kdk......kdk..",
+        "..kdk......kdk..",
+        "..kdk......kdk..",
+    ],
+    "decor_minecart": [
+        "................",
+        "...kkk...kkk....",
+        "..kkkkkkkkkkkk..",
+        ".kddddddddddddk.",
+        ".kdkkkkkkkkkkdk.",
+        ".kdkkdkkkkdkkdk.",
+        ".kdkkkkdkkkkkdk.",
+        ".kddddddddddddk.",
+        ".kdlllllllllldk.",
+        ".kdlddddddddldk.",
+        ".kdlllllllllldk.",
+        ".kddddddddddddk.",
+        "..kkkkkkkkkkkk..",
+        "..kddk....kddk..",
+        "..kddk....kddk..",
+        "...kk......kk...",
+    ],
+    "decor_crystal": [
+        "................",
+        ".......kk.......",
+        "......kpPk......",
+        "......kwpk...k..",
+        "..k...kppk..kpk.",
+        ".kpk..kppPk.kpk.",
+        ".kwpk.kwppk.kpPk",
+        ".kppk.kpppPkkwpk",
+        ".kppPkkppppkkppk",
+        "..kpPkkwpppkkpPk",
+        "..kppkkppPPkkPk.",
+        "...kPkkpPPPkkk..",
+        "..kkkkkkkkkkkkk.",
+        ".kdddddddddddddk",
+        ".kkkkkkkkkkkkkkk",
+        "................",
+    ],
+    "floor_mine": [
+        "nnnnBnnnnnnnnnnn",
+        "nnnnnnnnnBnnnnnn",
+        "nBnnnnnnnnnnnndn",
+        "nnnnnnndnnnnnnnn",
+        "nnnnnnnnnnnnBnnn",
+        "nnndnnnnnnnnnnnn",
+        "nnnnnnnnBnnnnnnn",
+        "nnnnnnnnnnnnnnBn",
+        "nnBnnnnnnnndnnnn",
+        "nnnnnnnnnnnnnnnn",
+        "nnnnndnnnnnnnnnn",
+        "nnnnnnnnnnBnnnnn",
+        "nBnnnnnnnnnnnnnn",
+        "nnnnnnnnnnnnndnn",
+        "nnnnnBnnnnnnnnnn",
+        "nnnnnnnnnnnnnnnn",
+    ],
+    "wall_mine": [
+        "dddkllldddddkddd",
+        "ddkllllldddkdddd",
+        "dklllllllddkdddd",
+        "kkkkkkkkkkkkkkkk",
+        "dddddkdddlllldkd",
+        "ddddkddllllllkdd",
+        "dddkddllllllkddd",
+        "kkkkkkkkkkkkkkkk",
+        "llldddddkdddddll",
+        "lllddddkddddddll",
+        "ddddddkddddddddd",
+        "kkkkkkkkkkkkkkkk",
+        "dddkddddllldddkd",
+        "ddkddddllllldkdd",
+        "dkdddddllllldkdd",
+        "kkkkkkkkkkkkkkkk",
+    ],
 }
+
+# Some rooms reuse the wood of the cabin and the planks of the hold.
+SPRITES["floor_galley"] = SPRITES["floor_cabin"]
+SPRITES["wall_galley"] = SPRITES["wall_hold"]
+SPRITES["floor_helm"] = SPRITES["floor_cabin"]
+SPRITES["wall_helm"] = SPRITES["wall_cabin"]
+SPRITES["floor_east_room"] = SPRITES["floor_cabin"]
+SPRITES["wall_east_room"] = SPRITES["wall_cabin"]
+SPRITES["floor_corridor"] = SPRITES["floor_hold"]
+SPRITES["wall_corridor"] = SPRITES["wall_hold"]
+SPRITES["floor_corridor_end"] = SPRITES["floor_hold"]
+SPRITES["wall_corridor_end"] = SPRITES["wall_hold"]
 
 # Pictures already turned into pygame Surfaces: (name, turns, flip) -> Surface.
 _images = {}
@@ -3950,6 +5613,12 @@ TO_ANGEL = act("enter", "deck_to_angel")
 CABIN_TO_DECK = act("enter", "cabin_to_deck")
 HOLD_TO_DECK = act("enter", "hold_to_deck")
 CRAB_TO_DECK = act("enter", "crab_to_deck")
+TO_INFIRMARY = act("enter", "hold_to_infirmary")
+INFIRMARY_TO_HOLD = act("enter", "infirmary_to_hold")
+CABIN_TO_GALLEY = act("enter", "cabin_to_galley")
+GALLEY_TO_CABIN = act("enter", "galley_to_cabin")
+TAKE_POTION = act("pick_up", "potion")
+GIVE_TO_DOCTOR = act("use_item", "doctor", item="potion")
 ACTIVATE_A = act("activate", "generator_a")
 ACTIVATE_B = act("activate", "generator_b")
 ACTIVATE_C = act("activate", "generator_c")
@@ -3977,17 +5646,24 @@ PHASE_1 = [step(1), step(2), step(3), step(4), step(5)]
 PHASE_2 = [step(3), step(1)]
 PHASE_3 = [step(5), step(2), step(4), step(3)]
 SOLVE_TILES = PHASE_1 + PHASE_2 + PHASE_3
+# The remedy, from the hold: the tinctures in the right order, then the doctor drinks it.
+RECIPE = [act("pour", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
+CALM_THE_DOCTOR = [TO_INFIRMARY] + RECIPE + [TAKE_POTION, GIVE_TO_DOCTOR, INFIRMARY_TO_HOLD]
+# From the deck to the galley and back: the anvil is there once the doctor is at peace.
+FUSE_IN_THE_GALLEY = [TO_CABIN, CABIN_TO_GALLEY, FUSE, GALLEY_TO_CABIN, CABIN_TO_DECK]
 # Wand, cabin puzzle, the first half of the key, and back on the deck.
 GET_KEY = [TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK]
-# Then the hold, no longer barred: the tiles, the second half, the two halves
-# fused on the anvil, and back on the deck.
-GET_FUSED_KEY = GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY, FUSE, HOLD_TO_DECK]
+# Then the hold, no longer barred: the tiles, the second half, the remedy for the
+# doctor, back on the deck, and the two halves fused on the anvil in the galley.
+GET_FUSED_KEY = (GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR
+                 + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
 # The shortest way to each ending: the barrel of the hold is optional.
 CRAB_ENDING = GET_FUSED_KEY + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
 ANGEL_ENDING = GET_FUSED_KEY + [OPEN_ANGEL, TO_ANGEL, GIVE_TO_ANGEL]
 # The long way: read the clue on the barrel too.
 CLUE_THEN_CRAB = (GET_KEY + [TO_HOLD, WAND_ON_BARREL] + SOLVE_TILES
-                  + [TAKE_SECOND_KEY, FUSE, HOLD_TO_DECK, OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB])
+                  + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY
+                  + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB])
 # Open both doors, go in one, come back and wander around without ending the game.
 CHOOSE_AND_WANDER = GET_FUSED_KEY + [OPEN_CRAB, OPEN_ANGEL, TO_CRAB, CRAB_TO_DECK, TO_CABIN]
 # Flip some generators, walk out and back in (they start over), flip another one.
@@ -4044,6 +5720,10 @@ def every_action():
             actions.append(act("activate", thing))
         if info["kind"] == "tile":
             actions.append(act("step_on", thing))
+        if info["kind"] == "ingredient":
+            actions.append(act("pour", thing))
+        if info["kind"] == "portal":
+            actions.append(act("travel", thing))
     for puzzle in story.FLOOR_PUZZLES:
         actions.append(act("leave_zone", puzzle))
     for target in targets:
@@ -4145,14 +5825,14 @@ def test_a3_revisited_cabin_offers_no_second_key():
 
 
 def test_a3_revisited_hold_offers_no_third_key():
-    """A3: back in the hold, the anvil is empty, and the tiles and the anvil do not make another key."""
+    """A3: back in the hold, the altar is empty, and the tiles and the altar do not make another key."""
     state = play(GET_FUSED_KEY + [TO_HOLD])
     assert "second_key" not in [thing["id"] for thing in engine.things_here(state)]
     _, outcome = engine.pick_up(state, "second_key")
     assert not outcome["ok"]
     after, outcome = engine.step_on(state, "tile_1")
     assert outcome["event"] == "already_done"
-    after, outcome = engine.use_item(state, "fused_key", "anvil")
+    after, outcome = engine.use_item(state, "fused_key", "hold_altar")
     assert outcome["event"] == "nothing_happens"
     assert after["inventory"] == ["wand", "fused_key"]
 
@@ -4270,7 +5950,7 @@ def test_pt01_restart_after_an_ending_also_asks():
 def test_pt02_the_scene_lists_its_things_and_their_actions():
     """The opening scene shows the wand and four doors, and E offers the right action for each."""
     state = engine.new_game()
-    here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
+    here = {thing["id"]: thing["status"] for thing in engine.things_here(state) if thing["kind"] != "decor"}
     assert here == {
         "wand": "on_floor",
         "deck_to_cabin": "open",
@@ -4281,6 +5961,17 @@ def test_pt02_the_scene_lists_its_things_and_their_actions():
     assert offered(state, "wand") == [("pick_up", None)]
     assert offered(state, "deck_to_cabin") == [("enter", None)]
     assert offered(state, "deck") == [("examine", None)]
+
+
+def test_decor_can_only_be_examined():
+    """Decor is there to look at: even with items in hand, E offers "Examine" and nothing else."""
+    state = play([TAKE_WAND])
+    for thing, info in story.OBJECTS.items():
+        if info["kind"] == "decor":
+            state["room"] = info["room"]
+            assert offered(state, thing) == [("examine", None)], thing
+            _, outcome = engine.examine(state, thing)
+            assert outcome["ok"] and outcome["text"] == info["look_text"], thing
 
 
 def test_pt02_accepted_actions_show_a_result():
@@ -4320,7 +6011,8 @@ def test_pt03_the_halves_do_not_open_the_doors(steps, half):
 
 def test_pt03_the_anvil_fuses_the_two_halves():
     """Either half on the anvil, with both in hand: the halves become the fused key, in the first half's place."""
-    with_both = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY])
+    with_both = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR
+                     + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY])
     assert with_both["inventory"] == ["wand", "key", "second_key"]
     for half in ("key", "second_key"):
         fused, outcome = engine.use_item(with_both, half, "anvil")
@@ -4330,13 +6022,13 @@ def test_pt03_the_anvil_fuses_the_two_halves():
     _, outcome = engine.use_item(with_both, "wand", "anvil")
     assert outcome["event"] == "nothing_happens"
     halves_first = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TAKE_WAND, TO_HOLD] + SOLVE_TILES
-                        + [TAKE_SECOND_KEY, FUSE])
+                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
     assert halves_first["inventory"] == ["fused_key", "wand"]  # the order things were found in is kept
 
 
 def test_pt03_one_half_alone_cannot_be_fused():
     """The anvil needs both halves: the refusal says the other one is missing, and nothing changes."""
-    state = play(GET_KEY + [TO_HOLD])
+    state = play(GET_KEY + [TO_HOLD] + CALM_THE_DOCTOR + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY])
     after, outcome = engine.use_item(state, "key", "anvil")
     assert outcome["event"] == "missing_item"
     assert outcome["text"] == story.MESSAGES["missing_item"]
@@ -4358,7 +6050,7 @@ def test_pt03_a_lock_needing_several_items_wants_them_all(monkeypatch):
     """The engine's rule for any lock: every item it requires must be carried, or it explains what is missing."""
     monkeypatch.setitem(story.DOORS["deck_to_crab"], "requires", ["fused_key", "wand"])
     without_wand = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TO_HOLD] + SOLVE_TILES
-                        + [TAKE_SECOND_KEY, FUSE, HOLD_TO_DECK])
+                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
     after, outcome = engine.use_item(without_wand, "fused_key", "deck_to_crab")
     assert outcome["event"] == "missing_item"
     assert after == without_wand
@@ -4546,13 +6238,13 @@ def test_r2_an_item_can_wait_for_a_flag_to_appear(monkeypatch):
 
 
 def test_r3_revisited_hold_remembers_the_solved_tiles():
-    """Back in the hold: every tile still lit, the barrier still gone, the anvil empty."""
+    """Back in the hold: every tile still lit, the barrier still gone, the altar empty."""
     state = play(GET_FUSED_KEY + [TO_HOLD])
     here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
     assert [here[f"tile_{number}"] for number in range(1, 6)] == ["lit"] * 5
     assert "hold_barrier" not in here
     assert "second_key" not in here
-    assert here["anvil"] == "present"
+    assert here["hold_altar"] == "present"
 
 
 def test_r3_found_clue_is_remembered():
@@ -5132,15 +6824,42 @@ def test_story_every_door_has_a_way_back():
 
 
 def test_story_every_room_can_be_reached():
+    """Through doors or portals, every room can be reached from the start."""
+    links = [(door["room"], door["to"]) for door in story.DOORS.values()]
+    for info in story.OBJECTS.values():
+        if info["kind"] == "portal":
+            links.append((info["room"], story.OBJECTS[info["to"]]["room"]))
     reached = {story.START_ROOM}
     grew = True
     while grew:
         grew = False
-        for door in story.DOORS.values():
-            if door["room"] in reached and door["to"] not in reached:
-                reached.add(door["to"])
+        for room, to in links:
+            if room in reached and to not in reached:
+                reached.add(to)
                 grew = True
     assert reached == set(story.ROOMS)
+
+
+def test_story_portals_come_in_pairs():
+    """Each portal leads to another portal, in another room, that leads back."""
+    for portal, info in story.OBJECTS.items():
+        if info["kind"] == "portal":
+            twin = story.OBJECTS[info["to"]]
+            assert twin["kind"] == "portal" and twin["to"] == portal, portal
+            assert twin["room"] != info["room"], portal
+
+
+def test_travel_through_the_portal_and_back():
+    state = engine.new_game()
+    state["room"] = "corridor_end"
+    there, outcome = engine.travel(state, "corridor_portal")
+    assert outcome["event"] == "teleported" and there["room"] == "mine"
+    assert "mine" in engine.visited_rooms(there)
+    back, _ = engine.travel(there, "mine_portal")
+    assert back["room"] == "corridor_end"
+    _, outcome = engine.travel(state, "mine_portal")
+    assert outcome["event"] == "not_here"
+    assert offered(state, "corridor_portal") == [("examine", None)]
 
 
 def test_story_locked_doors_are_complete():
@@ -5166,7 +6885,17 @@ def test_story_locked_doors_are_complete():
 
 def test_story_objects_are_well_formed():
     for thing_id, thing in story.OBJECTS.items():
-        assert thing["kind"] in ("puzzle", "character", "switch", "tile", "barrier", "altar", "anvil"), thing_id
+        assert thing["kind"] in ("puzzle", "character", "switch", "tile", "barrier", "altar", "anvil", "decor",
+                                 "cauldron", "ingredient", "portal"), thing_id
+        for key in ("appears_if", "gone_if"):
+            assert thing.get(key) is None or thing[key] in story.FLAGS, (thing_id, key)
+        if thing["kind"] == "ingredient":
+            assert thing["puzzle"] in story.POTION_PUZZLES, thing_id
+            assert thing["pour_text"].strip(), thing_id
+        if thing["kind"] == "decor":
+            assert isinstance(thing["solid"], bool), thing_id
+            assert thing["picture"].startswith("decor_"), thing_id
+            assert not thing["reactions"], f"{thing_id} is decor: it reacts to nothing"
         assert thing["name"].strip()
         assert thing["look_text"].strip()
         if thing["kind"] in ("puzzle", "character"):
@@ -5233,6 +6962,95 @@ def test_story_texts_are_not_empty():
             assert puzzle[key].strip()
     for text in story.MESSAGES.values():
         assert text.strip()
+
+
+
+
+# --- The infirmary: the remedy, the doctor and his gift ----------------------------
+
+IN_INFIRMARY = GET_KEY + [TO_HOLD, TO_INFIRMARY]
+
+
+def test_potion_the_recipe_in_order_makes_the_remedy():
+    """Each tincture of the recipe moves the cauldron on; the last one makes the remedy appear in it."""
+    puzzle = story.POTION_PUZZLES["remedy"]
+    state = play(IN_INFIRMARY)
+    assert "potion" not in [thing["id"] for thing in engine.things_here(state)]
+    for number, tincture in enumerate(puzzle["recipe"], start=1):
+        state, outcome = engine.pour(state, tincture)
+        if number < len(puzzle["recipe"]):
+            assert outcome["event"] == "potion_poured"
+            assert outcome["text"] == story.OBJECTS[tincture]["pour_text"]
+            assert state["flags"]["potion_step"] == number
+    assert outcome["event"] == "potion_ready"
+    assert state["flags"]["potion_solved"] and state["flags"]["potion_step"] == 0
+    assert "potion" in [thing["id"] for thing in engine.things_here(state)]
+
+
+def test_potion_a_wrong_tincture_spoils_the_mixture():
+    """Out of order, the cauldron empties and the recipe starts over; nothing appears."""
+    green, red, gold, blue = story.POTION_PUZZLES["remedy"]["recipe"]
+    state = play(IN_INFIRMARY + [act("pour", green), act("pour", red)])
+    after, outcome = engine.pour(state, blue)  # the gold had to come first
+    assert outcome["ok"] and outcome["event"] == "potion_spoiled"
+    assert after["flags"]["potion_step"] == 0
+    assert not after["flags"]["potion_solved"]
+    _, outcome = engine.pour(play(IN_INFIRMARY), red)  # a wrong first one spoils it too
+    assert outcome["event"] == "potion_spoiled"
+
+
+def test_potion_the_cauldron_is_done_once_the_remedy_is_made():
+    state = play(IN_INFIRMARY + RECIPE)
+    for tincture in story.POTION_PUZZLES["remedy"]["recipe"]:
+        after, outcome = engine.pour(state, tincture)
+        assert outcome["event"] == "already_done"
+        assert after == state
+
+
+def test_potion_pouring_is_offered_on_every_tincture_only_in_the_infirmary():
+    state = play(IN_INFIRMARY)
+    for tincture in story.POTION_PUZZLES["remedy"]["recipe"]:
+        assert offered(state, tincture) == [("pour", None), ("examine", None)]
+    _, outcome = engine.pour(play(GET_KEY), "green_tincture")
+    assert outcome["event"] == "not_here"
+
+
+def test_doctor_drinks_the_remedy_vanishes_and_the_anvil_appears_in_the_galley():
+    before = play(IN_INFIRMARY + RECIPE + [TAKE_POTION])
+    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY], before)
+    assert "anvil" not in [thing["id"] for thing in engine.things_here(in_galley)]
+    after, outcome = engine.use_item(before, "potion", "doctor")
+    assert outcome["event"] == "flag_set" and after["flags"]["doctor_at_peace"]
+    here = [thing["id"] for thing in engine.things_here(after)]
+    assert "doctor" not in here and "potion" not in here  # gone, and the cauldron gives no second remedy
+    assert "potion" not in after["inventory"]  # drunk
+    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY], after)
+    assert "anvil" in [thing["id"] for thing in engine.things_here(in_galley)]
+
+
+def test_doctor_wants_nothing_but_the_remedy():
+    state = play(IN_INFIRMARY)
+    after, outcome = engine.use_item(state, "wand", "doctor")
+    assert outcome["event"] == "nothing_happens"
+    assert after == state
+
+
+def test_restore_rejects_an_impossible_cauldron_or_remedy():
+    good = play(IN_INFIRMARY + RECIPE + [TAKE_POTION])
+    assert engine.restore_state(good) == good
+    for flags in ({"potion_step": 4}, {"potion_step": 2, "potion_solved": True}, {"doctor_at_peace": True}):
+        broken = copy.deepcopy(good)
+        broken["flags"].update(flags)
+        assert engine.restore_state(broken) is None, flags
+
+
+def test_entering_a_room_marks_it_on_the_map():
+    state = engine.new_game()
+    assert engine.visited_rooms(state) == ["deck"]
+    state = play([TO_CABIN, CABIN_TO_GALLEY], state)
+    assert set(engine.visited_rooms(state)) == {"deck", "cabin", "galley"}
+    for room in story.ROOMS:
+        assert story.FLAGS["visited_" + room] == (room == story.START_ROOM), room
 
 
 ================================================================================
@@ -5376,7 +7194,13 @@ IN_THE_HOLD = FIRST_HALF + [act("enter", "deck_to_hold")]
 TILE_SEQUENCE = ["tile_1", "tile_2", "tile_3", "tile_4", "tile_5", "tile_3", "tile_1", "tile_5", "tile_2", "tile_4", "tile_3"]
 TILES_SOLVED = IN_THE_HOLD + [act("step_on", tile) for tile in TILE_SEQUENCE]
 BOTH_HALVES = TILES_SOLVED + [act("pick_up", "second_key")]  # in the hold, not fused yet
-KEY_FUSED = BOTH_HALVES + [act("use_item", "anvil", "second_key"), act("enter", "hold_to_deck")]  # back on the deck
+DOCTOR_AT_PEACE = (BOTH_HALVES + [act("enter", "hold_to_infirmary")]
+                   + [act("pour", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
+                   + [act("pick_up", "potion"), act("use_item", "doctor", "potion")])  # in the infirmary
+KEY_FUSED = DOCTOR_AT_PEACE + [act("enter", "infirmary_to_hold"), act("enter", "hold_to_deck"),
+                               act("enter", "deck_to_cabin"), act("enter", "cabin_to_galley"),
+                               act("use_item", "anvil", "second_key"),
+                               act("enter", "galley_to_cabin"), act("enter", "cabin_to_deck")]  # back on the deck
 CRAB_DOOR_OPEN = KEY_FUSED + [act("use_item", "deck_to_crab", "fused_key")]
 TO_THE_CRAB_ENDING = CRAB_DOOR_OPEN + [act("enter", "deck_to_crab"), act("use_item", "crab", "wand")]
 TO_THE_ANGEL_ENDING = KEY_FUSED + [act("use_item", "deck_to_angel", "fused_key"), act("enter", "deck_to_angel"),
@@ -5512,21 +7336,22 @@ def playing(app, actions):
 # --- The layout in story.py -------------------------------------------------------
 
 
-def on_the_floor(tile):
+def on_the_floor(tile, room):
     col, row = tile
-    return 1 <= col <= main.COLUMNS - 2 and 1 <= row <= main.ROWS - 2
+    columns, rows = main.room_size(room)
+    return 1 <= col <= columns - 2 and 1 <= row <= rows - 2
 
 
 def test_layout_everything_stands_on_the_floor():
     for room_id, room in story.ROOMS.items():
-        assert on_the_floor(room["entry"]), room_id
+        assert on_the_floor(room["entry"], room_id), room_id
     for thing_id, info in list(story.ITEMS.items()) + list(story.OBJECTS.items()):
         if info["room"] is None:
             continue  # made at the anvil: it never lies anywhere
-        assert on_the_floor(info["pos"]), thing_id
+        assert on_the_floor(info["pos"], info["room"]), thing_id
         width, height = info.get("size", (1, 1))
         last_tile = (info["pos"][0] + width - 1, info["pos"][1] + height - 1)
-        assert on_the_floor(last_tile), thing_id
+        assert on_the_floor(last_tile, info["room"]), thing_id
 
 
 def test_layout_nothing_shares_a_tile():
@@ -5614,10 +7439,13 @@ def test_layout_any_tile_leads_to_any_other_without_crossing_a_third():
                 assert end in seen, (start, goal)
 
 
-def test_layout_each_wall_has_at_most_one_door():
+def test_layout_doors_on_the_same_wall_keep_apart():
+    """A wall can have more than one door ("at"), but their openings and the floor in front never overlap."""
     for room in story.ROOMS:
-        sides = [story.DOORS[door]["side"] for door in main.doors_in(room)]
-        assert len(sides) == len(set(sides)), room
+        doors = main.doors_in(room)
+        for index, door in enumerate(doors):
+            for other in doors[index + 1:]:
+                assert not approach(door).inflate(2, 2).colliderect(approach(other)), (room, door, other)
 
 
 def test_layout_the_way_back_is_on_the_opposite_wall():
@@ -5648,16 +7476,66 @@ def test_layout_nothing_stands_in_front_of_a_door():
                 assert not approach(door_id).colliderect(main.thing_rect(thing_id)), (door_id, thing_id)
 
 
+def test_layout_every_door_and_thing_can_be_reached():
+    """From the entry of each room the player can walk to every door and get within reach of every thing.
+
+    A search over the floor in small steps, like the player's own: what new decor
+    adds must never wall off a door or a puzzle. What a barrier guards is left out.
+    """
+    for room in story.ROOMS:
+        state = in_room(room)
+        solids = main.solid_rects(state)
+        barriers = [main.thing_rect(thing) for thing, info in story.OBJECTS.items()
+                    if info["room"] == room and info["kind"] == "barrier"]
+        inside = main.tile_rect(0, 0, *main.room_size(room))  # open doors lead out: stop at the room's edge
+        start = main.spawn_at_entry(room)
+        seen = {start}
+        frontier = [start]
+        while frontier:
+            further = []
+            for x, y in frontier:
+                for dx, dy in ((4, 0), (-4, 0), (0, 4), (0, -4)):
+                    point = (x + dx, y + dy)
+                    body = main.player_rect(point)
+                    if point not in seen and inside.contains(body) and body.collidelist(solids) == -1:
+                        seen.add(point)
+                        further.append(point)
+            frontier = further
+        bodies = [main.player_rect(point) for point in seen]
+        for door in main.doors_in(room):
+            assert any(body.colliderect(approach(door)) for body in bodies), (room, door)
+        for thing, info in list(story.OBJECTS.items()) + list(story.ITEMS.items()):
+            if info["room"] != room or info.get("kind") == "barrier":
+                continue
+            rect = main.thing_rect(thing)
+            if any(barrier.contains(rect) for barrier in barriers):
+                continue  # behind a barrier until a puzzle is solved
+            assert any(body.inflate(2 * main.REACH, 2 * main.REACH).colliderect(rect) for body in bodies), (room, thing)
+
+
+def test_flat_decor_can_be_walked_over_and_solid_decor_cannot():
+    for thing, info in story.OBJECTS.items():
+        if info["kind"] != "decor":
+            continue
+        solids = main.solid_rects(in_room(info["room"]))
+        blocked = main.thing_rect(thing).collidelist(solids) != -1
+        assert blocked == info["solid"], thing
+
+
 # --- Room geometry ------------------------------------------------------------------
 
 
-def test_doors_are_in_the_middle_of_their_wall():
+def test_doors_are_in_the_middle_of_their_wall_unless_told_otherwise():
     for door_id, door in story.DOORS.items():
         rect = main.door_rect(door_id)
-        if door["side"] in ("N", "S"):
-            assert rect.centerx == main.WIDTH // 2, door_id
+        columns, rows = main.room_size(door["room"])
+        if "at" in door:
+            along = rect.left if door["side"] in ("N", "S") else rect.top - main.HUD_HEIGHT
+            assert along == door["at"] * main.TILE, door_id
+        elif door["side"] in ("N", "S"):
+            assert rect.centerx == columns * main.TILE // 2, door_id
         else:
-            assert rect.centery == main.HUD_HEIGHT + main.ROWS * main.TILE // 2, door_id
+            assert rect.centery == main.HUD_HEIGHT + rows * main.TILE // 2, door_id
 
 
 def test_walls_close_the_room_except_at_the_doors():
@@ -5667,9 +7545,10 @@ def test_walls_close_the_room_except_at_the_doors():
         openings = [main.door_rect(door) for door in main.doors_in(room)]
         for opening in openings:
             assert opening.collidelist(walls) == -1, room
-        for col in range(main.COLUMNS):
-            for row in range(main.ROWS):
-                if col in (0, main.COLUMNS - 1) or row in (0, main.ROWS - 1):
+        columns, rows = main.room_size(room)
+        for col in range(columns):
+            for row in range(rows):
+                if col in (0, columns - 1) or row in (0, rows - 1):
                     center = main.tile_rect(col, row).center
                     assert pygame.Rect(center, (1, 1)).collidelist(walls + openings) != -1, (room, col, row)
 
@@ -5690,7 +7569,7 @@ def test_players_appear_on_free_floor():
 def test_player_never_walks_through_walls_or_closed_doors(app):
     """Walking in every direction for five seconds: the player never overlaps anything solid."""
     start_new_game(app)
-    room_area = main.tile_rect(0, 0, main.COLUMNS, main.ROWS)
+    room_area = main.tile_rect(0, 0, *main.room_size("deck"))
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
             app["state"] = engine.new_game()
@@ -6027,12 +7906,32 @@ def test_a_whole_game_on_screen(app, door, character, ending):
     stand_next_to(app, "second_key")
     press(app, pygame.K_e)
     read_all(app)
+    walk_into(app, "hold_to_infirmary")
+    for tincture in story.POTION_PUZZLES["remedy"]["recipe"]:
+        stand_next_to(app, tincture)
+        press(app, pygame.K_e)
+        choose_in_menu(app, "pour")
+        poured = dialog_text(app)  # the text box tells how the mixture changes
+        read_all(app)
+    assert poured == story.POTION_PUZZLES["remedy"]["solved_text"]
+    stand_next_to(app, "potion")
+    press(app, pygame.K_e)
+    read_all(app)
+    stand_next_to(app, "doctor")
+    press(app, pygame.K_e)
+    choose_in_menu(app, "use_item", "potion")
+    read_all(app)
+    walk_into(app, "infirmary_to_hold")
+    walk_into(app, "hold_to_deck")
+    walk_into(app, "deck_to_cabin")
+    walk_into(app, "cabin_to_galley")
     stand_next_to(app, "anvil")
     press(app, pygame.K_e)
     choose_in_menu(app, "use_item", "key")  # either half fuses both
     assert dialog_text(app) == story.OBJECTS["anvil"]["fuse_text"]
     read_all(app)
-    walk_into(app, "hold_to_deck")
+    walk_into(app, "galley_to_cabin")
+    walk_into(app, "cabin_to_deck")
     app["player"] = main.spawn_in_front_of(door)
     press(app, pygame.K_e)
     choose_in_menu(app, "use_item", "fused_key")
@@ -6199,8 +8098,9 @@ def test_a_mistake_makes_the_tiles_blink_red_then_go_dark(in_hold):
 
 
 def test_every_floor_outcome_has_a_sound():
-    """The events step_on and leave_zone accept each have a sound, and every sound exists."""
-    assert set(main.EVENT_SOUNDS) == {"tile_lit", "phase_complete", "tiles_complete", "tiles_reset"}
+    """The events step_on, leave_zone, pour and travel accept each have a sound, and every sound exists."""
+    assert set(main.EVENT_SOUNDS) == {"tile_lit", "phase_complete", "tiles_complete", "tiles_reset",
+                                      "potion_poured", "potion_spoiled", "potion_ready", "teleported"}
     for effect in main.EVENT_SOUNDS.values():
         assert effect in sounds.EFFECTS
 
@@ -6278,6 +8178,141 @@ def test_arrows_and_wasd_give_the_same_directions():
     assert main.held_direction(held) == (0, 0)  # opposite keys cancel out
 
 
+
+
+# --- The map ----------------------------------------------------------------------
+
+
+def test_map_layout_lines_up_every_door_with_its_way_back():
+    """The search over the doors puts each room against the wall of its door, with the two openings facing."""
+    layout = main.room_layout()
+    assert set(layout) == set(story.ROOMS)
+    for door, info in story.DOORS.items():
+        back = main.return_door(info["to"], info["room"])
+        x, y = layout[info["room"]]
+        col, row, width, height = main.door_tiles(door)
+        other_x, other_y = layout[info["to"]]
+        back_col, back_row, _, _ = main.door_tiles(back)
+        if info["side"] in ("N", "S"):
+            assert x + col == other_x + back_col, door
+        else:
+            assert y + row == other_y + back_row, door
+
+
+def test_map_rooms_never_overlap_on_the_ship():
+    layout = main.room_layout()
+    areas = {room: pygame.Rect(layout[room], main.room_size(room)) for room in story.ROOMS}
+    rooms = list(areas)
+    for index, room in enumerate(rooms):
+        for other in rooms[index + 1:]:
+            assert not areas[room].colliderect(areas[other]), (room, other)
+
+
+def test_map_fits_in_the_corner_of_the_bar():
+    corner = main.map_rect()
+    assert corner.top >= 0 and corner.bottom <= main.HUD_HEIGHT and corner.right <= main.WIDTH
+    for room in story.ROOMS:
+        assert corner.contains(main.map_area(room)), room
+
+
+def test_map_dot_follows_the_player_inside_the_current_room(app):
+    start_new_game(app)
+    for room in ("deck", "corridor", "cabin"):
+        area = main.map_area(room)
+        columns, rows = main.room_size(room)
+        for col, row in ((1, 1), (columns - 2, rows - 2), (columns // 2, rows // 2)):
+            x, y = main.map_dot(room, main.tile_rect(col, row).topleft)
+            assert area.collidepoint(x, y), (room, col, row)
+    top = main.map_dot("deck", main.tile_rect(7, 1).topleft)
+    bottom = main.map_dot("deck", main.tile_rect(7, 22).topleft)
+    assert top[1] < bottom[1]
+
+
+def test_map_points_at_the_anvil_until_the_key_is_fused():
+    assert main.map_markers(play(BOTH_HALVES)) == []
+    assert main.map_markers(play(DOCTOR_AT_PEACE)) == ["galley"]
+    assert main.map_markers(play(KEY_FUSED)) == []
+
+
+def test_map_is_drawn_in_every_room(app):
+    start_new_game(app)
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for room in story.ROOMS:
+        app["state"] = in_room(room)
+        app["player"] = main.spawn_at_entry(room)
+        main.draw_hud(app, screen)
+
+
+# --- Big rooms and the camera -------------------------------------------------------
+
+
+def test_camera_stays_still_in_a_room_the_size_of_the_screen():
+    for col, row in ((1, 1), (14, 10), (7, 5)):
+        assert main.camera("cabin", main.tile_rect(col, row).topleft) == (0, 0)
+
+
+def test_camera_follows_the_player_along_the_tall_deck_and_stops_at_its_edges():
+    top = main.camera("deck", main.tile_rect(7, 1).topleft)
+    middle = main.camera("deck", main.tile_rect(7, 12).topleft)
+    bottom = main.camera("deck", main.tile_rect(7, 22).topleft)
+    columns, rows = main.room_size("deck")
+    assert top == (0, 0)
+    assert bottom == (0, rows * main.TILE - main.VIEW.height)
+    assert top[1] < middle[1] < bottom[1]
+
+
+def test_camera_scrolls_sideways_in_the_corridor_and_centres_its_low_ceiling():
+    columns, rows = main.room_size("corridor")
+    west = main.camera("corridor", main.tile_rect(2, 3).topleft)
+    east = main.camera("corridor", main.tile_rect(columns - 3, 3).topleft)
+    assert west[0] == 0 and east[0] == columns * main.TILE - main.VIEW.width
+    assert west[1] == east[1] == (rows * main.TILE - main.VIEW.height) // 2  # less than a screen: black above and below
+
+
+def test_the_player_is_always_on_screen(app):
+    """Wherever the player stands in a big room, the camera keeps them inside the view."""
+    for room in ("deck", "corridor", "mine"):
+        columns, rows = main.room_size(room)
+        for col in range(1, columns - 1, 3):
+            for row in range(1, rows - 1, 3):
+                position = main.tile_rect(col, row).topleft
+                x, y = main.camera(room, position)
+                body = main.player_rect(position).move(-x, -y)
+                assert main.VIEW.contains(body), (room, col, row)
+
+
+# --- The portal ---------------------------------------------------------------------
+
+
+def test_walking_into_the_portal_leads_to_the_mine_and_back(app):
+    start_new_game(app)
+    app["state"] = in_room("corridor_end")
+    stand_next_to(app, "corridor_portal")  # just below the ring
+    walk_until(app, lambda x, y: app["state"]["room"] == "mine", lambda x, y: (0, -1), limit=60)
+    assert app["player"] == main.spawn_by_portal("mine_portal")
+    assert app["banner"] == story.ROOMS["mine"]["name"]
+    assert engine.restore_state(save.load_game())["room"] == "mine"  # saved at once
+    walk_until(app, lambda x, y: app["state"]["room"] == "corridor_end", lambda x, y: (0, -1), limit=60)
+    assert app["player"] == main.spawn_by_portal("corridor_portal")
+
+
+def test_arriving_by_a_portal_lands_on_free_floor():
+    for portal, info in story.OBJECTS.items():
+        if info["kind"] == "portal":
+            spot = main.player_rect(main.spawn_by_portal(portal))
+            assert spot.collidelist(main.solid_rects(in_room(info["room"]))) == -1, portal
+            assert main.portal_touched(in_room(info["room"]), spot.topleft) is None, portal
+
+
+def test_big_rooms_are_drawn_through_the_camera(app):
+    start_new_game(app)
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for room in story.ROOMS:
+        app["state"] = in_room(room)
+        app["player"] = main.spawn_at_entry(room)
+        main.draw_play_screen(app, screen)
+
+
 ================================================================================
 # FILE: plot_twist/test_graphics.py
 ================================================================================
@@ -6322,7 +8357,11 @@ TO_THE_CRAB_DOOR = ([("pick_up", "wand", None), ("enter", "deck_to_cabin", None)
                      ("activate", "generator_d", None), ("pick_up", "key", None), ("enter", "cabin_to_deck", None),
                      ("enter", "deck_to_hold", None)]
                     + [("step_on", tile, None) for tile in TILES]
-                    + [("pick_up", "second_key", None), ("use_item", "anvil", "key"), ("enter", "hold_to_deck", None)])
+                    + [("pick_up", "second_key", None), ("enter", "hold_to_infirmary", None)]
+                    + [("pour", tincture, None) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
+                    + [("pick_up", "potion", None), ("use_item", "doctor", "potion"), ("enter", "infirmary_to_hold", None),
+                       ("enter", "hold_to_deck", None), ("enter", "deck_to_cabin", None), ("enter", "cabin_to_galley", None),
+                       ("use_item", "anvil", "key"), ("enter", "galley_to_cabin", None), ("enter", "cabin_to_deck", None)])
 CRAB_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_crab", "fused_key"), ("enter", "deck_to_crab", None),
                                   ("use_item", "crab", "wand")]
 ANGEL_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_angel", "fused_key"), ("enter", "deck_to_angel", None),
@@ -6340,8 +8379,12 @@ def test_every_sprite_is_a_proper_picture():
             for letter in row:
                 assert letter == "." or letter in sprites.PALETTE, (name, letter)
         size = (len(rows[0]), len(rows))
+        sharing = [thing for thing, info in story.OBJECTS.items() if info.get("picture") == name]
         if name.startswith("door_") or name == "ship":
             assert size == (2 * main.TILE, main.TILE), name
+        elif sharing:  # a shared picture is as big as every piece that uses it
+            for thing in sharing:
+                assert size == main.thing_rect(thing).size, (name, thing)
         elif name in story.OBJECTS:
             assert size == main.thing_rect(name).size, name  # the big characters fill all their tiles
         else:
@@ -6356,7 +8399,8 @@ def test_everything_on_screen_has_a_picture():
     for item in story.ITEMS:
         assert sprites.image(item) is not None, item
     statuses = {"puzzle": ["solved", "unsolved"], "character": ["present"], "switch": ["on", "off"],
-                "altar": ["present"], "anvil": ["present"], "barrier": ["up"], "tile": ["lit", "dark", "error"]}
+                "altar": ["present"], "anvil": ["present"], "barrier": ["up"], "tile": ["lit", "dark", "error"], "decor": ["present"],
+                "cauldron": ["present"], "ingredient": ["present"], "portal": ["present"]}
     for thing, info in story.OBJECTS.items():
         for status in statuses[info["kind"]]:
             if info["kind"] == "barrier":
