@@ -51,7 +51,8 @@ ROOMS = {
         "name": "Captain's cabin",
         "description": (
             "Sea charts scattered on the floor, and four generators humming at the corners of a square, "
-            "joined by cables. At the back, an energy barrier guards a small altar."
+            "joined by cables. At the back, an energy barrier guards a small altar. "
+            "Side doors lead to the galley and to the helm."
         ),
         "outdoor": False,
         "entry": (7, 9),
@@ -61,7 +62,7 @@ ROOMS = {
         "description": (
             "Dark, overturned crates and the smell of brine. Five numbered tiles shine in the floor, "
             "from 1 to 5. At the back, an anvil wrapped in a barrier; "
-            "in a corner, a barrel covered in symbols."
+            "in a corner, a barrel covered in symbols. A narrow door leads to the infirmary."
         ),
         "outdoor": False,
         "entry": (7, 2),
@@ -77,6 +78,27 @@ ROOMS = {
         "description": "A room flooded with white light. In the middle, an angel smiles at you.",
         "outdoor": False,
         "entry": (13, 5),
+    },
+    "infirmary": {
+        "name": "Infirmary",
+        "description": (
+            "Empty beds with grey sheets, a cabinet full of bottles. "
+            "The air is cold, and something in here does not want you to stay."
+        ),
+        "outdoor": False,
+        "entry": (13, 5),
+    },
+    "galley": {
+        "name": "Galley",
+        "description": "Pots hanging from the ceiling, a cold stove and a table laid for a meal nobody ate.",
+        "outdoor": False,
+        "entry": (13, 5),
+    },
+    "helm": {
+        "name": "Helm",
+        "description": "The ship's wheel turns slowly on its own. Through the windows, only fog.",
+        "outdoor": False,
+        "entry": (2, 5),
     },
 }
 
@@ -194,6 +216,36 @@ DOORS = {
         "requires": [], "choice_flag": None, "opens_with": None,
         "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
     },
+    "hold_to_infirmary": {
+        "room": "hold", "to": "infirmary", "side": "W",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "infirmary_to_hold": {
+        "room": "infirmary", "to": "hold", "side": "E",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "cabin_to_galley": {
+        "room": "cabin", "to": "galley", "side": "W",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "galley_to_cabin": {
+        "room": "galley", "to": "cabin", "side": "E",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "cabin_to_helm": {
+        "room": "cabin", "to": "helm", "side": "E",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
+    "helm_to_cabin": {
+        "room": "helm", "to": "cabin", "side": "W",
+        "requires": [], "choice_flag": None, "opens_with": None,
+        "locked_text": None, "sealed_text": None, "open_text": None, "barred_text": None,
+    },
 }
 
 # The things that stand in the rooms. Each one stands on tile "pos" (and the
@@ -211,6 +263,9 @@ DOORS = {
 # - "altar" holds an item: the cabin's altar.
 # - "anvil" holds an item too, and fuses the parts of an item (see "part_of" in
 #   ITEMS) when one of them is used on it while the player carries them all.
+# - "decor" is only there to look at: E offers "Examine" and nothing else. It
+#   blocks the way if "solid" is true; if not, the player walks over it (a rope on
+#   the floor). "picture" names its sprite, so many pieces can share one.
 # The barrel of the hold is still a simple puzzle: it only asks for the wand.
 OBJECTS = {
     # The generators of the cabin, at the corners of a square: A top left, B top
@@ -414,6 +469,223 @@ OBJECTS = {
             },
         },
     },
+    # Decor: nothing to solve, but the rooms feel lived in.
+    "deck_barrel_1": {
+        "kind": "decor", "name": "Barrel", "room": "deck", "pos": (2, 2),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of fresh water. Empty.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_barrel_2": {
+        "kind": "decor", "name": "Barrel", "room": "deck", "pos": (3, 2),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of salted fish. The smell is terrible.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_crate_1": {
+        "kind": "decor", "name": "Crate", "room": "deck", "pos": (12, 2),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate from the port of Lisbon.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_crate_2": {
+        "kind": "decor", "name": "Crate", "room": "deck", "pos": (13, 2),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate nailed shut. Something inside rattles.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_barrel_3": {
+        "kind": "decor", "name": "Barrel", "room": "deck", "pos": (2, 9),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of tar, sticky to the touch.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_rope": {
+        "kind": "decor", "name": "Coiled rope", "room": "deck", "pos": (12, 9),
+        "picture": "decor_rope", "solid": False,
+        "look_text": "A coil of wet rope. Nobody tied up the sails.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_shelf_1": {
+        "kind": "decor", "name": "Bookshelf", "room": "cabin", "pos": (1, 1),
+        "picture": "decor_bookshelf", "solid": True,
+        "look_text": "Logbooks. The last page of each one is torn out.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_shelf_2": {
+        "kind": "decor", "name": "Bookshelf", "room": "cabin", "pos": (2, 1),
+        "picture": "decor_bookshelf", "solid": True,
+        "look_text": "Old atlases, swollen with damp.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_table": {
+        "kind": "decor", "name": "Chart table", "room": "cabin", "pos": (13, 1),
+        "picture": "decor_table", "solid": True,
+        "look_text": "A sea chart, pinned down by a compass. The course is marked in red.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_crate_1": {
+        "kind": "decor", "name": "Crate", "room": "hold", "pos": (1, 1),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "Overturned crates of ship's biscuits.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_crate_2": {
+        "kind": "decor", "name": "Crate", "room": "hold", "pos": (2, 1),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate of candles, all burned down.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_crate_3": {
+        "kind": "decor", "name": "Crate", "room": "hold", "pos": (13, 1),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A heavy crate. It will not move.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_sack": {
+        "kind": "decor", "name": "Sack", "room": "hold", "pos": (14, 1),
+        "picture": "decor_sack", "solid": True,
+        "look_text": "A sack of flour, chewed open by rats.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_rock_1": {
+        "kind": "decor", "name": "Rock", "room": "crab_room", "pos": (13, 2),
+        "picture": "decor_rock", "solid": True,
+        "look_text": "A rock covered in barnacles.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_rock_2": {
+        "kind": "decor", "name": "Rock", "room": "crab_room", "pos": (13, 9),
+        "picture": "decor_rock", "solid": True,
+        "look_text": "A slippery rock. Something lives under it.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_shells_1": {
+        "kind": "decor", "name": "Shells", "room": "crab_room", "pos": (5, 2),
+        "picture": "decor_shells", "solid": False,
+        "look_text": "Empty shells, cracked open.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_shells_2": {
+        "kind": "decor", "name": "Shells", "room": "crab_room", "pos": (6, 9),
+        "picture": "decor_shells", "solid": False,
+        "look_text": "A heap of shells, arranged almost like a spiral.",
+        "done_text": None, "reactions": {},
+    },
+    "angel_candle_1": {
+        "kind": "decor", "name": "Candle", "room": "angel_room", "pos": (3, 2),
+        "picture": "decor_candle", "solid": True,
+        "look_text": "A tall candle. Its flame does not move.",
+        "done_text": None, "reactions": {},
+    },
+    "angel_candle_2": {
+        "kind": "decor", "name": "Candle", "room": "angel_room", "pos": (3, 9),
+        "picture": "decor_candle", "solid": True,
+        "look_text": "A tall candle. It gives no heat.",
+        "done_text": None, "reactions": {},
+    },
+    "angel_candle_3": {
+        "kind": "decor", "name": "Candle", "room": "angel_room", "pos": (8, 2),
+        "picture": "decor_candle", "solid": True,
+        "look_text": "A tall candle. The wax flows upwards.",
+        "done_text": None, "reactions": {},
+    },
+    "angel_candle_4": {
+        "kind": "decor", "name": "Candle", "room": "angel_room", "pos": (8, 9),
+        "picture": "decor_candle", "solid": True,
+        "look_text": "A tall candle, white as bone.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_bed_1": {
+        "kind": "decor", "name": "Bed", "room": "infirmary", "pos": (2, 1),
+        "picture": "decor_bed", "solid": True,
+        "look_text": "A narrow bed. The sheets are cold.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_bed_2": {
+        "kind": "decor", "name": "Bed", "room": "infirmary", "pos": (4, 1),
+        "picture": "decor_bed", "solid": True,
+        "look_text": "A narrow bed. Someone left a dent in the pillow.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_bed_3": {
+        "kind": "decor", "name": "Bed", "room": "infirmary", "pos": (6, 1),
+        "picture": "decor_bed", "solid": True,
+        "look_text": "A narrow bed, its sheets torn to strips.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_cabinet_1": {
+        "kind": "decor", "name": "Medicine cabinet", "room": "infirmary", "pos": (10, 1),
+        "picture": "decor_cabinet", "solid": True,
+        "look_text": "Bottles with faded labels. Most are empty.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_cabinet_2": {
+        "kind": "decor", "name": "Medicine cabinet", "room": "infirmary", "pos": (11, 1),
+        "picture": "decor_cabinet", "solid": True,
+        "look_text": "Bandages, scissors, a broken syringe.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_stove_1": {
+        "kind": "decor", "name": "Stove", "room": "galley", "pos": (2, 1),
+        "picture": "decor_stove", "solid": True,
+        "look_text": "A cast-iron stove. The ashes are still warm.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_stove_2": {
+        "kind": "decor", "name": "Stove", "room": "galley", "pos": (3, 1),
+        "picture": "decor_stove", "solid": True,
+        "look_text": "A pot of soup, gone cold long ago.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_table_1": {
+        "kind": "decor", "name": "Table", "room": "galley", "pos": (6, 5),
+        "picture": "decor_table", "solid": True,
+        "look_text": "Plates for six. Six chairs pushed back in a hurry.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_table_2": {
+        "kind": "decor", "name": "Table", "room": "galley", "pos": (7, 5),
+        "picture": "decor_table", "solid": True,
+        "look_text": "Someone carved a wing and a claw into the wood.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_barrel": {
+        "kind": "decor", "name": "Barrel", "room": "galley", "pos": (14, 1),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of wine. Half empty.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_sack_1": {
+        "kind": "decor", "name": "Sack", "room": "galley", "pos": (1, 10),
+        "picture": "decor_sack", "solid": True,
+        "look_text": "A sack of potatoes, sprouting.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_sack_2": {
+        "kind": "decor", "name": "Sack", "room": "galley", "pos": (2, 10),
+        "picture": "decor_sack", "solid": True,
+        "look_text": "A sack of salt.",
+        "done_text": None, "reactions": {},
+    },
+    "helm_wheel": {
+        "kind": "decor", "name": "Ship's wheel", "room": "helm", "pos": (13, 5),
+        "picture": "decor_wheel", "solid": True,
+        "look_text": "The wheel turns by itself, a little at a time. It will not obey you.",
+        "done_text": None, "reactions": {},
+    },
+    "helm_table": {
+        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (13, 1),
+        "picture": "decor_table", "solid": True,
+        "look_text": "A compass whose needle spins and spins.",
+        "done_text": None, "reactions": {},
+    },
+    "helm_shelf": {
+        "kind": "decor", "name": "Bookshelf", "room": "helm", "pos": (14, 1),
+        "picture": "decor_bookshelf", "solid": True,
+        "look_text": "Signal flags, folded with care.",
+        "done_text": None, "reactions": {},
+    },
 }
 
 # Circuits of generators. When every switch of a circuit is on at the same time,
@@ -554,3 +826,5 @@ MESSAGES = {
     # Shown if the save file cannot be written (for example, the disk is full).
     "save_failed": "The game cannot be saved: progress from here on could be lost.",
 }
+
+

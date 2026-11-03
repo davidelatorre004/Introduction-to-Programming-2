@@ -72,7 +72,7 @@ def test_everything_on_screen_has_a_picture():
     for item in story.ITEMS:
         assert sprites.image(item) is not None, item
     statuses = {"puzzle": ["solved", "unsolved"], "character": ["present"], "switch": ["on", "off"],
-                "altar": ["present"], "anvil": ["present"], "barrier": ["up"], "tile": ["lit", "dark", "error"]}
+                "altar": ["present"], "anvil": ["present"], "barrier": ["up"], "tile": ["lit", "dark", "error"], "decor": ["present"]}
     for thing, info in story.OBJECTS.items():
         for status in statuses[info["kind"]]:
             if info["kind"] == "barrier":
@@ -241,3 +241,5 @@ def test_the_endings_play_their_animation(app, ending_path):
             pictures[frame] = pygame.image.tobytes(screen, "RGB")
         main.update(app, 0, 0)
     assert pictures[0] != pictures[2 * main.FPS]
+
+

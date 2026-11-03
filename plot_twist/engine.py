@@ -194,6 +194,8 @@ def actions_for(state, target):
     if kind == "switch":
         label = story.MESSAGES["label_activate"].format(name=story.OBJECTS[target]["name"])
         return [_action("activate", target, label)]
+    if kind == "decor":
+        return [_action("examine", target, story.MESSAGES["label_examine"])]  # only to look at
     if kind == "door" and door_status(state, target) == "open":
         destination = story.ROOMS[story.DOORS[target]["to"]]["name"]
         label = story.MESSAGES["label_enter"].format(room=destination)
@@ -759,3 +761,5 @@ def _is_allowed(flag, value):
         if value == allowed and type(value) is type(allowed):
             return True
     return False
+
+

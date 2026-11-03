@@ -305,6 +305,52 @@ def test_layout_nothing_stands_in_front_of_a_door():
                 assert not approach(door_id).colliderect(main.thing_rect(thing_id)), (door_id, thing_id)
 
 
+def test_layout_every_door_and_thing_can_be_reached():
+    """From the entry of each room the player can walk to every door and get within reach of every thing.
+
+    A search over the floor in small steps, like the player's own: what new decor
+    adds must never wall off a door or a puzzle. What a barrier guards is left out.
+    """
+    for room in story.ROOMS:
+        state = in_room(room)
+        solids = main.solid_rects(state)
+        barriers = [main.thing_rect(thing) for thing, info in story.OBJECTS.items()
+                    if info["room"] == room and info["kind"] == "barrier"]
+        inside = main.tile_rect(0, 0, main.COLUMNS, main.ROWS)  # open doors lead out: stop at the room's edge
+        start = main.spawn_at_entry(room)
+        seen = {start}
+        frontier = [start]
+        while frontier:
+            further = []
+            for x, y in frontier:
+                for dx, dy in ((4, 0), (-4, 0), (0, 4), (0, -4)):
+                    point = (x + dx, y + dy)
+                    body = main.player_rect(point)
+                    if point not in seen and inside.contains(body) and body.collidelist(solids) == -1:
+                        seen.add(point)
+                        further.append(point)
+            frontier = further
+        bodies = [main.player_rect(point) for point in seen]
+        for door in main.doors_in(room):
+            assert any(body.colliderect(approach(door)) for body in bodies), (room, door)
+        for thing, info in list(story.OBJECTS.items()) + list(story.ITEMS.items()):
+            if info["room"] != room or info.get("kind") == "barrier":
+                continue
+            rect = main.thing_rect(thing)
+            if any(barrier.contains(rect) for barrier in barriers):
+                continue  # behind a barrier until a puzzle is solved
+            assert any(body.inflate(2 * main.REACH, 2 * main.REACH).colliderect(rect) for body in bodies), (room, thing)
+
+
+def test_flat_decor_can_be_walked_over_and_solid_decor_cannot():
+    for thing, info in story.OBJECTS.items():
+        if info["kind"] != "decor":
+            continue
+        solids = main.solid_rects(in_room(info["room"]))
+        blocked = main.thing_rect(thing).collidelist(solids) != -1
+        assert blocked == info["solid"], thing
+
+
 # --- Room geometry ------------------------------------------------------------------
 
 
@@ -933,3 +979,5 @@ def test_arrows_and_wasd_give_the_same_directions():
     assert main.held_direction(held) == (-1, -1)
     held = collections.defaultdict(bool, {pygame.K_LEFT: True, pygame.K_d: True})
     assert main.held_direction(held) == (0, 0)  # opposite keys cancel out
+
+

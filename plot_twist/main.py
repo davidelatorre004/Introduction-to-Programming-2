@@ -121,6 +121,9 @@ ROOM_COLORS = {
     "hold": ((70, 60, 55), (40, 32, 30)),
     "crab_room": ((60, 110, 110), (30, 60, 65)),
     "angel_room": ((225, 220, 200), (170, 165, 150)),
+    "infirmary": ((200, 210, 205), (110, 125, 120)),
+    "galley": ((120, 80, 50), (40, 32, 30)),
+    "helm": ((120, 80, 50), (70, 45, 30)),
 }
 DEFAULT_ROOM_COLORS = ((100, 100, 100), (50, 50, 50))
 
@@ -208,16 +211,22 @@ def solid_rects(state):
 
     That is puzzles, characters, generators, altars, and a barrier until it dissolves.
 
-    Items on the floor and the numbered tiles are not solid: the player walks over them.
+    Items on the floor, the numbered tiles and flat decor are not solid: the player walks over them.
     """
     solids = wall_rects(state["room"])
     for thing in engine.things_here(state):
         if thing["kind"] == "door":
             if thing["status"] != "open":
                 solids.append(door_rect(thing["id"]))
-        elif thing["kind"] not in ("item", "tile"):
+        elif thing["kind"] not in ("item", "tile") and not is_flat(thing["id"]):
             solids.append(thing_rect(thing["id"]))
     return solids
+
+
+def is_flat(thing):
+    """True for decor lying on the floor, like a coil of rope: the player walks over it."""
+    info = story.OBJECTS.get(thing)
+    return info is not None and info["kind"] == "decor" and not info["solid"]
 
 
 def player_rect(position):
@@ -975,10 +984,15 @@ def draw_door(screen, door, status):
 def thing_picture(thing):
     """The sprite of a thing as it is now, or None.
 
-    It tries the id with the status ("hold_puzzle_solved"), the id alone ("crab"),
-    the kind with the status ("switch_on") and the kind alone ("altar").
+    It tries the shared "picture" of decor ("decor_barrel"), the id with the status
+    ("hold_puzzle_solved"), the id alone ("crab"), the kind with the status
+    ("switch_on") and the kind alone ("altar").
     """
-    for name in (thing["id"] + "_" + thing["status"], thing["id"], thing["kind"] + "_" + thing["status"], thing["kind"]):
+    names = [thing["id"] + "_" + thing["status"], thing["id"], thing["kind"] + "_" + thing["status"], thing["kind"]]
+    shared = story.OBJECTS.get(thing["id"], {}).get("picture")
+    if shared is not None:
+        names.insert(0, shared)  # decor: many pieces share one picture
+    for name in names:
         picture = sprites.image(name)
         if picture is not None:
             return picture
@@ -1152,8 +1166,8 @@ def draw_room(app, screen):
     for thing in things:
         if thing["kind"] == "door":
             draw_door(screen, thing["id"], thing["status"])
-        elif thing["kind"] in HOLDERS:
-            draw_thing(screen, thing)  # low furniture, drawn before what lies on it
+        elif thing["kind"] in HOLDERS or is_flat(thing["id"]):
+            draw_thing(screen, thing)  # low furniture and flat decor, drawn before what lies on it
         elif thing["kind"] not in ("item", "tile"):
             standing.append(thing)
     for thing in things:
@@ -1429,3 +1443,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

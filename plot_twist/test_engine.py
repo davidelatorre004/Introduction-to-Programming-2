@@ -356,7 +356,7 @@ def test_pt01_restart_after_an_ending_also_asks():
 def test_pt02_the_scene_lists_its_things_and_their_actions():
     """The opening scene shows the wand and four doors, and E offers the right action for each."""
     state = engine.new_game()
-    here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
+    here = {thing["id"]: thing["status"] for thing in engine.things_here(state) if thing["kind"] != "decor"}
     assert here == {
         "wand": "on_floor",
         "deck_to_cabin": "open",
@@ -367,6 +367,17 @@ def test_pt02_the_scene_lists_its_things_and_their_actions():
     assert offered(state, "wand") == [("pick_up", None)]
     assert offered(state, "deck_to_cabin") == [("enter", None)]
     assert offered(state, "deck") == [("examine", None)]
+
+
+def test_decor_can_only_be_examined():
+    """Decor is there to look at: even with items in hand, E offers "Examine" and nothing else."""
+    state = play([TAKE_WAND])
+    for thing, info in story.OBJECTS.items():
+        if info["kind"] == "decor":
+            state["room"] = info["room"]
+            assert offered(state, thing) == [("examine", None)], thing
+            _, outcome = engine.examine(state, thing)
+            assert outcome["ok"] and outcome["text"] == info["look_text"], thing
 
 
 def test_pt02_accepted_actions_show_a_result():
@@ -1252,7 +1263,11 @@ def test_story_locked_doors_are_complete():
 
 def test_story_objects_are_well_formed():
     for thing_id, thing in story.OBJECTS.items():
-        assert thing["kind"] in ("puzzle", "character", "switch", "tile", "barrier", "altar", "anvil"), thing_id
+        assert thing["kind"] in ("puzzle", "character", "switch", "tile", "barrier", "altar", "anvil", "decor"), thing_id
+        if thing["kind"] == "decor":
+            assert isinstance(thing["solid"], bool), thing_id
+            assert thing["picture"].startswith("decor_"), thing_id
+            assert not thing["reactions"], f"{thing_id} is decor: it reacts to nothing"
         assert thing["name"].strip()
         assert thing["look_text"].strip()
         if thing["kind"] in ("puzzle", "character"):
@@ -1319,3 +1334,5 @@ def test_story_texts_are_not_empty():
             assert puzzle[key].strip()
     for text in story.MESSAGES.values():
         assert text.strip()
+
+
