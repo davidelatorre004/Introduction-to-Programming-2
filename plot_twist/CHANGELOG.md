@@ -2,9 +2,24 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v18](versions/v18.md) - E only for what matters (2026-11-03)
+## [v19](versions/v19.md) - Visual effects (2026-11-03)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- A new module, `effects.py`: particles, banded 8-bit glows, pixel-by-pixel dissolves, floor ripples and the portal warp. Each effect can be switched off in its `FX` table, and its timing and size are constants at the top of the file. The rules of the game did not change.
+- Generators: a lamp that is on glows and pulses, and sparks jump from its lever. Lit cables pulse, with a spot of current running along them. When seven generators are on, the last one trembles and blushes red.
+- Barriers: spots of energy run around their edges and they flash now and then; when one opens it dissolves pixel by pixel in one second, crackling with sparks.
+- Cauldron: the liquid changes colour with the recipe (seaweed, brown, bright gold, then clear and glowing), bubbles rise in the same colour, and the blue fire lights the floor around it.
+- Portals: light turns slowly around the ring, the floor sways around it, and going through one ends in a purple warp instead of a dark fade.
+- Tiles of the hold: a lit tile glows and sends out a wave; a mistake throws red sparks and the red blinking lasts a second.
+- Anvil: the two halves fly together above it, meet in a burst of sparks and a white flash, and the fused key builds up pixel by pixel.
+- Wand: a spark climbs up the arm when it is picked up, and its icon in the bar glows.
+- Mood: dust floats in the rooms indoors, lanterns swing and flicker, the crystals of the mine pulse purple. The bad ending flashes white, then red.
+- Map: every visited room has a soft halo, the current one pulses, and once the doctor is at peace a small anvil marks the galley, if the player has been there.
+
+## [v18](versions/v18.md) - E only for what matters (2026-11-03)
+
+In commit [`055d470`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/055d470813e653602a8356e53663c1016a130fb2/plot_twist).
 
 - E acts only on things that matter to the story: items, generators, doors, characters, puzzles, the cauldron, the anvil, portals.
 - Near furniture, or far from everything, E does nothing and the top bar shows no hint. E also reaches past a barrel to what matters behind it.

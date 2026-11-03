@@ -16,8 +16,11 @@ showing, where the player stands, what the text box says. The game itself is
 app["state"], the engine's state.
 """
 
+import math
+
 import pygame
 
+import effects
 import engine
 import save
 import sounds
@@ -49,13 +52,15 @@ WAVE_FRAMES = FPS // 6     # frames between two pictures of the stormy sea (four
 SEA_PICTURES = 4           # pictures of the stormy sea, shown one after the other
 CALM_FRAMES = FPS // 2     # frames between the two pictures of the calm sea of the good ending
 BARRIER_FRAMES = 6         # frames between the two pictures of a barrier's energy
-FLASH_FRAMES = FPS // 2    # how long the tiles blink red after a mistake, before going dark
+FLASH_FRAMES = FPS         # how long the tiles blink red after a mistake, before going dark
 FLASH_BLINK = 6            # frames between two blinks
 ALTAR_LIFT = 5             # how much higher an item lying on an altar is drawn
 ENDING_SCENE_HEIGHT = 64   # the picture at the top of the ending screen
 ENDING_HORIZON = 40        # where the sea starts in that picture
 ENDING_MENU_TOP = 186
 EXPLOSION_DELAY = 12       # frames before the ship blows up in the bad ending
+EXPLOSION_WHITE = 20       # frames of the white flash of the blast
+EXPLOSION_RED = 40         # frames of the red glare after it
 
 # The direction to walk in to go through a door on each wall.
 TOWARD = {"N": (0, -1), "S": (0, 1), "W": (-1, 0), "E": (1, 0)}
@@ -117,6 +122,7 @@ EVENT_SOUNDS = {
 
 INVENTORY_ROOM = 108  # pixels of the bar for the items carried, left of the map
 MAP_SCALE = 3        # one pixel of the map for every three tiles of the ship
+MAP_HALO = (70, 70, 100)  # the soft border around a room already visited
 
 # Floor and wall color of each room.
 ROOM_COLORS = {
@@ -564,6 +570,7 @@ def new_app(fonts):
         "on_tile": None,         # the numbered tile the player stood on in the last frame
         "zones": set(),          # the floor puzzles whose zone the player was in, in the last frame
         "flash_frames": 0,       # frames left of the tiles blinking red after a mistake
+        "fx": effects.new_fx(),  # the visual effects: particles, dissolves, the warp (see effects.py)
     }
     open_main_menu(app)
     return app
@@ -777,7 +784,10 @@ def go_through_portal(app, portal):
     app["player"] = spawn_by_portal(story.OBJECTS[portal]["to"])
     app["touching"] = None
     settle_on_floor(app)
-    app["fade"] = FADE_FRAMES
+    if effects.FX["portals"]:
+        app["fx"]["warp"] = effects.WARP_FRAMES  # a purple warp instead of the dark fade
+    else:
+        app["fade"] = FADE_FRAMES
     show_banner(app, story.ROOMS[state["room"]]["name"])
 
 
@@ -812,6 +822,7 @@ def floor_action(app, action):
     if not outcome["ok"]:
         return
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
+    show_outcome(app, action, app["state"], state, outcome)
     if outcome["event"] == "tiles_reset":
         app["flash_frames"] = FLASH_FRAMES
     if outcome["event"] == "tiles_complete":
@@ -859,6 +870,7 @@ def do_action(app, action):
         app["banner_frames"] = 0  # the text box takes over from an older banner
         say(app, outcome["text"])
     if outcome["ok"]:
+        show_outcome(app, action, app["state"], state, outcome)
         app["state"] = state
         save_progress(app)
 
@@ -942,6 +954,7 @@ def update(app, dx, dy):
     """Move the game on by one frame. (dx, dy) is the direction held on the keyboard."""
     app["frame"] += 1
     app["scene_frames"] += 1
+    update_effects(app)
     app["moving"] = False
     if app["banner_frames"] > 0:
         app["banner_frames"] -= 1
@@ -976,6 +989,314 @@ def update(app, dx, dy):
     portal = portal_touched(app["state"], app["player"])
     if portal is not None:
         go_through_portal(app, portal)
+
+
+# --- Visual effects: what happens on screen when something happens in the game -----------
+#
+# effects.py has the tools (particles, glows, dissolves, the warp) and the switches;
+# here they are tied to the things of the game. Nothing here changes the game.
+
+FUSE_MEET = 28        # frame of the welding when the two halves meet
+FUSE_RISE = 30        # how many pixels above the anvil the halves weld (above the text box)
+
+
+def floor_rect(room):
+    """The floor of a room, in room pixels: inside its walls."""
+    columns, rows = room_size(room)
+    return tile_rect(1, 1, columns - 2, rows - 2)
+
+
+def standing_barriers(state):
+    return {thing["id"] for thing in engine.things_here(state) if thing["kind"] == "barrier"}
+
+
+def show_outcome(app, action, before, after, outcome):
+    """Something was accepted: start the effects that show it. `before` and `after` are the states."""
+    fx = app["fx"]
+    event = outcome["event"]
+    target = action.get("target")
+    if effects.FX["barriers"] and after["room"] == before["room"]:
+        for barrier in standing_barriers(before) - standing_barriers(after):
+            fx["fading"].append({"rect": thing_rect(barrier), "frames": effects.BARRIER_FADE_FRAMES})
+    if event == "picked_up" and target == "wand" and effects.FX["wand"]:
+        fx["wand_rise"] = {"age": 0}
+    elif event == "fused" and effects.FX["anvil"]:
+        anvil = thing_rect(target)
+        fx["fuse"] = {"center": (anvil.centerx, anvil.top - FUSE_RISE), "age": 0}
+    elif event in ("potion_poured", "potion_spoiled", "potion_ready") and effects.FX["cauldron"]:
+        x, y = liquid_center(target)
+        if event == "potion_poured":
+            color = cauldron_color(after)
+            effects.spawn(fx, x, y, effects.POUR_BUBBLES, [color, lighter(color)], speed=0.5, life=40, up=0.5,
+                          spread=math.pi / 2, angle=-math.pi / 2)
+        elif event == "potion_spoiled":
+            effects.spawn(fx, x, y, 24, [(70, 60, 50), (40, 36, 30), (120, 100, 70)], speed=2.2, life=30,
+                          gravity=0.12, up=1.2)
+        else:
+            effects.spawn(fx, x, y, 30, [effects.LIQUID["ready"], (255, 255, 255)], speed=1.4, life=50, up=0.6)
+    elif event in ("tile_lit", "phase_complete", "tiles_complete") and effects.FX["tiles"]:
+        fx["waves"].append({"center": thing_rect(target).center, "age": 0})
+        if event == "tiles_complete":
+            for thing in engine.things_here(after):
+                if thing["kind"] == "tile":
+                    x, y = thing_rect(thing["id"]).center
+                    effects.spawn(fx, x, y, 8, effects.SPARK, speed=1.5, life=30, up=0.5)
+    elif event == "tiles_reset" and effects.FX["tiles"]:
+        if action["verb"] == "step_on":
+            x, y = thing_rect(target).center
+        else:
+            x, y = player_rect(app["player"]).center
+        effects.spawn(fx, x, y, effects.MISTAKE_SPARKS, effects.RED, speed=1.8, life=24, gravity=0.05)
+
+
+def lighter(color, amount=60):
+    return tuple(min(255, c + amount) for c in color)
+
+
+def cauldron_color(state):
+    """The colour of the liquid in the cauldron: it follows the recipe, then glows when the remedy is ready."""
+    puzzle = story.POTION_PUZZLES["remedy"]
+    if state["flags"][puzzle["solved_flag"]]:
+        return effects.LIQUID["ready"]
+    return effects.LIQUID[min(state["flags"][puzzle["step_flag"]], 3)]
+
+
+def liquid_center(cauldron):
+    """The middle of the liquid, on top of the cauldron's picture."""
+    rect = thing_rect(cauldron)
+    return (rect.left + 8, rect.top + 4)
+
+
+def update_effects(app):
+    """Move the effects on by one frame, and add the particles that keep coming (sparks, bubbles)."""
+    fx = app["fx"]
+    state = app["state"]
+    if state is None:
+        effects.update(fx)
+        return
+    room = state["room"]
+    if fx["room"] != room:
+        effects.reset_room(fx, room, floor_rect(room), not story.ROOMS[room]["outdoor"])
+    rng = fx["rng"]
+    frame = app["frame"]
+    if app["scene"] in ("play", "actions", "inventory"):
+        for thing in engine.things_here(state):
+            rect = thing_rect(thing["id"]) if thing["kind"] != "door" else None
+            if thing["kind"] == "switch" and thing["status"] == "on" and effects.FX["generators"]:
+                if rng.random() < 1 / effects.GENERATOR_SPARK_EVERY:
+                    effects.spawn(fx, rect.left + 14, rect.top + 1, rng.randint(1, 2), effects.SPARK, speed=0.8,
+                                  life=18, gravity=0.06, up=0.8, spread=math.pi / 2, angle=-math.pi / 2)
+            elif thing["kind"] == "cauldron" and effects.FX["cauldron"]:
+                flags = state["flags"]
+                if (flags["potion_step"] or flags["potion_solved"]) and frame % effects.CAULDRON_BUBBLE_EVERY == 0:
+                    color = cauldron_color(state)
+                    x, y = liquid_center(thing["id"])
+                    effects.spawn(fx, x + rng.randint(-4, 4), y, 1, [lighter(color)], speed=0.1, life=36, up=0.35)
+        for fading in fx["fading"]:
+            area = fading["rect"]
+            for _ in range(effects.BARRIER_SPARKS):
+                effects.spawn(fx, rng.uniform(area.left, area.right), rng.uniform(area.top, area.bottom), 1,
+                              effects.ENERGY, speed=1.2, life=16)
+        if fx["wand_rise"] is not None:
+            body = player_rect(app["player"])
+            climb = fx["wand_rise"]["age"] / effects.WAND_RISE_FRAMES
+            side = 1 if app["facing"][0] >= 0 else -1
+            effects.spawn(fx, body.centerx + side * 5, body.bottom - 3 - climb * 12, 1, [(255, 236, 140), (186, 116, 255)],
+                          speed=0.2, life=16, up=0.5)
+        if fx["fuse"] is not None and fx["fuse"]["age"] == FUSE_MEET:
+            x, y = fx["fuse"]["center"]
+            effects.spawn(fx, x, y, effects.FUSE_SPARKS, effects.WELD, speed=2.6, life=36, gravity=0.08, up=0.6)
+            fx["flash"] = effects.FLASH_FRAMES
+    effects.update(fx)
+
+
+def draw_portal_light(app, surface, thing):
+    """The light turning around a ring of a portal."""
+    rect = thing_rect(thing["id"])
+    effects.draw_ring_light(surface, (rect.left + 16, rect.top + 15), 12, app["frame"])
+
+
+def draw_cauldron_liquid(app, surface, thing):
+    """The liquid in the cauldron, coloured by the recipe so far; the ready remedy glows softly."""
+    state = app["state"]
+    rect = thing_rect(thing["id"])
+    color = cauldron_color(state)
+    surface.fill(color, (rect.left + 2, rect.top + 3, 12, 1))
+    surface.fill(lighter(color, 30), (rect.left + 3, rect.top + 4, 10, 1))
+    wave = (app["frame"] // 10) % 8
+    surface.fill(lighter(color, 80), (rect.left + 4 + wave, rect.top + 3, 1, 1))  # light on the surface
+    if state["flags"]["potion_solved"]:
+        effects.glow(surface, (rect.left + 8, rect.top + 4), 12, (90, 150, 170), effects.pulse(app["frame"], 0.05, 0.5, 1))
+
+
+def draw_generator(app, surface, thing):
+    """A generator. When on, its lamp glows and pulses. When all the others are on, the one
+    still off trembles and blushes red: one more lever and the circuit is complete."""
+    state = app["state"]
+    rect = thing_rect(thing["id"])
+    almost = effects.FX["generators"] and thing["status"] == "off" and _almost_complete(state, thing["id"])
+    shake = ((app["frame"] // 3) % 3) - 1 if almost else 0
+    picture = thing_picture(thing)
+    if picture is None:
+        draw_thing(surface, thing)
+    else:
+        surface.blit(picture, rect.move(shake, 0))
+    if not effects.FX["generators"]:
+        return
+    if thing["status"] == "on":
+        effects.glow(surface, (rect.left + 7, rect.top + 4), effects.GENERATOR_GLOW, (120, 100, 30),
+                     effects.pulse(app["frame"], 0.09, 0.45, 1.0, rect.left * 0.1))
+    elif almost:
+        effects.glow(surface, rect.center, 8, (120, 30, 20), effects.pulse(app["frame"], 0.2, 0.3, 1.0))
+
+
+def _almost_complete(state, switch):
+    """True when every other generator of the circuit is on and only this one is off."""
+    circuit = next(c for c in story.CIRCUITS.values() if switch in c["switches"])
+    if state["flags"][circuit["solved_flag"]] or state["flags"][story.OBJECTS[switch]["flag"]]:
+        return False
+    on = sum(1 for other in circuit["switches"] if state["flags"][story.OBJECTS[other]["flag"]])
+    return on == len(circuit["switches"]) - 1
+
+
+def draw_barrier_energy(app, surface, thing):
+    """Spots of energy running around the edge of a barrier that stands, and a flash now and then."""
+    area = thing_rect(thing["id"])
+    perimeter = 2 * (area.width + area.height)
+    for spot in range(effects.BARRIER_EDGE_SPOTS):
+        along = (app["frame"] * 1.3 + spot * perimeter / effects.BARRIER_EDGE_SPOTS) % perimeter
+        x, y = point_on_edge(area, along)
+        surface.fill(effects.ENERGY[1], (x, y, 2, 1))
+    if (app["frame"] // 7) % 11 == 0:  # a short flash every couple of seconds
+        effects.glow(surface, area.center, max(area.width, area.height) // 2, (20, 60, 70), 0.8)
+
+
+def point_on_edge(area, along):
+    """The point `along` pixels around the edge of a rectangle, clockwise from its top-left corner."""
+    if along < area.width:
+        return area.left + along, area.top
+    along -= area.width
+    if along < area.height:
+        return area.right - 1, area.top + along
+    along -= area.height
+    if along < area.width:
+        return area.right - 1 - along, area.bottom - 1
+    along -= area.width
+    return area.left, area.bottom - 1 - along
+
+
+def draw_fading_barriers(app, surface):
+    """The barriers that just opened, dissolving pixel by pixel."""
+    tile = sprites.image("barrier_" + str((app["frame"] // BARRIER_FRAMES) % 2))
+    for fading in app["fx"]["fading"]:
+        area = fading["rect"]
+        progress = 1 - fading["frames"] / effects.BARRIER_FADE_FRAMES
+        whole = pygame.Surface(area.size, pygame.SRCALPHA)
+        if tile is None:
+            pygame.draw.rect(whole, THING_COLORS["barrier"], whole.get_rect(), 2)
+        else:
+            for x in range(0, area.width, TILE):
+                for y in range(0, area.height, TILE):
+                    whole.blit(tile, (x, y))
+        surface.blit(effects.dissolved(whole, progress), area.topleft)
+
+
+def draw_fusing_key(app, surface):
+    """The two halves of the key flying together above the anvil, then the fused key building up."""
+    fuse = app["fx"]["fuse"]
+    if fuse is None:
+        return
+    x, y = fuse["center"]
+    age = fuse["age"]
+    halves = [sprites.image("key"), sprites.image("second_key")]
+    whole = sprites.image("fused_key")
+    if age < FUSE_MEET:
+        gap = round(14 * (1 - age / FUSE_MEET))
+        for picture, side in zip(halves, (-1, 1)):
+            if picture is not None:
+                surface.blit(picture, picture.get_rect(center=(x + side * gap, y)))
+    elif whole is not None:
+        progress = min(1.0, (age - FUSE_MEET) / 24)
+        if progress < 1:
+            for picture in halves:
+                if picture is not None:
+                    surface.blit(effects.dissolved(picture, progress), picture.get_rect(center=(x, y)))
+        surface.blit(effects.dissolved(whole, progress, appearing=True), whole.get_rect(center=(x, y)))
+        effects.glow(surface, (x, y), 10, (120, 90, 30), 1 - (age - FUSE_MEET) / (effects.FUSE_FRAMES - FUSE_MEET))
+
+
+def draw_lights(app, surface, things):
+    """The light of the room, added on top: lanterns, crystals, the blue fire of the cauldron."""
+    if not effects.FX["lights"] and not effects.FX["cauldron"]:
+        return
+    frame = app["frame"]
+    for thing in things:
+        info = story.OBJECTS.get(thing["id"])
+        if info is None:
+            continue
+        rect = thing_rect(thing["id"])
+        picture = info.get("picture")
+        if picture == "decor_lantern" and effects.FX["lights"]:
+            flicker = effects.pulse(frame, 0.23, 0.55, 0.8, rect.left) + 0.15 * ((frame // 5 + rect.top) % 3 == 0)
+            effects.glow(surface, (rect.centerx + lantern_swing(app, thing["id"])[1], rect.top + 7), effects.LANTERN_GLOW,
+                         (70, 50, 20), flicker)
+        elif picture == "decor_crystal" and effects.FX["lights"]:
+            effects.glow(surface, rect.center, effects.CRYSTAL_GLOW, (100, 45, 150),
+                         effects.pulse(frame, 0.045, 0.2, 1.0, rect.left * 0.3 + rect.top))
+        elif info["kind"] == "cauldron" and effects.FX["cauldron"]:
+            flicker = effects.pulse(frame, 0.3, 0.6, 0.9) + 0.1 * ((frame // 4) % 2)
+            effects.glow(surface, (rect.centerx, rect.top + 13), effects.FIRE_GLOW, (20, 50, 90), flicker)
+
+
+def lantern_swing(app, lantern):
+    """How a lantern swings now: an angle in degrees, and how far its light moves sideways."""
+    rect = thing_rect(lantern)
+    angle = effects.LANTERN_SWING * math.sin(app["frame"] * 0.05 + rect.left * 0.13)
+    return angle, round(angle / effects.LANTERN_SWING * 2)
+
+
+_swung = {}
+
+
+def draw_lantern(app, surface, thing):
+    """A lantern hanging from its hook, swinging a little with the ship."""
+    picture = thing_picture(thing)
+    rect = thing_rect(thing["id"])
+    if picture is None or not effects.FX["lights"]:
+        draw_thing(surface, thing)
+        return
+    angle, _ = lantern_swing(app, thing["id"])
+    key = round(angle)
+    if key not in _swung:
+        _swung[key] = pygame.transform.rotate(picture, key)
+    turned = _swung[key]
+    # It turns around its hook at the top: the top middle stays where it is.
+    hook = (rect.centerx, rect.top + 1)
+    offset = (math.sin(math.radians(-key)) * 7, (1 - math.cos(math.radians(key))) * 7)
+    surface.blit(turned, turned.get_rect(center=(round(hook[0] + offset[0]), round(hook[1] + 7 - offset[1]))))
+
+
+def draw_tile_effects(app, surface, things):
+    """The lit tiles glow softly; a wave spreads from a tile just lit."""
+    if not effects.FX["tiles"]:
+        return
+    for thing in things:
+        if thing["kind"] == "tile" and thing["status"] == "lit" and app["flash_frames"] == 0:
+            effects.glow(surface, thing_rect(thing["id"]).center, 10, (60, 50, 10),
+                         effects.pulse(app["frame"], 0.08, 0.4, 0.8, thing_rect(thing["id"]).left * 0.05))
+    for wave in app["fx"]["waves"]:
+        progress = wave["age"] / effects.TILE_WAVE_FRAMES
+        color = effects.SPARK[0] if progress < 0.4 else (effects.SPARK[2] if progress < 0.7 else (150, 110, 40))
+        pygame.draw.circle(surface, color, wave["center"], 4 + round(progress * 18), 1)
+
+
+def draw_wand_glow(app, screen, x, y):
+    """A soft magic glow behind the wand in the bar, with a sparkle turning around it."""
+    if not effects.FX["wand"]:
+        return
+    effects.glow(screen, (x + 8, y + 8), 8, (70, 40, 110), effects.pulse(app["frame"], 0.07, 0.4, 1.0))
+    angle = app["frame"] * 0.08
+    screen.fill(effects.PURPLE[1], (x + 8 + round(6 * math.cos(angle)), y + 8 + round(6 * math.sin(angle)), 1, 1))
 
 
 # --- Drawing -------------------------------------------------------------------------
@@ -1212,10 +1533,11 @@ def switch_of_flag(flag):
     return None
 
 
-def draw_cables(screen, state):
+def draw_cables(screen, state, frame=0):
     """The cables between the generators of the room, along the sides of their square.
 
     A cable joins two generators that switch each other over, and lights up when both are on.
+    A lit cable pulses, and a spot of current runs along it.
     """
     for switch, info in story.OBJECTS.items():
         if info["kind"] != "switch" or info["room"] != state["room"]:
@@ -1225,8 +1547,16 @@ def draw_cables(screen, state):
             if other is None or other <= switch:
                 continue  # itself, or a cable already drawn from the other end
             lit = state["flags"][info["flag"]] and state["flags"][flag]
+            start, end = thing_rect(switch).center, thing_rect(other).center
             color = COLORS["highlight"] if lit else COLORS["cable"]
-            pygame.draw.line(screen, color, thing_rect(switch).center, thing_rect(other).center, 2)
+            if lit and effects.FX["cables"]:
+                bright = effects.pulse(frame, effects.CABLE_PULSE, 0, 1, start[0] * 0.02)
+                color = tuple(round(a + (b - a) * bright) for a, b in zip(COLORS["highlight"], (255, 245, 190)))
+            pygame.draw.line(screen, color, start, end, 2)
+            if lit and effects.FX["cables"]:
+                along = (frame * effects.CABLE_CURRENT + (start[0] + start[1]) * 0.01) % 1
+                spot = (round(start[0] + (end[0] - start[0]) * along), round(start[1] + (end[1] - start[1]) * along))
+                screen.fill((255, 255, 255), (spot[0] - 1, spot[1] - 1, 3, 3))
 
 
 def draw_floor_puzzles(app, screen, things):
@@ -1288,14 +1618,23 @@ def draw_room(app, screen):
     if story.ROOMS[room]["outdoor"]:
         draw_railing(screen, room)
     things = engine.things_here(state)
+    if effects.FX["portals"]:
+        for thing in things:
+            if thing["kind"] == "portal":
+                effects.ripple(screen, thing_rect(thing["id"]).inflate(20, 20), app["frame"])  # the floor sways
     draw_floor_puzzles(app, screen, things)
-    draw_cables(screen, state)
+    draw_tile_effects(app, screen, things)
+    draw_cables(screen, state, app["frame"])
     standing = []
     for thing in things:
         if thing["kind"] == "door":
             draw_door(screen, thing["id"], thing["status"])
         elif thing["kind"] in HOLDERS or is_flat(thing["id"]):
             draw_thing(screen, thing)  # low furniture, portals and flat decor, drawn before what lies on it
+            if thing["kind"] == "cauldron" and effects.FX["cauldron"]:
+                draw_cauldron_liquid(app, screen, thing)
+            elif thing["kind"] == "portal" and effects.FX["portals"]:
+                draw_portal_light(app, screen, thing)
         elif thing["kind"] not in ("item", "tile"):
             standing.append(thing)
     for thing in things:
@@ -1310,6 +1649,12 @@ def draw_room(app, screen):
     for thing in standing:
         if thing_rect(thing["id"]).bottom > feet:
             draw_standing(app, screen, thing)
+    # The effects on top: barriers dissolving, the key welding, particles, dust, and the light.
+    draw_fading_barriers(app, screen)
+    draw_fusing_key(app, screen)
+    effects.draw_particles(screen, app["fx"]["particles"])
+    effects.draw_dust(screen, app["fx"], app["frame"])
+    draw_lights(app, screen, things)
     # The letter of each generator, on the floor above it.
     for thing in things:
         if thing["kind"] == "switch":
@@ -1319,9 +1664,15 @@ def draw_room(app, screen):
 
 
 def draw_standing(app, screen, thing):
-    """A puzzle, character, switch or barrier: the barrier has its own way of being drawn."""
+    """A puzzle, character, switch or barrier: barriers, generators and lanterns have their own way of being drawn."""
     if thing["kind"] == "barrier":
         draw_barrier(app, screen, thing)
+        if effects.FX["barriers"]:
+            draw_barrier_energy(app, screen, thing)
+    elif thing["kind"] == "switch":
+        draw_generator(app, screen, thing)
+    elif story.OBJECTS.get(thing["id"], {}).get("picture") == "decor_lantern":
+        draw_lantern(app, screen, thing)
     else:
         draw_thing(screen, thing)
 
@@ -1348,6 +1699,8 @@ def draw_hud(app, screen):
     for item in reversed(state["inventory"]):
         x -= gap
         picture = sprites.image(item)
+        if item == "wand":
+            draw_wand_glow(app, screen, x, 14)
         if picture is None:
             pygame.draw.rect(screen, THING_COLORS.get(item, MISSING_COLOR), (x + 4, 19, 8, 8))
         else:
@@ -1439,8 +1792,24 @@ def draw_map(app, screen):
     state = app["state"]
     visited = engine.visited_rooms(state)
     for room in visited:
+        # A visited room has a soft halo around it; the one the player is in, a halo that pulses.
+        halo = map_area(room).inflate(2, 2)
+        if room == state["room"]:
+            strength = effects.pulse(app["frame"], 0.1, 0.3, 1.0)
+            halo_color = tuple(round(c * strength) for c in COLORS["highlight"])
+        else:
+            halo_color = MAP_HALO
+        pygame.draw.rect(screen, halo_color, halo, 1)
+    for room in visited:
         color = COLORS["highlight"] if room == state["room"] else COLORS["dim_text"]
         pygame.draw.rect(screen, color, map_area(room))
+    # Once the doctor is at peace, a little anvil marks the galley, if the player has seen it.
+    anvil = story.OBJECTS["anvil"]
+    if engine.is_standing(state, "anvil") and anvil["room"] in visited:
+        area = map_area(anvil["room"])
+        x, y = area.center
+        screen.fill(COLORS["black"], (x - 1, y - 1, 3, 1))  # the top of the anvil...
+        screen.fill(COLORS["black"], (x, y, 1, 1))          # ...and its foot
     for door, info in story.DOORS.items():
         if info["room"] in visited:  # an exit out of a known room, even towards an unknown one
             area = map_area(info["room"])
@@ -1518,6 +1887,8 @@ def draw_play_screen(app, screen):
     if app["fade"] > 0:
         # Just through a door: the room comes out of the dark.
         shade(screen, VIEW, 255 * app["fade"] // FADE_FRAMES)
+    effects.draw_warp(screen, VIEW, app["fx"])   # just through a portal: the purple warp
+    effects.draw_flash(screen, VIEW, app["fx"])  # the white flash of the anvil
     draw_hud(app, screen)
 
 
@@ -1595,10 +1966,15 @@ def draw_explosion(app, scene, time):
         y = center[1] - (2.2 + (piece % 4) * 0.4) * blast + 0.06 * blast * blast
         if y < ENDING_SCENE_HEIGHT:
             pygame.draw.rect(scene, sprites.PALETTE["n"], (round(x), round(y), 2, 2))
-    if blast < 16:
+    if blast < EXPLOSION_WHITE:
         flash = pygame.Surface(scene.get_size(), pygame.SRCALPHA)
-        flash.fill((255, 255, 255, 255 - blast * 16))  # the blast lights everything up
+        flash.fill((255, 255, 255, 255 - blast * 255 // EXPLOSION_WHITE))  # the blast lights everything up
         scene.blit(flash, (0, 0))
+    elif blast < EXPLOSION_WHITE + EXPLOSION_RED:
+        fire = pygame.Surface(scene.get_size(), pygame.SRCALPHA)
+        left = EXPLOSION_WHITE + EXPLOSION_RED - blast
+        fire.fill((255, 40, 20, 200 * left // EXPLOSION_RED))  # then a red glare that dies away
+        scene.blit(fire, (0, 0))
 
 
 def draw_ending_screen(app, screen):
