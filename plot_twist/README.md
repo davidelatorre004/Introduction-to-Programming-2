@@ -77,7 +77,7 @@ Qualche aiuto:
 - La chiave delle porte chiuse è spezzata in due metà: ogni enigma ne nasconde una. Le metà da sole non girano: vanno fuse su un'incudine, che compare solo dopo aver aiutato il dottore dell'infermeria.
 - Con la chiave fusa si aprono tutte e due le porte. Dietro ognuna c'è qualcuno che vuole la tua bacchetta, e a chi la dai decide il finale.
 - **Indizio per la cabina:** gli otto generatori sono collegati da cavi in un anello, e attivarne uno cambia anche i due vicini. Devi accenderli tutti insieme.
-- **Indizio per l'infermeria:** il rimedio del dottore si fa con quattro fialette, in un ordine preciso. La prima è in infermeria; quando la raccogli, le altre compaiono in giro per la nave, e la mappa in alto a destra lampeggia sulle stanze dove sono. Gli appunti del dottore dicono l'ordine.
+- **Indizio per l'infermeria:** il rimedio del dottore si fa con quattro fialette, in un ordine preciso. La prima è in infermeria; quando la raccogli, le altre compaiono in giro per la nave: cercale. Gli appunti del dottore dicono l'ordine.
 - **La miniera:** il portale in fondo al corridoio porta in una miniera. In fondo alla miniera un secondo portale riporta sulla nave, ma solo all'andata.
 - **Indizio per la stiva:** le cinque piastrelle numerate si calpestano, in tre prove una dopo l'altra. Una piastrella sbagliata, o uscire dalla grata intorno, fa ricominciare la prova in corso: "BZZZ!". I nomi delle prove sono incisi sull'incudine: esamina la barriera che la avvolge.
 

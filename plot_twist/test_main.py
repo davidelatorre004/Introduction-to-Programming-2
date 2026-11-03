@@ -1099,10 +1099,21 @@ def test_map_dot_follows_the_player_inside_the_current_room(app):
     assert top[1] < bottom[1]
 
 
-def test_map_points_at_the_anvil_until_the_key_is_fused():
-    assert main.map_markers(play(BOTH_HALVES)) == []
-    assert main.map_markers(play(DOCTOR_AT_PEACE)) == ["galley"]
-    assert main.map_markers(play(KEY_FUSED)) == []
+def test_map_gives_no_hints(app):
+    """The map never blinks on a room: not while the anvil waits, nor while the tinctures are scattered."""
+    start_new_game(app)
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    found_green = BOTH_HALVES + [act("enter", "hold_to_infirmary"), act("pick_up", "green_tincture")]
+    for actions in (found_green, DOCTOR_AT_PEACE):
+        app["state"] = play(actions)
+        app["player"] = main.spawn_at_entry(app["state"]["room"])
+        corner = main.map_rect().inflate(4, 4)
+        for frame in range(0, main.FPS, 5):
+            app["frame"] = frame
+            main.draw_hud(app, screen)
+            for x in range(corner.left, corner.right):
+                for y in range(max(corner.top, 0), min(corner.bottom, main.HUD_HEIGHT)):
+                    assert tuple(screen.get_at((x, y)))[:3] != main.COLORS["error"], (actions[-1], frame, x, y)
 
 
 def test_map_is_drawn_in_every_room(app):
@@ -1210,17 +1221,6 @@ def test_the_helm_portal_is_far_from_the_ladder_and_the_wheel():
     spot = main.player_rect(main.spawn_by_portal("helm_portal"))
     assert spot.collidelist(main.solid_rects(in_room("helm"))) == -1
     assert main.door_touched("helm", spot.topleft, 0, 0) is None
-
-
-def test_map_points_at_the_scattered_tinctures_until_they_are_picked_up():
-    """Once the green tincture is found, the map marks the rooms where the other three wait, one by one."""
-    assert main.map_markers(play(BOTH_HALVES + [act("enter", "hold_to_infirmary")])) == []
-    found_green = play(BOTH_HALVES + [act("enter", "hold_to_infirmary"), act("pick_up", "green_tincture")])
-    assert set(main.map_markers(found_green)) == {"galley", "helm", "corridor"}
-    found_blue = play(BOTH_HALVES + [act("enter", "hold_to_infirmary"), act("pick_up", "green_tincture"),
-                                     act("enter", "infirmary_to_corridor"), act("pick_up", "blue_tincture")])
-    assert set(main.map_markers(found_blue)) == {"galley", "helm"}
-    assert main.map_markers(play(TINCTURES_FOUND)) == []
 
 
 def test_the_cabin_is_half_as_big_again_and_the_camera_follows():

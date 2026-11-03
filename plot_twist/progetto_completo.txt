@@ -185,8 +185,7 @@ ROOMS = {
 # If "free_if" names a flag, it can be seen but not picked up until that flag is true.
 # An item with "gone_if" is used up for good once that flag is set.
 # An item with "sets_flag" sets that flag when it is picked up (the green tincture
-# makes the other three appear). One with "on_map" is pointed at on the map while
-# it waits somewhere for the player.
+# makes the other three appear).
 # An item that is "part_of" another one is fused into it at the anvil: then the
 # parts leave the inventory for good, and the whole item takes their place. An
 # item that only comes from fusing has no room and no "pos".
@@ -265,7 +264,6 @@ ITEMS = {
         "pos": (12, 3),
         "appears_if": "tinctures_scattered",
         "gone_if": "potion_solved",
-        "on_map": True,
         "part_of": None,
         "free_if": None,
         "pickup_text": "You pick up the red tincture, hidden among the spices.",
@@ -277,7 +275,6 @@ ITEMS = {
         "pos": (4, 3),
         "appears_if": "tinctures_scattered",
         "gone_if": "potion_solved",
-        "on_map": True,
         "part_of": None,
         "free_if": None,
         "pickup_text": "You pick up the gold tincture, rolling back and forth under the wheel.",
@@ -289,7 +286,6 @@ ITEMS = {
         "pos": (30, 3),
         "appears_if": "tinctures_scattered",
         "gone_if": "potion_solved",
-        "on_map": True,
         "part_of": None,
         "free_if": None,
         "pickup_text": "You pick up the blue tincture from a puddle in the corridor.",
@@ -1200,6 +1196,325 @@ OBJECTS = {
         "look_text": "A crate of dynamite. Very, very old dynamite.",
         "done_text": None, "reactions": {},
     },
+    # More decor, so that the rooms do not look empty.
+    "deck_anchor": {
+        "kind": "decor", "name": "Anchor", "room": "deck", "pos": (1, 7),
+        "picture": "decor_anchor", "solid": True,
+        "look_text": "A spare anchor, red with rust. Nobody has dropped one in a long time.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_net": {
+        "kind": "decor", "name": "Fishing net", "room": "deck", "pos": (5, 18),
+        "picture": "decor_net", "solid": False,
+        "look_text": "A fishing net spread out to dry. It is still wet.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_barrel_5": {
+        "kind": "decor", "name": "Barrel", "room": "deck", "pos": (13, 14),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of gunpowder, its lid nailed down twice.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_barrel_6": {
+        "kind": "decor", "name": "Barrel", "room": "deck", "pos": (13, 15),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of apples, all of them gone soft.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_crate_4": {
+        "kind": "decor", "name": "Crate", "room": "deck", "pos": (1, 17),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate of spare sails, folded wet.",
+        "done_text": None, "reactions": {},
+    },
+    "deck_lantern": {
+        "kind": "decor", "name": "Lantern", "room": "deck", "pos": (14, 6),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A storm lantern, swinging with the waves.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_shelf_3": {
+        "kind": "decor", "name": "Bookshelf", "room": "cabin", "pos": (1, 3),
+        "picture": "decor_bookshelf", "solid": True,
+        "look_text": "Books on knots, stars and currents.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_shelf_4": {
+        "kind": "decor", "name": "Bookshelf", "room": "cabin", "pos": (1, 4),
+        "picture": "decor_bookshelf", "solid": True,
+        "look_text": "A row of empty bottles, each with a little ship inside.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_notes": {
+        "kind": "decor", "name": "Captain's log", "room": "cabin", "pos": (5, 1),
+        "picture": "decor_notes", "solid": True,
+        "look_text": "The captain's log. The last entry reads: \"The wand must not fall into the wrong hands.\"",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_lantern": {
+        "kind": "decor", "name": "Lantern", "room": "cabin", "pos": (8, 1),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A brass lantern. Its light trembles with the generators.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_desk_1": {
+        "kind": "decor", "name": "Desk", "room": "cabin", "pos": (11, 8),
+        "picture": "decor_table", "solid": True,
+        "look_text": "The captain's desk, covered in sea charts.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_desk_2": {
+        "kind": "decor", "name": "Desk", "room": "cabin", "pos": (12, 8),
+        "picture": "decor_table", "solid": True,
+        "look_text": "A compass and a half-written letter, never sent.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_chair": {
+        "kind": "decor", "name": "Chair", "room": "cabin", "pos": (12, 10),
+        "picture": "decor_chair", "solid": True,
+        "look_text": "The captain's chair. It is still warm.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_barrel_1": {
+        "kind": "decor", "name": "Barrel", "room": "cabin", "pos": (1, 15),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of the captain's best rum.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_barrel_2": {
+        "kind": "decor", "name": "Barrel", "room": "cabin", "pos": (1, 16),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "Another barrel of rum. This one is empty.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_crate_1": {
+        "kind": "decor", "name": "Crate", "room": "cabin", "pos": (22, 15),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate of maps, rolled and tied.",
+        "done_text": None, "reactions": {},
+    },
+    "cabin_crate_2": {
+        "kind": "decor", "name": "Crate", "room": "cabin", "pos": (22, 16),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate of spare cables for the generators.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_barrel_1": {
+        "kind": "decor", "name": "Barrel", "room": "hold", "pos": (14, 4),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of salted pork.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_barrel_2": {
+        "kind": "decor", "name": "Barrel", "room": "hold", "pos": (14, 5),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel that sloshes when the ship rolls.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_sack_2": {
+        "kind": "decor", "name": "Sack", "room": "hold", "pos": (14, 7),
+        "picture": "decor_sack", "solid": True,
+        "look_text": "A sack of dried beans.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_crate_4": {
+        "kind": "decor", "name": "Crate", "room": "hold", "pos": (1, 9),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate of tools: hammers, nails, a saw.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_crate_5": {
+        "kind": "decor", "name": "Crate", "room": "hold", "pos": (1, 10),
+        "picture": "decor_crate", "solid": True,
+        "look_text": "A crate stamped with a crab and a wing.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_rope": {
+        "kind": "decor", "name": "Coiled rope", "room": "hold", "pos": (3, 8),
+        "picture": "decor_rope", "solid": False,
+        "look_text": "A thick rope, coiled on the floor.",
+        "done_text": None, "reactions": {},
+    },
+    "hold_lantern": {
+        "kind": "decor", "name": "Lantern", "room": "hold", "pos": (11, 1),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A lantern hanging from a hook. It barely lights the hold.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_rock_3": {
+        "kind": "decor", "name": "Rock", "room": "crab_room", "pos": (1, 9),
+        "picture": "decor_rock", "solid": True,
+        "look_text": "A rock scratched by claws.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_shells_3": {
+        "kind": "decor", "name": "Shells", "room": "crab_room", "pos": (11, 9),
+        "picture": "decor_shells", "solid": False,
+        "look_text": "Shells, sorted by size.",
+        "done_text": None, "reactions": {},
+    },
+    "crab_puddle": {
+        "kind": "decor", "name": "Puddle", "room": "crab_room", "pos": (4, 7),
+        "picture": "decor_puddle", "solid": False,
+        "look_text": "A puddle of sea water. Tiny crabs scuttle in it.",
+        "done_text": None, "reactions": {},
+    },
+    "angel_candle_5": {
+        "kind": "decor", "name": "Candle", "room": "angel_room", "pos": (12, 2),
+        "picture": "decor_candle", "solid": True,
+        "look_text": "A tall candle. It smells of nothing at all.",
+        "done_text": None, "reactions": {},
+    },
+    "angel_candle_6": {
+        "kind": "decor", "name": "Candle", "room": "angel_room", "pos": (12, 9),
+        "picture": "decor_candle", "solid": True,
+        "look_text": "A tall candle. Its light is cold.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_lantern": {
+        "kind": "decor", "name": "Lantern", "room": "infirmary", "pos": (14, 1),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A lantern with a green glass.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_chair": {
+        "kind": "decor", "name": "Chair", "room": "infirmary", "pos": (9, 3),
+        "picture": "decor_chair", "solid": True,
+        "look_text": "The doctor's chair, by the beds.",
+        "done_text": None, "reactions": {},
+    },
+    "infirmary_bed_4": {
+        "kind": "decor", "name": "Bed", "room": "infirmary", "pos": (1, 9),
+        "picture": "decor_bed", "solid": True,
+        "look_text": "A bed pushed against the wall, its blanket folded.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_chair_1": {
+        "kind": "decor", "name": "Chair", "room": "galley", "pos": (5, 5),
+        "picture": "decor_chair", "solid": True,
+        "look_text": "A chair, pushed back in a hurry.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_chair_2": {
+        "kind": "decor", "name": "Chair", "room": "galley", "pos": (8, 5),
+        "picture": "decor_chair", "solid": True,
+        "look_text": "A chair with one leg shorter than the others.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_chair_3": {
+        "kind": "decor", "name": "Chair", "room": "galley", "pos": (6, 4),
+        "picture": "decor_chair", "solid": True,
+        "look_text": "A chair with a coat still hanging on it.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_chair_4": {
+        "kind": "decor", "name": "Chair", "room": "galley", "pos": (7, 6),
+        "picture": "decor_chair", "solid": True,
+        "look_text": "A chair, knocked sideways.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_barrel_2": {
+        "kind": "decor", "name": "Barrel", "room": "galley", "pos": (14, 10),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of flour.",
+        "done_text": None, "reactions": {},
+    },
+    "galley_sack_3": {
+        "kind": "decor", "name": "Sack", "room": "galley", "pos": (3, 10),
+        "picture": "decor_sack", "solid": True,
+        "look_text": "A sack of onions.",
+        "done_text": None, "reactions": {},
+    },
+    "helm_table_2": {
+        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (1, 1),
+        "picture": "decor_table", "solid": True,
+        "look_text": "Charts of a coast nobody on board has ever seen.",
+        "done_text": None, "reactions": {},
+    },
+    "helm_lantern": {
+        "kind": "decor", "name": "Lantern", "room": "helm", "pos": (14, 9),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A lantern. Its flame points always north.",
+        "done_text": None, "reactions": {},
+    },
+    "helm_barrel": {
+        "kind": "decor", "name": "Barrel", "room": "helm", "pos": (1, 10),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel of fresh water for the helmsman.",
+        "done_text": None, "reactions": {},
+    },
+    "corridor_puddle_1": {
+        "kind": "decor", "name": "Puddle", "room": "corridor", "pos": (8, 3),
+        "picture": "decor_puddle", "solid": False,
+        "look_text": "Water dripping from the ceiling.",
+        "done_text": None, "reactions": {},
+    },
+    "corridor_puddle_2": {
+        "kind": "decor", "name": "Puddle", "room": "corridor", "pos": (36, 2),
+        "picture": "decor_puddle", "solid": False,
+        "look_text": "A puddle that reflects a purple light.",
+        "done_text": None, "reactions": {},
+    },
+    "corridor_lantern_3": {
+        "kind": "decor", "name": "Lantern", "room": "corridor", "pos": (18, 1),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A lantern, nearly out.",
+        "done_text": None, "reactions": {},
+    },
+    "corridor_sack": {
+        "kind": "decor", "name": "Sack", "room": "corridor", "pos": (25, 4),
+        "picture": "decor_sack", "solid": True,
+        "look_text": "A wet sack of coal.",
+        "done_text": None, "reactions": {},
+    },
+    "corridor_barrel_2": {
+        "kind": "decor", "name": "Barrel", "room": "corridor", "pos": (43, 4),
+        "picture": "decor_barrel", "solid": True,
+        "look_text": "A barrel blocking half the corridor.",
+        "done_text": None, "reactions": {},
+    },
+    "end_crystal_1": {
+        "kind": "decor", "name": "Crystal", "room": "corridor_end", "pos": (2, 9),
+        "picture": "decor_crystal", "solid": True,
+        "look_text": "A purple crystal growing through the planks.",
+        "done_text": None, "reactions": {},
+    },
+    "end_crystal_2": {
+        "kind": "decor", "name": "Crystal", "room": "corridor_end", "pos": (13, 9),
+        "picture": "decor_crystal", "solid": True,
+        "look_text": "A purple crystal. It hums like the portal.",
+        "done_text": None, "reactions": {},
+    },
+    "end_rock": {
+        "kind": "decor", "name": "Rock", "room": "corridor_end", "pos": (12, 5),
+        "picture": "decor_rock", "solid": True,
+        "look_text": "A rock that has no business being on a ship.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rock_3": {
+        "kind": "decor", "name": "Rock", "room": "mine", "pos": (10, 5),
+        "picture": "decor_rock", "solid": True,
+        "look_text": "A rock with a vein of something shiny.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_crystal_4": {
+        "kind": "decor", "name": "Crystal", "room": "mine", "pos": (4, 15),
+        "picture": "decor_crystal", "solid": True,
+        "look_text": "A crystal as tall as your hand, glowing faintly.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_rock_4": {
+        "kind": "decor", "name": "Rock", "room": "mine", "pos": (12, 16),
+        "picture": "decor_rock", "solid": True,
+        "look_text": "A pile of stones, left by the miners.",
+        "done_text": None, "reactions": {},
+    },
+    "mine_lantern_3": {
+        "kind": "decor", "name": "Lantern", "room": "mine", "pos": (1, 7),
+        "picture": "decor_lantern", "solid": True,
+        "look_text": "A lantern nailed to a beam.",
+        "done_text": None, "reactions": {},
+    },
 }
 
 # Circuits of generators. When every switch of a circuit is on at the same time,
@@ -1868,19 +2183,6 @@ def is_standing(state, thing):
     return _is_standing(state, thing)
 
 
-def is_waiting(state, item):
-    """True if an item lies somewhere on the ship right now, in any room: it has appeared,
-    it is not used up, and the player does not carry it (what the map points at)."""
-    info = story.ITEMS[item]
-    if info["room"] is None:
-        return False
-    if info["appears_if"] is not None and not state["flags"][info["appears_if"]]:
-        return False
-    if info.get("gone_if") is not None and state["flags"][info["gone_if"]]:
-        return False
-    return not _has_or_fused(state, item)
-
-
 def perform(state, action):
     """Carry out an action given as data, such as one returned by actions_for().
 
@@ -2492,9 +2794,6 @@ EVENT_SOUNDS = {
 
 INVENTORY_ROOM = 108  # pixels of the bar for the items carried, left of the map
 MAP_SCALE = 3        # one pixel of the map for every three tiles of the ship
-MAP_BLINK = FPS // 3 # frames between two blinks of a marker
-# Things the map points at while they wait for the player: the anvil, until the key is fused.
-MAP_MARKERS = {"anvil": "fused_key"}
 
 # Floor and wall color of each room.
 ROOM_COLORS = {
@@ -3810,19 +4109,6 @@ def map_dot(room, position):
     return (area.left + round(across * (area.width - 1)), area.top + round(down * (area.height - 1)))
 
 
-def map_markers(state):
-    """The rooms the map points at: where a thing waits that the player still needs,
-    and where an item marked "on_map" lies (the tinctures scattered around the ship)."""
-    rooms = []
-    for thing, needed in MAP_MARKERS.items():
-        if engine.is_standing(state, thing) and not engine.has_item(state, needed):
-            rooms.append(story.OBJECTS[thing]["room"])
-    for item, info in story.ITEMS.items():
-        if info.get("on_map") and engine.is_waiting(state, item) and info["room"] not in rooms:
-            rooms.append(info["room"])
-    return rooms
-
-
 def draw_map(app, screen):
     """The map of the ship: only the rooms visited so far, the doors out of them, and the player."""
     state = app["state"]
@@ -3847,9 +4133,6 @@ def draw_map(app, screen):
             else:
                 x = area.right
             pygame.draw.rect(screen, COLORS["dim_text"], (x, y, 1, 1))
-    if (app["frame"] // MAP_BLINK) % 2 == 0:
-        for room in map_markers(state):
-            pygame.draw.rect(screen, COLORS["error"], map_area(room).inflate(2, 2), 1)
     x, y = map_dot(state["room"], app["player"])
     pygame.draw.rect(screen, COLORS["black"], (x, y, 1, 1))
 
@@ -5013,6 +5296,79 @@ SPRITES = {
         ".....kRrrRk.....",
         "......kRRk......",
         ".......kk.......",
+        "................",
+        "................",
+    ],
+    # More decor: an anchor, a chair, a puddle and a fishing net (the last two lie flat).
+    "decor_anchor": [
+        "......kkkk......",
+        ".....kdllk......",
+        ".....kd..k......",
+        "......kkkk......",
+        "...kkkkddkkkk...",
+        "...kllldllllk...",
+        "...kkkkdlkkkk...",
+        "......kdlk......",
+        "......kdlk......",
+        "......kdlk......",
+        "..kk..kdlk..kk..",
+        ".kdk..kdlk..kdk.",
+        ".kdlk.kdlk.kldk.",
+        "..kdllkdlkllldk.",
+        "...kkdddddddkk..",
+        ".....kkkkkkk....",
+    ],
+    "decor_chair": [
+        "................",
+        "....kkkkkkkk....",
+        "....kbbbbbbk....",
+        "....kbnnnnbk....",
+        "....kbbbbbbk....",
+        "....kbnnnnbk....",
+        "....kbbbbbbk....",
+        "...kkkkkkkkkk...",
+        "...kbbbbbbbbk...",
+        "...kBBBBBBBBk...",
+        "...kkkkkkkkkk...",
+        "...knk....knk...",
+        "...knk....knk...",
+        "...knk....knk...",
+        "...kkk....kkk...",
+        "................",
+    ],
+    "decor_puddle": [
+        "................",
+        "................",
+        "................",
+        "................",
+        ".....SSSSSS.....",
+        "...SSssssssSS...",
+        "..SssfssssssSS..",
+        "..SsssssfsssssS.",
+        ".SssssssssssssS.",
+        ".SsfssssssssfsS.",
+        "..SSssssssssSS..",
+        "....SSSSSSSS....",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
+    "decor_net": [
+        "................",
+        ".kk...kk...kk...",
+        "knnk.knnk.knnk..",
+        ".kk.k.kk.k.kk.k.",
+        "...knk..knk..knk",
+        ".kk.k.kk.k.kk.k.",
+        "knnk.knnk.knnk..",
+        ".kk.k.kk.k.kk.k.",
+        "...knk..knk..knk",
+        ".kk.k.kk.k.kk.k.",
+        "knnk.knnk.knnk..",
+        ".kk.k.kk.k.kk.k.",
+        "...knk..knk..knk",
+        "....k....k....k.",
         "................",
         "................",
     ],
@@ -7399,13 +7755,19 @@ TINCTURES = story.POTION_PUZZLES["remedy"]["recipe"]
 SCATTERED = {"red_tincture": "galley", "gold_tincture": "helm", "blue_tincture": "corridor"}
 
 
+def lies_in_its_room(state, item):
+    """True if the item lies on the floor of its room right now, for a player standing there."""
+    there = dict(state, room=story.ITEMS[item]["room"])
+    return item in [thing["id"] for thing in engine.things_here(there)]
+
+
 def test_tinctures_the_green_one_waits_in_the_infirmary_and_the_others_hide():
     """At first only the green tincture can be found; the other three are nowhere on the ship."""
     state = play(IN_INFIRMARY)
     assert "green_tincture" in [thing["id"] for thing in engine.things_here(state)]
     for tincture, room in SCATTERED.items():
         assert story.ITEMS[tincture]["room"] == room
-        assert not engine.is_waiting(state, tincture), tincture
+        assert not lies_in_its_room(state, tincture), tincture
         elsewhere = dict(state, room=room)
         assert tincture not in [thing["id"] for thing in engine.things_here(elsewhere)], tincture
         _, outcome = engine.pick_up(elsewhere, tincture)
@@ -7417,7 +7779,7 @@ def test_tinctures_picking_up_the_green_one_scatters_the_others():
     state = play(IN_INFIRMARY + [TAKE_GREEN])
     assert state["flags"]["tinctures_scattered"]
     for tincture, room in SCATTERED.items():
-        assert engine.is_waiting(state, tincture), tincture
+        assert lies_in_its_room(state, tincture), tincture
         elsewhere = dict(state, room=room)
         assert tincture in [thing["id"] for thing in engine.things_here(elsewhere)], tincture
     assert play(GET_KEY + [TO_HOLD] + GATHER_TINCTURES)["inventory"][-4:] == [
@@ -7442,7 +7804,7 @@ def test_potion_the_recipe_in_order_makes_the_remedy():
     assert "potion" in [thing["id"] for thing in engine.things_here(state)]
     for tincture in TINCTURES:
         assert tincture not in state["inventory"], tincture  # used up
-        assert not engine.is_waiting(state, tincture), tincture
+        assert not lies_in_its_room(state, tincture), tincture
 
 
 def test_potion_a_wrong_tincture_spoils_the_mixture_but_keeps_the_bottles():
@@ -8761,10 +9123,21 @@ def test_map_dot_follows_the_player_inside_the_current_room(app):
     assert top[1] < bottom[1]
 
 
-def test_map_points_at_the_anvil_until_the_key_is_fused():
-    assert main.map_markers(play(BOTH_HALVES)) == []
-    assert main.map_markers(play(DOCTOR_AT_PEACE)) == ["galley"]
-    assert main.map_markers(play(KEY_FUSED)) == []
+def test_map_gives_no_hints(app):
+    """The map never blinks on a room: not while the anvil waits, nor while the tinctures are scattered."""
+    start_new_game(app)
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    found_green = BOTH_HALVES + [act("enter", "hold_to_infirmary"), act("pick_up", "green_tincture")]
+    for actions in (found_green, DOCTOR_AT_PEACE):
+        app["state"] = play(actions)
+        app["player"] = main.spawn_at_entry(app["state"]["room"])
+        corner = main.map_rect().inflate(4, 4)
+        for frame in range(0, main.FPS, 5):
+            app["frame"] = frame
+            main.draw_hud(app, screen)
+            for x in range(corner.left, corner.right):
+                for y in range(max(corner.top, 0), min(corner.bottom, main.HUD_HEIGHT)):
+                    assert tuple(screen.get_at((x, y)))[:3] != main.COLORS["error"], (actions[-1], frame, x, y)
 
 
 def test_map_is_drawn_in_every_room(app):
@@ -8872,17 +9245,6 @@ def test_the_helm_portal_is_far_from_the_ladder_and_the_wheel():
     spot = main.player_rect(main.spawn_by_portal("helm_portal"))
     assert spot.collidelist(main.solid_rects(in_room("helm"))) == -1
     assert main.door_touched("helm", spot.topleft, 0, 0) is None
-
-
-def test_map_points_at_the_scattered_tinctures_until_they_are_picked_up():
-    """Once the green tincture is found, the map marks the rooms where the other three wait, one by one."""
-    assert main.map_markers(play(BOTH_HALVES + [act("enter", "hold_to_infirmary")])) == []
-    found_green = play(BOTH_HALVES + [act("enter", "hold_to_infirmary"), act("pick_up", "green_tincture")])
-    assert set(main.map_markers(found_green)) == {"galley", "helm", "corridor"}
-    found_blue = play(BOTH_HALVES + [act("enter", "hold_to_infirmary"), act("pick_up", "green_tincture"),
-                                     act("enter", "infirmary_to_corridor"), act("pick_up", "blue_tincture")])
-    assert set(main.map_markers(found_blue)) == {"galley", "helm"}
-    assert main.map_markers(play(TINCTURES_FOUND)) == []
 
 
 def test_the_cabin_is_half_as_big_again_and_the_camera_follows():

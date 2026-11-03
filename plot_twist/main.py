@@ -117,9 +117,6 @@ EVENT_SOUNDS = {
 
 INVENTORY_ROOM = 108  # pixels of the bar for the items carried, left of the map
 MAP_SCALE = 3        # one pixel of the map for every three tiles of the ship
-MAP_BLINK = FPS // 3 # frames between two blinks of a marker
-# Things the map points at while they wait for the player: the anvil, until the key is fused.
-MAP_MARKERS = {"anvil": "fused_key"}
 
 # Floor and wall color of each room.
 ROOM_COLORS = {
@@ -1435,19 +1432,6 @@ def map_dot(room, position):
     return (area.left + round(across * (area.width - 1)), area.top + round(down * (area.height - 1)))
 
 
-def map_markers(state):
-    """The rooms the map points at: where a thing waits that the player still needs,
-    and where an item marked "on_map" lies (the tinctures scattered around the ship)."""
-    rooms = []
-    for thing, needed in MAP_MARKERS.items():
-        if engine.is_standing(state, thing) and not engine.has_item(state, needed):
-            rooms.append(story.OBJECTS[thing]["room"])
-    for item, info in story.ITEMS.items():
-        if info.get("on_map") and engine.is_waiting(state, item) and info["room"] not in rooms:
-            rooms.append(info["room"])
-    return rooms
-
-
 def draw_map(app, screen):
     """The map of the ship: only the rooms visited so far, the doors out of them, and the player."""
     state = app["state"]
@@ -1472,9 +1456,6 @@ def draw_map(app, screen):
             else:
                 x = area.right
             pygame.draw.rect(screen, COLORS["dim_text"], (x, y, 1, 1))
-    if (app["frame"] // MAP_BLINK) % 2 == 0:
-        for room in map_markers(state):
-            pygame.draw.rect(screen, COLORS["error"], map_area(room).inflate(2, 2), 1)
     x, y = map_dot(state["room"], app["player"])
     pygame.draw.rect(screen, COLORS["black"], (x, y, 1, 1))
 

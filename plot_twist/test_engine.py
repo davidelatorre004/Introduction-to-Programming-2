@@ -1449,13 +1449,19 @@ TINCTURES = story.POTION_PUZZLES["remedy"]["recipe"]
 SCATTERED = {"red_tincture": "galley", "gold_tincture": "helm", "blue_tincture": "corridor"}
 
 
+def lies_in_its_room(state, item):
+    """True if the item lies on the floor of its room right now, for a player standing there."""
+    there = dict(state, room=story.ITEMS[item]["room"])
+    return item in [thing["id"] for thing in engine.things_here(there)]
+
+
 def test_tinctures_the_green_one_waits_in_the_infirmary_and_the_others_hide():
     """At first only the green tincture can be found; the other three are nowhere on the ship."""
     state = play(IN_INFIRMARY)
     assert "green_tincture" in [thing["id"] for thing in engine.things_here(state)]
     for tincture, room in SCATTERED.items():
         assert story.ITEMS[tincture]["room"] == room
-        assert not engine.is_waiting(state, tincture), tincture
+        assert not lies_in_its_room(state, tincture), tincture
         elsewhere = dict(state, room=room)
         assert tincture not in [thing["id"] for thing in engine.things_here(elsewhere)], tincture
         _, outcome = engine.pick_up(elsewhere, tincture)
@@ -1467,7 +1473,7 @@ def test_tinctures_picking_up_the_green_one_scatters_the_others():
     state = play(IN_INFIRMARY + [TAKE_GREEN])
     assert state["flags"]["tinctures_scattered"]
     for tincture, room in SCATTERED.items():
-        assert engine.is_waiting(state, tincture), tincture
+        assert lies_in_its_room(state, tincture), tincture
         elsewhere = dict(state, room=room)
         assert tincture in [thing["id"] for thing in engine.things_here(elsewhere)], tincture
     assert play(GET_KEY + [TO_HOLD] + GATHER_TINCTURES)["inventory"][-4:] == [
@@ -1492,7 +1498,7 @@ def test_potion_the_recipe_in_order_makes_the_remedy():
     assert "potion" in [thing["id"] for thing in engine.things_here(state)]
     for tincture in TINCTURES:
         assert tincture not in state["inventory"], tincture  # used up
-        assert not engine.is_waiting(state, tincture), tincture
+        assert not lies_in_its_room(state, tincture), tincture
 
 
 def test_potion_a_wrong_tincture_spoils_the_mixture_but_keeps_the_bottles():

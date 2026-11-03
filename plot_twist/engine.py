@@ -481,19 +481,6 @@ def is_standing(state, thing):
     return _is_standing(state, thing)
 
 
-def is_waiting(state, item):
-    """True if an item lies somewhere on the ship right now, in any room: it has appeared,
-    it is not used up, and the player does not carry it (what the map points at)."""
-    info = story.ITEMS[item]
-    if info["room"] is None:
-        return False
-    if info["appears_if"] is not None and not state["flags"][info["appears_if"]]:
-        return False
-    if info.get("gone_if") is not None and state["flags"][info["gone_if"]]:
-        return False
-    return not _has_or_fused(state, item)
-
-
 def perform(state, action):
     """Carry out an action given as data, such as one returned by actions_for().
 
