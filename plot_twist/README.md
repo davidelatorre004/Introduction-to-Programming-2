@@ -74,9 +74,11 @@ Qualche aiuto:
   - in alto, la cabina del capitano;
   - in basso, la stiva, chiusa da un cancello;
   - a destra e a sinistra, due porte chiuse a chiave.
-- La chiave delle porte chiuse è spezzata in due metà: ogni enigma ne nasconde una. Le metà da sole non girano: vanno fuse sull'incudine della stiva.
+- La chiave delle porte chiuse è spezzata in due metà: ogni enigma ne nasconde una. Le metà da sole non girano: vanno fuse su un'incudine, che compare solo dopo aver aiutato il dottore dell'infermeria.
 - Con la chiave fusa si aprono tutte e due le porte. Dietro ognuna c'è qualcuno che vuole la tua bacchetta, e a chi la dai decide il finale.
-- **Indizio per la cabina:** i quattro generatori sono collegati da cavi, e attivarne uno cambia anche quelli collegati. Devi accenderli tutti insieme.
+- **Indizio per la cabina:** gli otto generatori sono collegati da cavi in un anello, e attivarne uno cambia anche i due vicini. Devi accenderli tutti insieme.
+- **Indizio per l'infermeria:** il rimedio del dottore si fa con quattro fialette, in un ordine preciso. La prima è in infermeria; quando la raccogli, le altre compaiono in giro per la nave, e la mappa in alto a destra lampeggia sulle stanze dove sono. Gli appunti del dottore dicono l'ordine.
+- **La miniera:** il portale in fondo al corridoio porta in una miniera. In fondo alla miniera un secondo portale riporta sulla nave, ma solo all'andata.
 - **Indizio per la stiva:** le cinque piastrelle numerate si calpestano, in tre prove una dopo l'altra. Una piastrella sbagliata, o uscire dalla grata intorno, fa ricominciare la prova in corso: "BZZZ!". I nomi delle prove sono incisi sull'incudine: esamina la barriera che la avvolge.
 
 ## 6. Il salvataggio
@@ -108,8 +110,8 @@ uv run pytest
 
 1. Sul ponte, raccogli la bacchetta magica: vai sopra di lei e premi E.
 2. Entra in cabina, dalla porta in alto.
-   - Ogni generatore, quando lo attivi, inverte sé stesso e i due vicini lungo i lati del quadrato.
-   - Attiva **A** e poi **D**: si accendono tutti e quattro e la barriera si dissolve.
+   - Ogni generatore, quando lo attivi, inverte sé stesso e i due vicini nell'anello A, B, C, D, E, F, G, H.
+   - Attiva **A** e poi **C**: si accendono tutti e otto e la barriera si dissolve.
    - Prendi la chiave dall'altare: è la "Central key".
 
    Se esci prima di finire, i generatori tornano come all'inizio.
@@ -119,11 +121,18 @@ uv run pytest
      - **The Wave:** 1, 2, 3, 4, 5;
      - **The Return**, partendo dalla 5 su cui sei: 3, 1;
      - **The Short Circuit**, partendo dalla 1 su cui sei: 5, 2, 4, 3.
-   - La barriera sparisce: prendi la "Second key" dall'incudine.
-   - Vicino all'incudine premi E e scegli "Use: Central key" (o la seconda): le due metà diventano la "Fused key".
-4. Torna sul ponte. Vicino alla porta a destra, quella con la chela, premi E e scegli "Use: Fused key". Entra.
-5. Vicino al granchio premi E, scegli "Give: Magic wand" e poi "Yes": **Ending 1 of 2 — Everyone saved**.
+   - La barriera sparisce: prendi la "Second key" dall'altare.
+4. Dalla stiva entra in infermeria (porta a sinistra) e raccogli la fialetta verde. Le altre tre compaiono:
+   - la **blu** nel corridoio, dalla porta in basso dell'infermeria;
+   - la **rossa** in cambusa, a sinistra della cabina;
+   - la **oro** in timoneria, dalla porta in alto della cabina.
+5. Torna in infermeria. Vicino al calderone premi E e versa, in quest'ordine: **verde, rossa, oro, blu**. Se sbagli il calderone si svuota, ma le fialette restano a te: ricomincia dalla verde.
+6. Raccogli il rimedio dal calderone e dallo al dottore ("Give: Remedy"). In cambusa compare l'incudine: vicino all'incudine premi E e scegli "Use: Central key" (o la seconda). Le due metà diventano la "Fused key".
+7. Torna sul ponte. Vicino alla porta a destra, quella con la chela, premi E e scegli "Use: Fused key". Entra.
+8. Vicino al granchio premi E, scegli "Give: Magic wand" e poi "Yes": **Ending 1 of 2 — Everyone saved**.
 
 Per l'altro finale apri anche la porta a sinistra, quella con l'ala (la chiave fusa apre tutte e due), e dai la bacchetta all'angelo: **Ending 2 of 2 — The ship explodes**.
+
+Facoltativo: dal corridoio, alla fine, entra nel portale e arrivi nella miniera. Lì c'è un cuore di cristallo da raccogliere (servirà più avanti). Il portale in fondo alla miniera ti porta dritto in timoneria; quello della timoneria non riporta indietro.
 
 </details>

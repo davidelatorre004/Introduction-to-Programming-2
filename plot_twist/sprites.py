@@ -13,8 +13,9 @@ Names follow what main.py looks for:
   the north wall (main.py turns them for the other walls);
 - the player as "player_<down/up/right>_<0, 1 or 2>": 0 standing, 1 and 2 walking
   (left is right mirrored);
-- the room tiles as "floor_<room>" and "wall_<room>", with "_0" and "_1" for the
-  two frames of a moving tile (the sea around the deck).
+- the room tiles as "floor_<room>" and "wall_<room>", with "_0" to "_3" for the
+  pictures of a moving tile (the stormy sea around the deck); "sea_calm_0" and
+  "sea_calm_1" are the calm sea of the good ending.
 - decor as "decor_<picture>", shared by every piece that names it in story.py
   (as big as the piece: the crab statue is 2 x 2 tiles), and the "portal";
 A picture missing here is drawn as a colored rectangle by main.py.
@@ -52,6 +53,9 @@ PALETTE = {
     "T": (40, 82, 88),     # dark teal
     "m": (232, 226, 210),  # marble
     "M": (190, 184, 168),  # marble shadow
+    "q": (20, 36, 72),     # stormy sea
+    "Q": (10, 18, 42),     # stormy sea, in the trough
+    "v": (58, 86, 132),    # the face of a wave
 }
 
 # The player's head and body are the same in the three frames of a direction:
@@ -740,7 +744,7 @@ SPRITES = {
         "YYYYYYYYYYYYYYYY",
         "yyyyyyyyyyyyyyyy",
     ],
-    "wall_deck_0": [
+    "sea_calm_0": [
         "ssssssssssssssss",
         "ssssssssssssssss",
         "ssssssssssssssss",
@@ -758,7 +762,7 @@ SPRITES = {
         "ssssssssssssssss",
         "ssssssssssssssss",
     ],
-    "wall_deck_1": [
+    "sea_calm_1": [
         "ssssssssssssssss",
         "ssssssssssssssss",
         "ssssssssssssssss",
@@ -775,6 +779,99 @@ SPRITES = {
         "ssssssssssssssss",
         "ssssssssssssssss",
         "ssssssssssssssss",
+    ],
+    # The stormy sea around the deck, on the title screen and in the bad ending:
+    # four pictures, shown one after the other (composed by a small script).
+    "wall_deck_0": [
+        "QQQQQQQQQQfwffwQ",
+        "QQQQQQQQQfffvvff",
+        "wQQQQQQQfvvvvvvv",
+        "ffQQQQQfvvvvqvvv",
+        "vvwfQwwvvvqqqqqv",
+        "vvfvfffvvqqqqqqq",
+        "qvvvfvvvqqqqqqqq",
+        "qqvvvvvqqqqqqqqq",
+        "qqqqvqqqqqqqQqqq",
+        "qqqqqqqqqffvfvvv",
+        "vqqqqqqqvqqqqqqq",
+        "qvvvfvvvqQQQQQQQ",
+        "QqqqqqqqQQQQQQQQ",
+        "QQQQqQQQQQQQQQQQ",
+        "QQQQQQQQQQQQQQQQ",
+        "QQQQQQQQQQQQwQQQ",
+    ],
+    "wall_deck_1": [
+        "qqqqQQqqqqqQQqqq",
+        "QQQQQQQQqQQQQQQQ",
+        "QQQQQQQQQQQQQQQQ",
+        "fQQQQQQQQQQQQQQQ",
+        "vwwQQQQQQQQQQQwf",
+        "vffwQQQQQQQQQwfv",
+        "vvvfwQQQQQQQwfvv",
+        "qvvvfwQQQQQffvvv",
+        "qqqvvfwfQfffvvqq",
+        "qqqqvvffwvvvvqqq",
+        "qqqqqvvvfvvvqqqq",
+        "qqqqqqvvvvvqqqqq",
+        "Qqqqqqqqvqqqqqqq",
+        "QQQqqfvvvvvfqqQQ",
+        "QQQQfqqqqqqqfQQQ",
+        "vvvvqqqqqqqqqfvv",
+    ],
+    "wall_deck_2": [
+        "qqqqQqqqqqqqvqqq",
+        "qvvvfvvvqqqqqqqq",
+        "vqqqqqqqvqqqqqqq",
+        "qQQQQQQQqvvvvffv",
+        "QQQQQQQQQqqqqqqq",
+        "QQQQQQQQQQQQqQQQ",
+        "QQQQQQQQQQQQQQQQ",
+        "QQQQwQQQQQQQQQQQ",
+        "QQfwfffQQQQQQQQQ",
+        "QfvfvvffQQQQQQQQ",
+        "fvvvvvvvfQQQQQQQ",
+        "vvvvqvvvffQQQQQw",
+        "vvqqqqqvvvfwQfwf",
+        "vqqqqqqqvvfffffv",
+        "qqqqqqqqqvvvvvvv",
+        "qqqqqqqqqqvvvvvq",
+    ],
+    "wall_deck_3": [
+        "Qwfvvvqqqqqvvfff",
+        "wfvvvqqqqqqqvvvv",
+        "fvvvqqqqqqqqqvvv",
+        "vvvqqqqqqqqqqqvv",
+        "vqqqqqqqQqqqqqqq",
+        "vvvvqqQQQQQqqfvv",
+        "qqqqvQQQQQQQvqqq",
+        "qqqqqvffvfvvqqqq",
+        "qqqQQqqqqqqqQQqq",
+        "qQQQQQQQQQQQQQQQ",
+        "QQQQQQQQQQQQQQQQ",
+        "QQQQQQQQfQQQQQQQ",
+        "QQQQQQwfvwfQQQQQ",
+        "QQQQQwfvvfvfQQQQ",
+        "QQQQffvvvvvffQQQ",
+        "QQQffvvvqvvvvfQQ",
+    ],
+    # The crystal heart of the mine.
+    "heart": [
+        "................",
+        "................",
+        "...kkk....kkk...",
+        "..kRrrk..krrRk..",
+        ".kRrwrrkkrrrrRk.",
+        ".kRwrrrrrrrrrRk.",
+        ".kRrrrrrrrrrrRk.",
+        ".kRrrrrrrrrrrRk.",
+        "..kRrrrrrrrrRk..",
+        "...kRrrrrrrRk...",
+        "....kRrrrrRk....",
+        ".....kRrrRk.....",
+        "......kRRk......",
+        ".......kk.......",
+        "................",
+        "................",
     ],
     "decor_barrel": [
         "................",

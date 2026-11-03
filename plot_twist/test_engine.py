@@ -40,12 +40,21 @@ TO_INFIRMARY = act("enter", "hold_to_infirmary")
 INFIRMARY_TO_HOLD = act("enter", "infirmary_to_hold")
 CABIN_TO_GALLEY = act("enter", "cabin_to_galley")
 GALLEY_TO_CABIN = act("enter", "galley_to_cabin")
+CABIN_TO_HELM = act("enter", "cabin_to_helm")
+HELM_TO_CABIN = act("enter", "helm_to_cabin")
+TO_CORRIDOR = act("enter", "infirmary_to_corridor")
+CORRIDOR_TO_INFIRMARY = act("enter", "corridor_to_infirmary")
+TAKE_GREEN = act("pick_up", "green_tincture")
+TAKE_RED = act("pick_up", "red_tincture")
+TAKE_GOLD = act("pick_up", "gold_tincture")
+TAKE_BLUE = act("pick_up", "blue_tincture")
 TAKE_POTION = act("pick_up", "potion")
 GIVE_TO_DOCTOR = act("use_item", "doctor", item="potion")
 ACTIVATE_A = act("activate", "generator_a")
 ACTIVATE_B = act("activate", "generator_b")
 ACTIVATE_C = act("activate", "generator_c")
 ACTIVATE_D = act("activate", "generator_d")
+ACTIVATE_E = act("activate", "generator_e")
 WAND_ON_BARREL = act("use_item", "hold_puzzle", item="wand")
 FUSE = act("use_item", "anvil", item="second_key")
 OPEN_CRAB = act("use_item", "deck_to_crab", item="fused_key")
@@ -60,8 +69,8 @@ def step(number):
     return act("step_on", f"tile_{number}")
 
 
-# The cabin's generators start A off, B on, C on, D off: A then D turns all four on.
-SOLVE_CABIN = [ACTIVATE_A, ACTIVATE_D]
+# The cabin's eight generators start with H, A, C and D off: A then C turns all eight on.
+SOLVE_CABIN = [ACTIVATE_A, ACTIVATE_C]
 # The tiles of the hold. Phase 1, the wave: 1 to 5. Phase 2, the return, from 5:
 # 3, then 1. Phase 3, the short circuit, from 1: 5, 2, 4, 3. Each phase starts on
 # the tile the one before ended on, already lit.
@@ -69,9 +78,14 @@ PHASE_1 = [step(1), step(2), step(3), step(4), step(5)]
 PHASE_2 = [step(3), step(1)]
 PHASE_3 = [step(5), step(2), step(4), step(3)]
 SOLVE_TILES = PHASE_1 + PHASE_2 + PHASE_3
-# The remedy, from the hold: the tinctures in the right order, then the doctor drinks it.
-RECIPE = [act("pour", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
-CALM_THE_DOCTOR = [TO_INFIRMARY] + RECIPE + [TAKE_POTION, GIVE_TO_DOCTOR, INFIRMARY_TO_HOLD]
+# The tinctures, from the hold and back: the green one in the infirmary makes the
+# others appear, in the corridor, the galley and the helm.
+GATHER_TINCTURES = [TO_INFIRMARY, TAKE_GREEN, TO_CORRIDOR, TAKE_BLUE, CORRIDOR_TO_INFIRMARY, INFIRMARY_TO_HOLD,
+                    HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY, TAKE_RED, GALLEY_TO_CABIN, CABIN_TO_HELM, TAKE_GOLD,
+                    HELM_TO_CABIN, CABIN_TO_DECK, TO_HOLD]
+# The remedy: the tinctures poured into the cauldron in the right order, then the doctor drinks it.
+RECIPE = [act("use_item", "cauldron", item=tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
+CALM_THE_DOCTOR = GATHER_TINCTURES + [TO_INFIRMARY] + RECIPE + [TAKE_POTION, GIVE_TO_DOCTOR, INFIRMARY_TO_HOLD]
 # From the deck to the galley and back: the anvil is there once the doctor is at peace.
 FUSE_IN_THE_GALLEY = [TO_CABIN, CABIN_TO_GALLEY, FUSE, GALLEY_TO_CABIN, CABIN_TO_DECK]
 # Wand, cabin puzzle, the first half of the key, and back on the deck.
@@ -143,8 +157,6 @@ def every_action():
             actions.append(act("activate", thing))
         if info["kind"] == "tile":
             actions.append(act("step_on", thing))
-        if info["kind"] == "ingredient":
-            actions.append(act("pour", thing))
         if info["kind"] == "portal":
             actions.append(act("travel", thing))
     for puzzle in story.FLOOR_PUZZLES:
@@ -630,7 +642,7 @@ def test_r3_revisited_cabin_remembers_the_complete_circuit():
     """Back in the cabin: the generators are still on, the barrier is still gone, the altar is empty."""
     state = play(GET_KEY + [TO_CABIN])
     here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
-    for generator in ("generator_a", "generator_b", "generator_c", "generator_d"):
+    for generator in GENERATORS:
         assert here[generator] == "on"
     assert "barrier" not in here
     assert "key" not in here
@@ -712,11 +724,14 @@ def test_r4_every_ending_is_reachable_from_a_new_game():
 
 # --- M5: the generators of the captain's cabin -----------------------------------------
 
-GENERATORS = ["generator_a", "generator_b", "generator_c", "generator_d"]
+GENERATORS = ["generator_a", "generator_b", "generator_c", "generator_d",
+              "generator_e", "generator_f", "generator_g", "generator_h"]
+START = "aBcdEFGh"  # H, A, C and D off; B, E, F and G on
+ALL_ON = "ABCDEFGH"
 
 
 def generators(state):
-    """The four generators as their letters, capital when on: "aBCd" is A off, B on, C on, D off."""
+    """The eight generators as their letters, capital when on: "aBcdEFGh" is the start."""
     letters = ""
     for generator in GENERATORS:
         letter = story.OBJECTS[generator]["label"]
@@ -724,23 +739,35 @@ def generators(state):
     return letters
 
 
-def test_m5_the_generators_start_a_off_b_on_c_on_d_off():
+def test_m5_the_generators_start_with_h_a_c_and_d_off():
     """The starting configuration the puzzle asks for, with the barrier up and the key behind it."""
     in_cabin = play([TO_CABIN])
-    assert generators(in_cabin) == "aBCd"
+    assert generators(in_cabin) == START
     here = {thing["id"]: thing["status"] for thing in engine.things_here(in_cabin)}
     assert here["barrier"] == "up"
     assert here["key"] == "guarded"
 
 
+def test_m5_the_generators_are_wired_in_a_ring():
+    """Each generator is wired to itself and to the two next to it in the ring A, B, ... H, and back to A."""
+    for index, generator in enumerate(GENERATORS):
+        neighbours = {GENERATORS[index - 1], GENERATORS[(index + 1) % len(GENERATORS)]}
+        toggles = story.OBJECTS[generator]["toggles"]
+        assert toggles[0] == generator and set(toggles[1:]) == neighbours, generator
+
+
 @pytest.mark.parametrize("generator, after", [
-    ("generator_a", "Abcd"),  # A, B and C flip
-    ("generator_b", "AbCD"),  # B, A and D flip
-    ("generator_c", "ABcD"),  # C, A and D flip
-    ("generator_d", "abcD"),  # D, B and C flip
+    ("generator_a", "AbcdEFGH"),  # H, A and B flip
+    ("generator_b", "AbCdEFGh"),  # A, B and C flip
+    ("generator_c", "abCDEFGh"),  # B, C and D flip
+    ("generator_d", "aBCDeFGh"),  # C, D and E flip
+    ("generator_e", "aBcDefGh"),  # D, E and F flip
+    ("generator_f", "aBcdefgh"),  # E, F and G flip
+    ("generator_g", "aBcdEfgH"),  # F, G and H flip
+    ("generator_h", "ABcdEFgH"),  # G, H and A flip
 ])
 def test_m5_a_generator_flips_itself_and_the_two_next_to_it(generator, after):
-    """From aBCd, each generator flips itself and its two neighbours along the sides, never the one across."""
+    """From the start, each generator flips itself and its two neighbours in the ring, and no other."""
     in_cabin = play([TO_CABIN])
     state, outcome = engine.activate(in_cabin, generator)
     assert outcome["event"] == "toggled"
@@ -753,18 +780,18 @@ def test_m5_activating_a_generator_twice_undoes_it():
     for generator in GENERATORS:
         once, _ = engine.activate(in_cabin, generator)
         twice, _ = engine.activate(once, generator)
-        assert generators(twice) == "aBCd", generator
+        assert generators(twice) == START, generator
 
 
-@pytest.mark.parametrize("first, last", [(ACTIVATE_A, ACTIVATE_D), (ACTIVATE_D, ACTIVATE_A)])
-def test_m5_all_four_on_dissolves_the_barrier(first, last):
-    """As soon as all four are on: the message, the barrier gone, and the key can be taken from the altar."""
+@pytest.mark.parametrize("first, last", [(ACTIVATE_A, ACTIVATE_C), (ACTIVATE_C, ACTIVATE_A)])
+def test_m5_all_eight_on_dissolves_the_barrier(first, last):
+    """Two levers, as with four generators: the message, the barrier gone, and the key can be taken from the altar."""
     state = play([TO_CABIN, first])
     assert not state["flags"]["cabin_solved"]  # one generator is not enough
     state, outcome = engine.perform(state, last)
     assert outcome["event"] == "circuit_complete"
     assert outcome["text"] == story.CIRCUITS["cabin_circuit"]["solved_text"]
-    assert generators(state) == "ABCD"
+    assert generators(state) == ALL_ON
     here = {thing["id"]: thing["status"] for thing in engine.things_here(state)}
     assert "barrier" not in here
     assert here["key"] == "on_floor"
@@ -772,31 +799,37 @@ def test_m5_all_four_on_dissolves_the_barrier(first, last):
     assert outcome["event"] == "picked_up"
 
 
+def test_m5_the_fewest_levers_are_two():
+    """The difficulty did not grow with the generators: no single lever solves it, and two do."""
+    in_cabin = play([TO_CABIN])
+    for generator in GENERATORS:
+        _, outcome = engine.activate(in_cabin, generator)
+        assert outcome["event"] == "toggled", generator
+
+
 def test_m5_every_configuration_of_the_generators_can_be_completed():
     """Whatever the player does, the circuit can still be completed: the puzzle has no dead ends.
 
-    On the way, every press is checked: the circuit is complete exactly when all four are on.
+    Pulling a lever twice undoes it, so the levers can be walked back. A search
+    from the start that never goes past the complete circuit still reaches every
+    one of the 256 configurations: from each of them there is a way to all eight on.
+    On the way, every pull is checked: the circuit is complete exactly when all eight are on.
     """
-    for number in range(16):
-        start = play([TO_CABIN])
-        for index, generator in enumerate(GENERATORS):
-            start["flags"][generator] = bool(number >> index & 1)
-        seen = {generators(start)}
-        frontier = [start]
-        completed = False
-        while frontier and not completed:  # all the configurations one press further, then two...
-            further = []
-            for state in frontier:
-                for generator in GENERATORS:
-                    after, outcome = engine.activate(state, generator)
-                    assert (outcome["event"] == "circuit_complete") == (generators(after) == "ABCD")
-                    if outcome["event"] == "circuit_complete":
-                        completed = True
-                    elif generators(after) not in seen:
-                        seen.add(generators(after))
+    start = play([TO_CABIN])
+    seen = {generators(start)}
+    frontier = [start]
+    while frontier:
+        further = []
+        for state in frontier:
+            for generator in GENERATORS:
+                after, outcome = engine.activate(state, generator)
+                assert (outcome["event"] == "circuit_complete") == (generators(after) == ALL_ON)
+                if generators(after) not in seen:
+                    seen.add(generators(after))
+                    if outcome["event"] != "circuit_complete":
                         further.append(after)
-            frontier = further
-        assert completed, generators(start)
+        frontier = further
+    assert len(seen) == 2 ** len(GENERATORS)
 
 
 def test_m5_a_complete_circuit_stays_on():
@@ -808,16 +841,16 @@ def test_m5_a_complete_circuit_stays_on():
 
 
 def test_m5_walking_back_in_finds_the_starting_configuration():
-    """Until the circuit is complete, entering the cabin always finds A off, B on, C on, D off."""
+    """Until the circuit is complete, entering the cabin always finds H, A, C and D off."""
     state = play([TO_CABIN, ACTIVATE_B, ACTIVATE_C])
-    assert generators(state) != "aBCd"
+    assert generators(state) != START
     state = play([CABIN_TO_DECK, TO_CABIN], state)
-    assert generators(state) == "aBCd"
+    assert generators(state) == START
 
 
 def test_m5_a_complete_circuit_is_remembered():
     state = play([TO_CABIN] + SOLVE_CABIN + [CABIN_TO_DECK, TO_CABIN])
-    assert generators(state) == "ABCD"
+    assert generators(state) == ALL_ON
     assert state["flags"]["cabin_solved"]
 
 
@@ -1250,7 +1283,7 @@ def test_story_every_room_can_be_reached():
     """Through doors or portals, every room can be reached from the start."""
     links = [(door["room"], door["to"]) for door in story.DOORS.values()]
     for info in story.OBJECTS.values():
-        if info["kind"] == "portal":
+        if info["kind"] == "portal" and info["to"] is not None:
             links.append((info["room"], story.OBJECTS[info["to"]]["room"]))
     reached = {story.START_ROOM}
     grew = True
@@ -1264,12 +1297,34 @@ def test_story_every_room_can_be_reached():
 
 
 def test_story_portals_come_in_pairs():
-    """Each portal leads to another portal, in another room, that leads back."""
+    """Each portal leads to another portal, in another room: one that leads back, or one that only receives.
+
+    A portal that only receives is the end of exactly one portal.
+    """
     for portal, info in story.OBJECTS.items():
-        if info["kind"] == "portal":
-            twin = story.OBJECTS[info["to"]]
-            assert twin["kind"] == "portal" and twin["to"] == portal, portal
-            assert twin["room"] != info["room"], portal
+        if info["kind"] != "portal":
+            continue
+        if info["to"] is None:
+            senders = [other for other, more in story.OBJECTS.items() if more.get("to") == portal]
+            assert len(senders) == 1, portal
+            continue
+        twin = story.OBJECTS[info["to"]]
+        assert twin["kind"] == "portal" and twin["to"] in (portal, None), portal
+        assert twin["room"] != info["room"], portal
+
+
+def test_the_mine_portal_leads_one_way_to_the_helm():
+    """From the bottom of the mine to the helm; from the helm, the ring does nothing at all."""
+    state = engine.new_game()
+    state["room"] = "mine"
+    there, outcome = engine.travel(state, "mine_exit")
+    assert outcome["event"] == "teleported" and there["room"] == "helm"
+    assert "helm" in engine.visited_rooms(there)
+    after, outcome = engine.travel(there, "helm_portal")
+    assert not outcome["ok"] and outcome["event"] == "nothing_happens"
+    assert after == there
+    assert engine.actions_for(there, "helm_portal") == []  # E offers nothing either
+    assert "helm_portal" in [thing["id"] for thing in engine.things_here(there)]  # but it is there to see
 
 
 def test_travel_through_the_portal_and_back():
@@ -1309,12 +1364,9 @@ def test_story_locked_doors_are_complete():
 def test_story_objects_are_well_formed():
     for thing_id, thing in story.OBJECTS.items():
         assert thing["kind"] in ("puzzle", "character", "switch", "tile", "barrier", "altar", "anvil", "decor",
-                                 "cauldron", "ingredient", "portal"), thing_id
+                                 "cauldron", "portal"), thing_id
         for key in ("appears_if", "gone_if"):
             assert thing.get(key) is None or thing[key] in story.FLAGS, (thing_id, key)
-        if thing["kind"] == "ingredient":
-            assert thing["puzzle"] in story.POTION_PUZZLES, thing_id
-            assert thing["pour_text"].strip(), thing_id
         if thing["kind"] == "decor":
             assert isinstance(thing["solid"], bool), thing_id
             assert thing["picture"].startswith("decor_"), thing_id
@@ -1391,55 +1443,108 @@ def test_story_texts_are_not_empty():
 
 # --- The infirmary: the remedy, the doctor and his gift ----------------------------
 
-IN_INFIRMARY = GET_KEY + [TO_HOLD, TO_INFIRMARY]
+IN_INFIRMARY = GET_KEY + [TO_HOLD, TO_INFIRMARY]  # nothing found yet
+WITH_THE_TINCTURES = GET_KEY + [TO_HOLD] + GATHER_TINCTURES + [TO_INFIRMARY]  # all four in hand
+TINCTURES = story.POTION_PUZZLES["remedy"]["recipe"]
+SCATTERED = {"red_tincture": "galley", "gold_tincture": "helm", "blue_tincture": "corridor"}
+
+
+def test_tinctures_the_green_one_waits_in_the_infirmary_and_the_others_hide():
+    """At first only the green tincture can be found; the other three are nowhere on the ship."""
+    state = play(IN_INFIRMARY)
+    assert "green_tincture" in [thing["id"] for thing in engine.things_here(state)]
+    for tincture, room in SCATTERED.items():
+        assert story.ITEMS[tincture]["room"] == room
+        assert not engine.is_waiting(state, tincture), tincture
+        elsewhere = dict(state, room=room)
+        assert tincture not in [thing["id"] for thing in engine.things_here(elsewhere)], tincture
+        _, outcome = engine.pick_up(elsewhere, tincture)
+        assert outcome["event"] == "not_here", tincture
+
+
+def test_tinctures_picking_up_the_green_one_scatters_the_others():
+    """With the green tincture in hand, the other three appear in the galley, the helm and the corridor."""
+    state = play(IN_INFIRMARY + [TAKE_GREEN])
+    assert state["flags"]["tinctures_scattered"]
+    for tincture, room in SCATTERED.items():
+        assert engine.is_waiting(state, tincture), tincture
+        elsewhere = dict(state, room=room)
+        assert tincture in [thing["id"] for thing in engine.things_here(elsewhere)], tincture
+    assert play(GET_KEY + [TO_HOLD] + GATHER_TINCTURES)["inventory"][-4:] == [
+        "green_tincture", "blue_tincture", "red_tincture", "gold_tincture"]
 
 
 def test_potion_the_recipe_in_order_makes_the_remedy():
     """Each tincture of the recipe moves the cauldron on; the last one makes the remedy appear in it."""
     puzzle = story.POTION_PUZZLES["remedy"]
-    state = play(IN_INFIRMARY)
+    state = play(WITH_THE_TINCTURES)
     assert "potion" not in [thing["id"] for thing in engine.things_here(state)]
-    for number, tincture in enumerate(puzzle["recipe"], start=1):
-        state, outcome = engine.pour(state, tincture)
-        if number < len(puzzle["recipe"]):
+    for number, tincture in enumerate(TINCTURES, start=1):
+        state, outcome = engine.use_item(state, tincture, "cauldron")
+        if number < len(TINCTURES):
             assert outcome["event"] == "potion_poured"
-            assert outcome["text"] == story.OBJECTS[tincture]["pour_text"]
+            assert outcome["text"] == puzzle["pour_texts"][tincture]
             assert state["flags"]["potion_step"] == number
+            assert tincture in state["inventory"]  # still in hand until the remedy is made
     assert outcome["event"] == "potion_ready"
+    assert outcome["text"] == puzzle["solved_text"]
     assert state["flags"]["potion_solved"] and state["flags"]["potion_step"] == 0
     assert "potion" in [thing["id"] for thing in engine.things_here(state)]
+    for tincture in TINCTURES:
+        assert tincture not in state["inventory"], tincture  # used up
+        assert not engine.is_waiting(state, tincture), tincture
 
 
-def test_potion_a_wrong_tincture_spoils_the_mixture():
-    """Out of order, the cauldron empties and the recipe starts over; nothing appears."""
-    green, red, gold, blue = story.POTION_PUZZLES["remedy"]["recipe"]
-    state = play(IN_INFIRMARY + [act("pour", green), act("pour", red)])
-    after, outcome = engine.pour(state, blue)  # the gold had to come first
+def test_potion_a_wrong_tincture_spoils_the_mixture_but_keeps_the_bottles():
+    """Out of order, the cauldron empties and the recipe starts over; the bottles stay in hand to try again."""
+    green, red, gold, blue = TINCTURES
+    state = play(WITH_THE_TINCTURES + [act("use_item", "cauldron", item=green), act("use_item", "cauldron", item=red)])
+    after, outcome = engine.use_item(state, blue, "cauldron")  # the gold had to come first
     assert outcome["ok"] and outcome["event"] == "potion_spoiled"
     assert after["flags"]["potion_step"] == 0
     assert not after["flags"]["potion_solved"]
-    _, outcome = engine.pour(play(IN_INFIRMARY), red)  # a wrong first one spoils it too
-    assert outcome["event"] == "potion_spoiled"
+    assert after["inventory"] == state["inventory"]
+    assert play(RECIPE, after)["flags"]["potion_solved"]  # starting over still works
+    _, outcome = engine.use_item(play(IN_INFIRMARY + [TAKE_GREEN, TO_CORRIDOR, TAKE_BLUE, CORRIDOR_TO_INFIRMARY]),
+                                 blue, "cauldron")
+    assert outcome["event"] == "potion_spoiled"  # a wrong first one spoils it too
+
+
+def test_potion_the_cauldron_wants_only_its_tinctures():
+    state = play(WITH_THE_TINCTURES)
+    after, outcome = engine.use_item(state, "wand", "cauldron")
+    assert outcome["event"] == "nothing_happens" and after == state
+    after, outcome = engine.use_item(state, "green_tincture", "doctor")
+    assert outcome["event"] == "nothing_happens" and after == state
 
 
 def test_potion_the_cauldron_is_done_once_the_remedy_is_made():
-    state = play(IN_INFIRMARY + RECIPE)
-    for tincture in story.POTION_PUZZLES["remedy"]["recipe"]:
-        after, outcome = engine.pour(state, tincture)
-        assert outcome["event"] == "already_done"
-        assert after == state
+    state = play(WITH_THE_TINCTURES + RECIPE)
+    offered_items = [action["item"] for action in engine.actions_for(state, "cauldron")]
+    assert not set(offered_items) & set(TINCTURES)  # the bottles are used up: nothing left to pour
+    for item in state["inventory"]:
+        after, outcome = engine.use_item(state, item, "cauldron")
+        assert not outcome["ok"] and after == state
 
 
-def test_potion_pouring_is_offered_on_every_tincture_only_in_the_infirmary():
-    state = play(IN_INFIRMARY)
-    for tincture in story.POTION_PUZZLES["remedy"]["recipe"]:
-        assert offered(state, tincture) == [("pour", None), ("examine", None)]
-    _, outcome = engine.pour(play(GET_KEY), "green_tincture")
-    assert outcome["event"] == "not_here"
+def test_potion_pouring_is_offered_on_the_cauldron_for_each_tincture():
+    state = play(WITH_THE_TINCTURES)
+    labels = {action["item"]: action["label"] for action in engine.actions_for(state, "cauldron")}
+    for tincture in TINCTURES:
+        assert labels[tincture] == story.MESSAGES["label_pour"].format(name=story.ITEMS[tincture]["name"])
+    assert labels["wand"] == story.MESSAGES["label_use"].format(item=story.ITEMS["wand"]["name"])
+
+
+def test_heart_waits_in_the_mine():
+    state = engine.new_game()
+    state["room"] = "mine"
+    assert "heart" in [thing["id"] for thing in engine.things_here(state)]
+    after, outcome = engine.pick_up(state, "heart")
+    assert outcome["event"] == "picked_up" and after["inventory"] == ["heart"]
 
 
 def test_doctor_drinks_the_remedy_vanishes_and_the_anvil_appears_in_the_galley():
-    before = play(IN_INFIRMARY + RECIPE + [TAKE_POTION])
+    before = play(WITH_THE_TINCTURES + RECIPE + [TAKE_POTION])
     in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY], before)
     assert "anvil" not in [thing["id"] for thing in engine.things_here(in_galley)]
     after, outcome = engine.use_item(before, "potion", "doctor")
@@ -1459,12 +1564,25 @@ def test_doctor_wants_nothing_but_the_remedy():
 
 
 def test_restore_rejects_an_impossible_cauldron_or_remedy():
-    good = play(IN_INFIRMARY + RECIPE + [TAKE_POTION])
+    good = play(WITH_THE_TINCTURES + RECIPE + [TAKE_POTION])
     assert engine.restore_state(good) == good
     for flags in ({"potion_step": 4}, {"potion_step": 2, "potion_solved": True}, {"doctor_at_peace": True}):
         broken = copy.deepcopy(good)
         broken["flags"].update(flags)
         assert engine.restore_state(broken) is None, flags
+
+
+def test_restore_rejects_impossible_tinctures():
+    """A tincture carried before it appeared, or after the remedy used it up, cannot be in a save."""
+    holding_green = play(IN_INFIRMARY + [TAKE_GREEN])
+    assert engine.restore_state(holding_green) == holding_green
+    early = copy.deepcopy(holding_green)
+    early["inventory"].append("red_tincture")
+    early["flags"]["tinctures_scattered"] = False
+    assert engine.restore_state(early) is None
+    late = copy.deepcopy(holding_green)
+    late["flags"]["potion_solved"] = True
+    assert engine.restore_state(late) is None
 
 
 def test_entering_a_room_marks_it_on_the_map():

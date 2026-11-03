@@ -35,11 +35,19 @@ def play(actions):
 
 TILES = ["tile_1", "tile_2", "tile_3", "tile_4", "tile_5", "tile_3", "tile_1", "tile_5", "tile_2", "tile_4", "tile_3"]
 TO_THE_CRAB_DOOR = ([("pick_up", "wand", None), ("enter", "deck_to_cabin", None), ("activate", "generator_a", None),
-                     ("activate", "generator_d", None), ("pick_up", "key", None), ("enter", "cabin_to_deck", None),
+                     ("activate", "generator_c", None), ("pick_up", "key", None), ("enter", "cabin_to_deck", None),
                      ("enter", "deck_to_hold", None)]
                     + [("step_on", tile, None) for tile in TILES]
-                    + [("pick_up", "second_key", None), ("enter", "hold_to_infirmary", None)]
-                    + [("pour", tincture, None) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
+                    + [("pick_up", "second_key", None), ("enter", "hold_to_infirmary", None),
+                       ("pick_up", "green_tincture", None), ("enter", "infirmary_to_corridor", None),
+                       ("pick_up", "blue_tincture", None), ("enter", "corridor_to_infirmary", None),
+                       ("enter", "infirmary_to_hold", None), ("enter", "hold_to_deck", None),
+                       ("enter", "deck_to_cabin", None), ("enter", "cabin_to_galley", None),
+                       ("pick_up", "red_tincture", None), ("enter", "galley_to_cabin", None),
+                       ("enter", "cabin_to_helm", None), ("pick_up", "gold_tincture", None),
+                       ("enter", "helm_to_cabin", None), ("enter", "cabin_to_deck", None),
+                       ("enter", "deck_to_hold", None), ("enter", "hold_to_infirmary", None)]
+                    + [("use_item", "cauldron", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
                     + [("pick_up", "potion", None), ("use_item", "doctor", "potion"), ("enter", "infirmary_to_hold", None),
                        ("enter", "hold_to_deck", None), ("enter", "deck_to_cabin", None), ("enter", "cabin_to_galley", None),
                        ("use_item", "anvil", "key"), ("enter", "galley_to_cabin", None), ("enter", "cabin_to_deck", None)])
@@ -81,7 +89,7 @@ def test_everything_on_screen_has_a_picture():
         assert sprites.image(item) is not None, item
     statuses = {"puzzle": ["solved", "unsolved"], "character": ["present"], "switch": ["on", "off"],
                 "altar": ["present"], "anvil": ["present"], "barrier": ["up"], "tile": ["lit", "dark", "error"], "decor": ["present"],
-                "cauldron": ["present"], "ingredient": ["present"], "portal": ["present"]}
+                "cauldron": ["present"], "portal": ["present"]}
     for thing, info in story.OBJECTS.items():
         for status in statuses[info["kind"]]:
             if info["kind"] == "barrier":

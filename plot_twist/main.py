@@ -45,7 +45,9 @@ DIALOG_PADDING = 8
 DIALOG_TEXT_WIDTH = WIDTH - 4 * DIALOG_PADDING  # margin and padding on both sides of the box
 FADE_FRAMES = FPS // 4     # how long a room takes to come out of the dark after a door
 WALK_STEP_FRAMES = 8       # frames per step of the walking animation
-WAVE_FRAMES = FPS // 2     # frames between the two pictures of the sea
+WAVE_FRAMES = FPS // 6     # frames between two pictures of the stormy sea (four of them)
+SEA_PICTURES = 4           # pictures of the stormy sea, shown one after the other
+CALM_FRAMES = FPS // 2     # frames between the two pictures of the calm sea of the good ending
 BARRIER_FRAMES = 6         # frames between the two pictures of a barrier's energy
 FLASH_FRAMES = FPS // 2    # how long the tiles blink red after a mistake, before going dark
 FLASH_BLINK = 6            # frames between two blinks
@@ -75,7 +77,7 @@ COLORS = {
     "highlight": (255, 205, 80),
     "hud": (24, 22, 34),
     "box": (16, 16, 30),
-    "sea": (34, 78, 150),
+    "sea": (20, 36, 72),
     "foam": (120, 170, 220),
     "railing": (95, 60, 30),
     "player": (90, 200, 120),
@@ -113,6 +115,7 @@ EVENT_SOUNDS = {
 
 # --- The map in the corner ------------------------------------------------------------
 
+INVENTORY_ROOM = 108  # pixels of the bar for the items carried, left of the map
 MAP_SCALE = 3        # one pixel of the map for every three tiles of the ship
 MAP_BLINK = FPS // 3 # frames between two blinks of a marker
 # Things the map points at while they wait for the player: the anvil, until the key is fused.
@@ -1003,13 +1006,16 @@ def draw_menu(app, screen, top):
 
 
 def wave_frame(app):
-    """Which of the two frames of the moving tiles (the sea) to show now."""
-    return (app["frame"] // WAVE_FRAMES) % 2
+    """Which picture of the moving tiles (the stormy sea) to show now."""
+    return (app["frame"] // WAVE_FRAMES) % SEA_PICTURES
 
 
-def draw_sea(app, screen, area):
-    """Fill an area with moving sea."""
-    tile = sprites.image("wall_deck_" + str(wave_frame(app)))
+def draw_sea(app, screen, area, calm=False):
+    """Fill an area with moving sea: the storm, or the calm sea of the good ending."""
+    if calm:
+        tile = sprites.image("sea_calm_" + str((app["frame"] // CALM_FRAMES) % 2))
+    else:
+        tile = sprites.image("wall_deck_" + str(wave_frame(app)))
     if tile is None:
         pygame.draw.rect(screen, COLORS["sea"], area)
         return
@@ -1303,8 +1309,10 @@ def draw_hud(app, screen):
         if hint:
             draw_text(screen, font, hint, COLORS["highlight"], (8, 18))
     x = right + 4
+    # 18 pixels for each item; with many items they move closer, so they never reach the hint on the left.
+    gap = min(18, max(10, INVENTORY_ROOM // max(len(state["inventory"]), 1)))
     for item in reversed(state["inventory"]):
-        x -= 18
+        x -= gap
         picture = sprites.image(item)
         if picture is None:
             pygame.draw.rect(screen, THING_COLORS.get(item, MISSING_COLOR), (x + 4, 19, 8, 8))
@@ -1393,11 +1401,15 @@ def map_dot(room, position):
 
 
 def map_markers(state):
-    """The rooms the map points at: where a thing waits that the player still needs."""
+    """The rooms the map points at: where a thing waits that the player still needs,
+    and where an item marked "on_map" lies (the tinctures scattered around the ship)."""
     rooms = []
     for thing, needed in MAP_MARKERS.items():
         if engine.is_standing(state, thing) and not engine.has_item(state, needed):
             rooms.append(story.OBJECTS[thing]["room"])
+    for item, info in story.ITEMS.items():
+        if info.get("on_map") and engine.is_waiting(state, item) and info["room"] not in rooms:
+            rooms.append(info["room"])
     return rooms
 
 
@@ -1529,7 +1541,7 @@ def draw_rescue(app, scene, time):
     coast = [(160, horizon), (184, horizon - 6), (210, horizon - 9), (236, horizon - 5), (WIDTH, horizon - 7),
              (WIDTH, horizon)]
     pygame.draw.polygon(scene, COLORS["land"], coast)
-    draw_sea(app, scene, pygame.Rect(0, horizon, WIDTH, ENDING_SCENE_HEIGHT - horizon))
+    draw_sea(app, scene, pygame.Rect(0, horizon, WIDTH, ENDING_SCENE_HEIGHT - horizon), calm=True)
     ship = sprites.image("ship")
     if ship is not None:
         x = 40 + min(time, 320) // 4  # sailing towards the coast

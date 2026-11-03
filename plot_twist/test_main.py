@@ -27,14 +27,22 @@ def act(verb, target, item=None):
 
 # The crab's path, from a new game to its ending, in stages.
 IN_THE_CABIN = [act("pick_up", "wand"), act("enter", "deck_to_cabin")]  # with the wand, the barrier up
-CIRCUIT_COMPLETE = IN_THE_CABIN + [act("activate", "generator_a"), act("activate", "generator_d")]
+CIRCUIT_COMPLETE = IN_THE_CABIN + [act("activate", "generator_a"), act("activate", "generator_c")]
 FIRST_HALF = CIRCUIT_COMPLETE + [act("pick_up", "key"), act("enter", "cabin_to_deck")]  # back on the deck
 IN_THE_HOLD = FIRST_HALF + [act("enter", "deck_to_hold")]
 TILE_SEQUENCE = ["tile_1", "tile_2", "tile_3", "tile_4", "tile_5", "tile_3", "tile_1", "tile_5", "tile_2", "tile_4", "tile_3"]
 TILES_SOLVED = IN_THE_HOLD + [act("step_on", tile) for tile in TILE_SEQUENCE]
 BOTH_HALVES = TILES_SOLVED + [act("pick_up", "second_key")]  # in the hold, not fused yet
-DOCTOR_AT_PEACE = (BOTH_HALVES + [act("enter", "hold_to_infirmary")]
-                   + [act("pour", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
+# The tinctures: the green one in the infirmary, then the three it scatters, and back in the infirmary.
+TINCTURES_FOUND = BOTH_HALVES + [
+    act("enter", "hold_to_infirmary"), act("pick_up", "green_tincture"),
+    act("enter", "infirmary_to_corridor"), act("pick_up", "blue_tincture"), act("enter", "corridor_to_infirmary"),
+    act("enter", "infirmary_to_hold"), act("enter", "hold_to_deck"), act("enter", "deck_to_cabin"),
+    act("enter", "cabin_to_galley"), act("pick_up", "red_tincture"), act("enter", "galley_to_cabin"),
+    act("enter", "cabin_to_helm"), act("pick_up", "gold_tincture"), act("enter", "helm_to_cabin"),
+    act("enter", "cabin_to_deck"), act("enter", "deck_to_hold"), act("enter", "hold_to_infirmary")]
+DOCTOR_AT_PEACE = (TINCTURES_FOUND
+                   + [act("use_item", "cauldron", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
                    + [act("pick_up", "potion"), act("use_item", "doctor", "potion")])  # in the infirmary
 KEY_FUSED = DOCTOR_AT_PEACE + [act("enter", "infirmary_to_hold"), act("enter", "hold_to_deck"),
                                act("enter", "deck_to_cabin"), act("enter", "cabin_to_galley"),
@@ -216,8 +224,9 @@ def test_layout_the_barrier_keeps_the_key_out_of_reach(room, item):
     state = in_room(room)
     solids = main.solid_rects(state)
     guarded = main.reach_rect(item)
-    for x in range(main.TILE, main.WIDTH - main.TILE, 2):
-        for y in range(main.HUD_HEIGHT + main.TILE, main.HEIGHT - main.TILE, 2):
+    columns, rows = main.room_size(room)
+    for x in range(main.TILE, (columns - 1) * main.TILE, 2):
+        for y in range(main.HUD_HEIGHT + main.TILE, main.HUD_HEIGHT + (rows - 1) * main.TILE, 2):
             body = main.player_rect((x, y))
             if body.collidelist(solids) == -1:
                 assert not body.inflate(2 * main.REACH, 2 * main.REACH).colliderect(guarded), (x, y)
@@ -604,17 +613,17 @@ def test_prompt_says_what_e_does_here():
 
 
 def test_the_nearest_thing_is_the_one_e_acts_on(app):
-    """In the corner between generator A and the barrier both are in reach: E picks the closer generator.
+    """In the corner between generator C and the barrier both are in reach: E picks the closer generator.
 
     On the very same tile, the key lying on the altar comes before the altar itself.
     """
     state = play(IN_THE_CABIN)  # with the wand, the barrier still up
-    generator, barrier = main.thing_rect("generator_a"), main.thing_rect("barrier")
+    generator, barrier = main.thing_rect("generator_c"), main.thing_rect("barrier")
     body = pygame.Rect(0, 0, main.PLAYER_SIZE, main.PLAYER_SIZE)
-    body.bottomleft = (generator.right + 2, generator.top - 2)
+    body.bottomright = (generator.left - 2, generator.top - 2)
     reach = body.inflate(2 * main.REACH, 2 * main.REACH)
     assert reach.colliderect(generator) and reach.colliderect(barrier)
-    assert main.nearest_target(state, body.topleft) == "generator_a"
+    assert main.nearest_target(state, body.topleft) == "generator_c"
     solved = play(CIRCUIT_COMPLETE)  # the key free on the altar
     app["state"] = solved
     stand_next_to(app, "key")
@@ -728,7 +737,7 @@ def test_a_whole_game_on_screen(app, door, character, ending):
     press(app, pygame.K_e)
     read_all(app)
     walk_into(app, "deck_to_cabin")
-    for generator in ("generator_a", "generator_d"):
+    for generator in ("generator_a", "generator_c"):
         stand_next_to(app, generator)
         press(app, pygame.K_e)  # a single action: pull the lever
     assert dialog_text(app) == story.CIRCUITS["cabin_circuit"]["solved_text"]
@@ -746,10 +755,28 @@ def test_a_whole_game_on_screen(app, door, character, ending):
     press(app, pygame.K_e)
     read_all(app)
     walk_into(app, "hold_to_infirmary")
-    for tincture in story.POTION_PUZZLES["remedy"]["recipe"]:
+    # The green tincture in the infirmary, then the three it scatters around the ship.
+    route = [("infirmary", "green_tincture", "infirmary_to_corridor"), ("corridor", "blue_tincture", "corridor_to_infirmary")]
+    for room, tincture, way_out in route:
+        assert app["state"]["room"] == room
         stand_next_to(app, tincture)
         press(app, pygame.K_e)
-        choose_in_menu(app, "pour")
+        read_all(app)
+        walk_into(app, way_out)
+    for way_out in ("infirmary_to_hold", "hold_to_deck", "deck_to_cabin", "cabin_to_galley"):
+        walk_into(app, way_out)
+    for tincture, ways_out in (("red_tincture", ("galley_to_cabin", "cabin_to_helm")),
+                               ("gold_tincture", ("helm_to_cabin", "cabin_to_deck", "deck_to_hold", "hold_to_infirmary"))):
+        stand_next_to(app, tincture)
+        press(app, pygame.K_e)
+        read_all(app)
+        for way_out in ways_out:
+            walk_into(app, way_out)
+    assert app["state"]["room"] == "infirmary"
+    for tincture in story.POTION_PUZZLES["remedy"]["recipe"]:
+        stand_next_to(app, "cauldron")
+        press(app, pygame.K_e)
+        choose_in_menu(app, "use_item", tincture)
         poured = dialog_text(app)  # the text box tells how the mixture changes
         read_all(app)
     assert poured == story.POTION_PUZZLES["remedy"]["solved_text"]
@@ -1087,7 +1114,7 @@ def test_map_is_drawn_in_every_room(app):
 
 def test_camera_stays_still_in_a_room_the_size_of_the_screen():
     for col, row in ((1, 1), (14, 10), (7, 5)):
-        assert main.camera("cabin", main.tile_rect(col, row).topleft) == (0, 0)
+        assert main.camera("galley", main.tile_rect(col, row).topleft) == (0, 0)
 
 
 def test_camera_follows_the_player_along_the_tall_deck_and_stops_at_its_edges():
@@ -1150,3 +1177,79 @@ def test_big_rooms_are_drawn_through_the_camera(app):
         app["state"] = in_room(room)
         app["player"] = main.spawn_at_entry(room)
         main.draw_play_screen(app, screen)
+
+
+def test_the_mine_portal_takes_the_player_to_the_helm_and_not_back(app, heard):
+    """At the bottom of the mine a portal leads to the helm. The ring in the helm does nothing, on foot or with E."""
+    start_new_game(app)
+    app["state"] = in_room("mine")
+    stand_next_to(app, "mine_exit")  # just below the ring
+    walk_until(app, lambda x, y: app["state"]["room"] == "helm", lambda x, y: (0, -1), limit=60)
+    assert app["player"] == main.spawn_by_portal("helm_portal")
+    assert heard == ["ding"]
+    assert engine.restore_state(save.load_game())["room"] == "helm"
+    saved = save.load_game()
+    walk_until(app, lambda x, y: main.portal_touched(app["state"], app["player"]) == "helm_portal",
+               lambda x, y: (0, -1), limit=60)  # straight back into the ring
+    for _ in range(30):
+        main.update(app, 0, 0)  # and standing in it
+    assert app["state"]["room"] == "helm"
+    assert heard == ["ding"] and save.load_game() == saved and app["dialog"] == []
+    assert main.prompt(app["state"], app["player"]) == ""
+    press(app, pygame.K_e)
+    assert app["scene"] == "play" and app["dialog"] == []
+
+
+def test_the_helm_portal_is_far_from_the_ladder_and_the_wheel():
+    """Arriving in the helm puts the player on free floor, away from the door down to the cabin."""
+    spot = main.player_rect(main.spawn_by_portal("helm_portal"))
+    assert spot.collidelist(main.solid_rects(in_room("helm"))) == -1
+    assert main.door_touched("helm", spot.topleft, 0, 0) is None
+
+
+def test_map_points_at_the_scattered_tinctures_until_they_are_picked_up():
+    """Once the green tincture is found, the map marks the rooms where the other three wait, one by one."""
+    assert main.map_markers(play(BOTH_HALVES + [act("enter", "hold_to_infirmary")])) == []
+    found_green = play(BOTH_HALVES + [act("enter", "hold_to_infirmary"), act("pick_up", "green_tincture")])
+    assert set(main.map_markers(found_green)) == {"galley", "helm", "corridor"}
+    found_blue = play(BOTH_HALVES + [act("enter", "hold_to_infirmary"), act("pick_up", "green_tincture"),
+                                     act("enter", "infirmary_to_corridor"), act("pick_up", "blue_tincture")])
+    assert set(main.map_markers(found_blue)) == {"galley", "helm"}
+    assert main.map_markers(play(TINCTURES_FOUND)) == []
+
+
+def test_the_cabin_is_half_as_big_again_and_the_camera_follows():
+    assert main.room_size("cabin") == (main.COLUMNS * 3 // 2, main.ROWS * 3 // 2)
+    top_left = main.camera("cabin", main.tile_rect(1, 1).topleft)
+    bottom_right = main.camera("cabin", main.tile_rect(22, 16).topleft)
+    assert top_left == (0, 0)
+    assert bottom_right == (24 * main.TILE - main.VIEW.width, 18 * main.TILE - main.VIEW.height)
+
+
+def test_the_corridor_is_two_tiles_lower():
+    assert main.room_size("corridor") == (48, 6)
+
+
+def test_the_sea_is_a_storm_except_in_the_good_ending(app):
+    """Four darker pictures of the sea, all different, one after the other; the good ending keeps a calm sea."""
+    storm = [sprites.image(f"wall_deck_{k}") for k in range(main.SEA_PICTURES)]
+    pictures = {pygame.image.tobytes(picture, "RGBA") for picture in storm}
+    assert len(pictures) == main.SEA_PICTURES
+    seen = set()
+    for frame in range(main.SEA_PICTURES * main.WAVE_FRAMES):
+        app["frame"] = frame
+        seen.add(main.wave_frame(app))
+    assert seen == set(range(main.SEA_PICTURES))
+
+    def brightness(picture):
+        width, height = picture.get_size()
+        return sum(sum(picture.get_at((x, y))[:3]) for x in range(width) for y in range(height))
+    assert brightness(storm[0]) < brightness(sprites.image("sea_calm_0"))
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    app["state"] = play(TO_THE_CRAB_ENDING)
+    main.set_scene(app, "ending")
+    app["frame"] = 0
+    main.draw(app, screen)
+    calm = sprites.image("sea_calm_0")
+    sea_y = main.ENDING_HORIZON + 8
+    assert tuple(screen.get_at((2, sea_y)))[:3] == tuple(calm.get_at((2, sea_y - main.ENDING_HORIZON)))[:3]

@@ -10,14 +10,19 @@ START_ROOM = "deck"
 # What the game remembers about the player's progress and choices, with the
 # value each flag has at the start of a new game.
 FLAGS = {
-    # The four generators of the captain's cabin: True is on, False is off. The
-    # puzzle starts with A off, B on, C on, D off, and goes back to that every
-    # time the player walks into the cabin, until the circuit is complete.
+    # The eight generators of the captain's cabin, in a ring: True is on, False is
+    # off. The puzzle starts with H, A, C and D off and B, E, F and G on, and goes
+    # back to that every time the player walks into the cabin, until the circuit
+    # is complete. Pulling A, then C (or C, then A) turns them all on.
     "generator_a": False,
     "generator_b": True,
-    "generator_c": True,
+    "generator_c": False,
     "generator_d": False,
-    # All four generators were on at once: the barrier in the cabin has dissolved.
+    "generator_e": True,
+    "generator_f": True,
+    "generator_g": True,
+    "generator_h": False,
+    # All eight generators were on at once: the barrier in the cabin has dissolved.
     "cabin_solved": False,
     # The numbered tiles of the hold: the phase being played (1, 2 or 3) and how
     # many tiles of its sequence are lit. Then all three phases are done: the
@@ -31,6 +36,9 @@ FLAGS = {
     # opened, None while it is locked. Opening one does not seal the other.
     "crab_door": None,
     "angel_door": None,
+    # The green tincture has been found in the infirmary: the other three have
+    # appeared, scattered around the ship (the galley, the helm, the corridor).
+    "tinctures_scattered": False,
     # The cauldron of the infirmary: how many ingredients of the recipe are in it,
     # in the right order; then the remedy is ready (and the cauldron empty again).
     "potion_step": 0,
@@ -70,12 +78,13 @@ ROOMS = {
     "cabin": {
         "name": "Captain's cabin",
         "description": (
-            "Sea charts scattered on the floor, and four generators humming at the corners of a square, "
+            "A wide cabin. Sea charts scattered on the floor, and eight generators humming around a square, "
             "joined by cables. At the back, an energy barrier guards a small altar. "
             "Doors lead to the galley, to an empty room and, up a ladder, to the helm."
         ),
         "outdoor": False,
-        "entry": (7, 9),
+        "entry": (11, 15),
+        "size": (24, 18),  # half as wide and half as long again as the screen: the view scrolls
     },
     "hold": {
         "name": "Hold",
@@ -117,7 +126,10 @@ ROOMS = {
     },
     "helm": {
         "name": "Helm",
-        "description": "The ship's wheel turns slowly on its own. Through the windows, only fog.",
+        "description": (
+            "The ship's wheel turns slowly on its own. Through the windows, only fog. "
+            "On the floor, a faint ring of purple light."
+        ),
         "outdoor": False,
         "entry": (11, 8),
     },
@@ -129,10 +141,10 @@ ROOMS = {
     },
     "corridor": {
         "name": "Corridor",
-        "description": "A long, low corridor under the hold. Water drips from the ceiling.",
+        "description": "A long, cramped corridor under the hold. Water drips from the low ceiling.",
         "outdoor": False,
         "entry": (12, 3),
-        "size": (48, 8),  # long and narrow: the view scrolls sideways
+        "size": (48, 6),  # long and cramped: the view scrolls sideways
     },
     "corridor_end": {
         "name": "End of the corridor",
@@ -142,7 +154,10 @@ ROOMS = {
     },
     "mine": {
         "name": "Mine",
-        "description": "A mine dug deep into the rock, far from the sea. Rails lead into the dark.",
+        "description": (
+            "A mine dug deep into the rock, far from the sea. Rails lead into the dark, "
+            "down to a second ring of light at the far end."
+        ),
         "outdoor": False,
         "entry": (7, 7),
         "size": (16, 24),
@@ -155,6 +170,9 @@ ROOMS = {
 # is picked up. If "appears_if" names a flag, it shows up only once that flag is true.
 # If "free_if" names a flag, it can be seen but not picked up until that flag is true.
 # An item with "gone_if" is used up for good once that flag is set.
+# An item with "sets_flag" sets that flag when it is picked up (the green tincture
+# makes the other three appear). One with "on_map" is pointed at on the map while
+# it waits somewhere for the player.
 # An item that is "part_of" another one is fused into it at the anvil: then the
 # parts leave the inventory for good, and the whole item takes their place. An
 # item that only comes from fusing has no room and no "pos".
@@ -174,7 +192,7 @@ ITEMS = {
         "name": "Central key",
         "description": "Half of a brass key, with a wave-shaped bow. On its own it opens nothing.",
         "room": "cabin",
-        "pos": (7, 1),  # on the altar, behind the barrier
+        "pos": (16, 1),  # on the altar, behind the barrier
         "appears_if": None,
         "part_of": "fused_key",
         "free_if": "cabin_solved",
@@ -207,6 +225,71 @@ ITEMS = {
         "part_of": None,
         "free_if": None,
         "pickup_text": "You fill a small bottle with the remedy. It is warm in your hand.",
+    },
+    # The four tinctures of the remedy. The green one waits in the infirmary; when
+    # it is picked up, the other three appear around the ship. They are poured into
+    # the cauldron with "Use", and stay in the inventory until the remedy is made.
+    "green_tincture": {
+        "name": "Green tincture",
+        "description": "A bottle of green tincture. It smells of seaweed.",
+        "room": "infirmary",
+        "pos": (5, 9),
+        "appears_if": None,
+        "gone_if": "potion_solved",
+        "sets_flag": "tinctures_scattered",
+        "part_of": None,
+        "free_if": None,
+        "pickup_text": (
+            "You pick up the green tincture. As you lift it, glass clinks far away: "
+            "the doctor's other tinctures are somewhere on the ship."
+        ),
+    },
+    "red_tincture": {
+        "name": "Red tincture",
+        "description": "A bottle of red tincture. It burns the nose like pepper.",
+        "room": "galley",
+        "pos": (12, 3),
+        "appears_if": "tinctures_scattered",
+        "gone_if": "potion_solved",
+        "on_map": True,
+        "part_of": None,
+        "free_if": None,
+        "pickup_text": "You pick up the red tincture, hidden among the spices.",
+    },
+    "gold_tincture": {
+        "name": "Gold tincture",
+        "description": "A bottle of gold tincture, thick and sweet like honey.",
+        "room": "helm",
+        "pos": (4, 3),
+        "appears_if": "tinctures_scattered",
+        "gone_if": "potion_solved",
+        "on_map": True,
+        "part_of": None,
+        "free_if": None,
+        "pickup_text": "You pick up the gold tincture, rolling back and forth under the wheel.",
+    },
+    "blue_tincture": {
+        "name": "Blue tincture",
+        "description": "A bottle of blue tincture. It is cold, like sea water at night.",
+        "room": "corridor",
+        "pos": (30, 3),
+        "appears_if": "tinctures_scattered",
+        "gone_if": "potion_solved",
+        "on_map": True,
+        "part_of": None,
+        "free_if": None,
+        "pickup_text": "You pick up the blue tincture from a puddle in the corridor.",
+    },
+    # Found in the mine. It has no use yet.
+    "heart": {
+        "name": "Heart",
+        "description": "A heart of red crystal, as big as a fist. It beats, slowly, in your hand.",
+        "room": "mine",
+        "pos": (4, 9),
+        "appears_if": None,
+        "part_of": None,
+        "free_if": None,
+        "pickup_text": "You pick up a heart of red crystal. It is warm, and it beats.",
     },
     # The two halves fused at the anvil: the key of the final doors.
     "fused_key": {
@@ -358,30 +441,30 @@ DOORS = {
 # - "altar" holds an item: the cabin's altar.
 # - "anvil" holds an item too, and fuses the parts of an item (see "part_of" in
 #   ITEMS) when one of them is used on it while the player carries them all.
-# - "cauldron" is where a potion puzzle is brewed; the remedy lies in it when ready.
-# - "ingredient" is a bottle on a shelf: E pours it into the cauldron of its
-#   "puzzle" (see POTION_PUZZLES), with its "pour_text".
+# - "cauldron" is where a potion puzzle is brewed: the tinctures of its recipe
+#   (items) are used on it, one at a time. The remedy lies in it when ready.
 # - Any object can have "appears_if" (it stands only once the flag is set, like
 #   the anvil) and "gone_if" (it is gone once the flag is set, like the doctor).
 # - "portal" is a ring of light on the floor: walking into it takes the player
-#   to the portal named in "to", in another room, wherever that is.
+#   to the portal named in "to", in another room, wherever that is. A portal
+#   whose "to" is None only receives: nothing happens near it.
 # - "decor" is only there to look at: E offers "Examine" and nothing else. It
 #   blocks the way if "solid" is true; if not, the player walks over it (a rope on
 #   the floor). "picture" names its sprite, so many pieces can share one.
 # The barrel of the hold is still a simple puzzle: it only asks for the wand.
 OBJECTS = {
-    # The generators of the cabin, at the corners of a square: A top left, B top
-    # right, C bottom left, D bottom right. Each one is wired to the two next to
-    # it along the sides of the square, never to the one across.
+    # The generators of the cabin, in a ring around a square: A top left, B top
+    # middle, C top right, then D, E, F, G and H on round the square. Each one is
+    # wired to the two next to it in the ring, and to no other.
     "generator_a": {
         "kind": "switch",
         "name": "Generator A",
         "label": "A",
         "room": "cabin",
-        "pos": (4, 4),
+        "pos": (6, 4),
         "flag": "generator_a",
-        "toggles": ["generator_a", "generator_b", "generator_c"],
-        "toggle_text": "Click! A, B and C switch over.",
+        "toggles": ["generator_a", "generator_h", "generator_b"],
+        "toggle_text": "Click! A, H and B switch over.",
         "look_text": "A generator with a big lever. Its plate says \"A\".",
         "done_text": None,
         "reactions": {},
@@ -391,10 +474,10 @@ OBJECTS = {
         "name": "Generator B",
         "label": "B",
         "room": "cabin",
-        "pos": (11, 4),
+        "pos": (12, 4),
         "flag": "generator_b",
-        "toggles": ["generator_b", "generator_a", "generator_d"],
-        "toggle_text": "Click! B, A and D switch over.",
+        "toggles": ["generator_b", "generator_a", "generator_c"],
+        "toggle_text": "Click! B, A and C switch over.",
         "look_text": "A generator with a big lever. Its plate says \"B\".",
         "done_text": None,
         "reactions": {},
@@ -404,10 +487,10 @@ OBJECTS = {
         "name": "Generator C",
         "label": "C",
         "room": "cabin",
-        "pos": (4, 7),
+        "pos": (18, 4),
         "flag": "generator_c",
-        "toggles": ["generator_c", "generator_a", "generator_d"],
-        "toggle_text": "Click! C, A and D switch over.",
+        "toggles": ["generator_c", "generator_b", "generator_d"],
+        "toggle_text": "Click! C, B and D switch over.",
         "look_text": "A generator with a big lever. Its plate says \"C\".",
         "done_text": None,
         "reactions": {},
@@ -417,11 +500,63 @@ OBJECTS = {
         "name": "Generator D",
         "label": "D",
         "room": "cabin",
-        "pos": (11, 7),
+        "pos": (18, 9),
         "flag": "generator_d",
-        "toggles": ["generator_d", "generator_b", "generator_c"],
-        "toggle_text": "Click! D, B and C switch over.",
+        "toggles": ["generator_d", "generator_c", "generator_e"],
+        "toggle_text": "Click! D, C and E switch over.",
         "look_text": "A generator with a big lever. Its plate says \"D\".",
+        "done_text": None,
+        "reactions": {},
+    },
+    "generator_e": {
+        "kind": "switch",
+        "name": "Generator E",
+        "label": "E",
+        "room": "cabin",
+        "pos": (18, 14),
+        "flag": "generator_e",
+        "toggles": ["generator_e", "generator_d", "generator_f"],
+        "toggle_text": "Click! E, D and F switch over.",
+        "look_text": "A generator with a big lever. Its plate says \"E\".",
+        "done_text": None,
+        "reactions": {},
+    },
+    "generator_f": {
+        "kind": "switch",
+        "name": "Generator F",
+        "label": "F",
+        "room": "cabin",
+        "pos": (12, 14),
+        "flag": "generator_f",
+        "toggles": ["generator_f", "generator_e", "generator_g"],
+        "toggle_text": "Click! F, E and G switch over.",
+        "look_text": "A generator with a big lever. Its plate says \"F\".",
+        "done_text": None,
+        "reactions": {},
+    },
+    "generator_g": {
+        "kind": "switch",
+        "name": "Generator G",
+        "label": "G",
+        "room": "cabin",
+        "pos": (6, 14),
+        "flag": "generator_g",
+        "toggles": ["generator_g", "generator_f", "generator_h"],
+        "toggle_text": "Click! G, F and H switch over.",
+        "look_text": "A generator with a big lever. Its plate says \"G\".",
+        "done_text": None,
+        "reactions": {},
+    },
+    "generator_h": {
+        "kind": "switch",
+        "name": "Generator H",
+        "label": "H",
+        "room": "cabin",
+        "pos": (6, 9),
+        "flag": "generator_h",
+        "toggles": ["generator_h", "generator_g", "generator_a"],
+        "toggle_text": "Click! H, G and A switch over.",
+        "look_text": "A generator with a big lever. Its plate says \"H\".",
         "done_text": None,
         "reactions": {},
     },
@@ -430,7 +565,7 @@ OBJECTS = {
         "kind": "barrier",
         "name": "Energy barrier",
         "room": "cabin",
-        "pos": (6, 1),
+        "pos": (15, 1),
         "size": (3, 2),
         "open_if": "cabin_solved",
         "look_text": "An energy barrier crackles around the altar. It seems powered by the generators.",
@@ -441,7 +576,7 @@ OBJECTS = {
         "kind": "altar",
         "name": "Altar",
         "room": "cabin",
-        "pos": (7, 1),
+        "pos": (16, 1),
         "look_text": "A small stone altar, against the back wall of the cabin.",
         "done_text": None,
         "reactions": {},
@@ -616,37 +751,9 @@ OBJECTS = {
         "name": "Cauldron",
         "room": "infirmary",
         "pos": (7, 6),
-        "look_text": "A copper cauldron over a weak blue flame. Four tinctures wait on the shelf nearby.",
+        "look_text": "A copper cauldron over a weak blue flame. The doctor's four tinctures go in here.",
         "done_text": None,
         "reactions": {},
-    },
-    "green_tincture": {
-        "kind": "ingredient", "name": "Green tincture", "room": "infirmary", "pos": (5, 9),
-        "puzzle": "remedy",
-        "look_text": "A bottle of green tincture. It smells of seaweed.",
-        "pour_text": "You pour the green tincture. The mixture bubbles and turns the colour of seaweed.",
-        "done_text": None, "reactions": {},
-    },
-    "red_tincture": {
-        "kind": "ingredient", "name": "Red tincture", "room": "infirmary", "pos": (7, 9),
-        "puzzle": "remedy",
-        "look_text": "A bottle of red tincture. It burns the nose like pepper.",
-        "pour_text": "You pour the red tincture. The mixture hisses and turns brown.",
-        "done_text": None, "reactions": {},
-    },
-    "gold_tincture": {
-        "kind": "ingredient", "name": "Gold tincture", "room": "infirmary", "pos": (9, 9),
-        "puzzle": "remedy",
-        "look_text": "A bottle of gold tincture, thick and sweet like honey.",
-        "pour_text": "You pour the gold tincture. The mixture thickens and starts to shine.",
-        "done_text": None, "reactions": {},
-    },
-    "blue_tincture": {
-        "kind": "ingredient", "name": "Blue tincture", "room": "infirmary", "pos": (11, 9),
-        "puzzle": "remedy",
-        "look_text": "A bottle of blue tincture. It is cold, like sea water at night.",
-        "pour_text": "You pour the blue tincture.",
-        "done_text": None, "reactions": {},
     },
     # The portal at the end of the corridor and its twin in the mine.
     "corridor_portal": {
@@ -659,6 +766,21 @@ OBJECTS = {
         "kind": "portal", "name": "Portal", "room": "mine", "pos": (7, 3), "size": (2, 2),
         "picture": "portal", "to": "corridor_portal",
         "look_text": "The way back: through the light you can see the corridor of the ship.",
+        "done_text": None, "reactions": {},
+    },
+    # A one-way portal: from the bottom of the mine straight to the helm. The ring
+    # in the helm only receives ("to" is None): walking into it, or pressing E by
+    # it, does nothing at all.
+    "mine_exit": {
+        "kind": "portal", "name": "Portal", "room": "mine", "pos": (7, 20), "size": (2, 2),
+        "picture": "portal", "to": "helm_portal",
+        "look_text": "A second ring of light, at the bottom of the mine. Through it you glimpse a ship's wheel.",
+        "done_text": None, "reactions": {},
+    },
+    "helm_portal": {
+        "kind": "portal", "name": "Portal", "room": "helm", "pos": (4, 6), "size": (2, 2),
+        "picture": "portal", "to": None,
+        "look_text": "A faint ring of purple light on the floor. It only leads here.",
         "done_text": None, "reactions": {},
     },
     # Decor: nothing to solve, but the rooms feel lived in.
@@ -711,7 +833,7 @@ OBJECTS = {
         "done_text": None, "reactions": {},
     },
     "cabin_table": {
-        "kind": "decor", "name": "Chart table", "room": "cabin", "pos": (13, 1),
+        "kind": "decor", "name": "Chart table", "room": "cabin", "pos": (22, 1),
         "picture": "decor_table", "solid": True,
         "look_text": "A sea chart, pinned down by a compass. The course is marked in red.",
         "done_text": None, "reactions": {},
@@ -921,7 +1043,7 @@ OBJECTS = {
         "done_text": None, "reactions": {},
     },
     "corridor_crate_1": {
-        "kind": "decor", "name": "Crate", "room": "corridor", "pos": (20, 6),
+        "kind": "decor", "name": "Crate", "room": "corridor", "pos": (20, 4),
         "picture": "decor_crate", "solid": True,
         "look_text": "A crate marked with a skull. You leave it closed.",
         "done_text": None, "reactions": {},
@@ -933,7 +1055,7 @@ OBJECTS = {
         "done_text": None, "reactions": {},
     },
     "corridor_crate_2": {
-        "kind": "decor", "name": "Crate", "room": "corridor", "pos": (33, 6),
+        "kind": "decor", "name": "Crate", "room": "corridor", "pos": (33, 4),
         "picture": "decor_crate", "solid": True,
         "look_text": "Empty bottles packed in straw.",
         "done_text": None, "reactions": {},
@@ -1073,7 +1195,8 @@ OBJECTS = {
 CIRCUITS = {
     "cabin_circuit": {
         "room": "cabin",
-        "switches": ["generator_a", "generator_b", "generator_c", "generator_d"],
+        "switches": ["generator_a", "generator_b", "generator_c", "generator_d",
+                     "generator_e", "generator_f", "generator_g", "generator_h"],
         "solved_flag": "cabin_solved",
         "solved_text": "The electric flow is complete! The barrier has dissolved!",
     },
@@ -1134,16 +1257,25 @@ ENDINGS = {
     },
 }
 
-# Potion puzzles. The ingredients go into the cauldron one at a time, and the
-# order matters: the next one of the "recipe" moves the "step_flag" on; any
-# other spoils the mixture, and it starts over from an empty cauldron. With the
-# whole recipe in, the "solved_flag" is set: the remedy appears in the cauldron
-# (an item with "appears_if" on that flag), and the cauldron stays done.
+# Potion puzzles. The ingredients are items: the player uses them on the
+# cauldron one at a time, and the order matters. The next one of the "recipe"
+# moves the "step_flag" on; any other spoils the mixture, and it starts over
+# from an empty cauldron, the bottles still in hand. With the whole recipe in,
+# the "solved_flag" is set: the bottles are used up, the remedy appears in the
+# cauldron (an item with "appears_if" on that flag), and the cauldron stays done.
 POTION_PUZZLES = {
     "remedy": {
         "room": "infirmary",
         "cauldron": "cauldron",
         "recipe": ["green_tincture", "red_tincture", "gold_tincture", "blue_tincture"],
+        # What the player reads when a tincture goes in at the right moment (the last
+        # one shows "solved_text" instead).
+        "pour_texts": {
+            "green_tincture": "You pour the green tincture. The mixture bubbles and turns the colour of seaweed.",
+            "red_tincture": "You pour the red tincture. The mixture hisses and turns brown.",
+            "gold_tincture": "You pour the gold tincture. The mixture thickens and starts to shine.",
+            "blue_tincture": "You pour the blue tincture.",
+        },
         "step_flag": "potion_step",
         "solved_flag": "potion_solved",
         "wrong_text": (
@@ -1182,7 +1314,7 @@ MESSAGES = {
     "guarded": "The barrier keeps you from taking it.",
     "circuit_done": "The circuit is complete: the generators stay on.",
     "missing_item": "On its own it is no use: this half needs the other one.",
-    "not_fused": "It is only half of the key, and it does not turn on its own: fuse it with the other half on the anvil in the hold.",
+    "not_fused": "It is only half of the key, and it does not turn on its own: fuse it with the other half on an anvil.",
     "already_lit": "The tile is already lit.",
     "tiles_done": "The tiles stay lit: the hold's system is unlocked.",
     # What an open door shows when examined.
