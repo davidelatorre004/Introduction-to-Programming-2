@@ -1031,7 +1031,7 @@ def bob(app):
 
 
 def draw_title_screen(app, screen):
-    draw_sea(app, screen, screen.get_rect())
+    draw_sea(app, screen, screen.get_rect(), calm=True)  # the title keeps the calm sea
     ship = sprites.image("ship")
     if ship is not None:
         screen.blit(ship, ship.get_rect(center=(WIDTH // 2, 104 + bob(app))))
