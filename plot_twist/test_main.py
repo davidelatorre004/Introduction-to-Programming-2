@@ -21,6 +21,11 @@ OPPOSITE = {"N": "S", "S": "N", "E": "W", "W": "E"}
 
 
 
+def p1(app):
+    """The first (and for now only) player of the interface."""
+    return app["players"][0]
+
+
 def act(verb, target, item=None):
     return {"verb": verb, "target": target, "item": item}
 
@@ -105,8 +110,8 @@ def stand_next_to(app, thing):
         body.midtop = (rect.centerx, rect.bottom + 2)
         if body.collidelist(main.solid_rects(app["state"])) != -1:
             body.midbottom = (rect.centerx, rect.top - 2)
-    app["player"] = (body.x, body.y)
-    app["touching"] = None
+    p1(app)["pos"] = (body.x, body.y)
+    p1(app)["touching"] = None
 
 
 def walk_until(app, arrived, direction, limit=300):
@@ -115,7 +120,7 @@ def walk_until(app, arrived, direction, limit=300):
     (x, y) is the middle of the player's body. Fails instead of walking forever.
     """
     for _ in range(limit):
-        x, y = main.player_rect(app["player"]).center
+        x, y = main.player_rect(p1(app)["pos"]).center
         if arrived(x, y):
             return
         main.update(app, *direction(x, y))
@@ -146,8 +151,8 @@ def choose_in_menu(app, verb, item=None):
 
 def walk_into(app, door, frames=30):
     """Put the player just in front of a door of the current room and walk into it."""
-    app["player"] = main.spawn_in_front_of(door)
-    app["touching"] = None
+    p1(app)["pos"] = main.spawn_in_front_of(door)
+    p1(app)["touching"] = None
     room = app["state"]["room"]
     dx, dy = main.TOWARD[story.DOORS[door]["side"]]
     for _ in range(frames):
@@ -421,12 +426,12 @@ def test_player_never_walks_through_walls_or_closed_doors(app):
     for dx in (-1, 0, 1):
         for dy in (-1, 0, 1):
             app["state"] = engine.new_game()
-            app["player"] = main.spawn_at_entry("deck")
-            app["touching"] = None
+            p1(app)["pos"] = main.spawn_at_entry("deck")
+            p1(app)["touching"] = None
             for _ in range(300):
                 main.update(app, dx, dy)
                 read_all(app)
-                rect = main.player_rect(app["player"])
+                rect = main.player_rect(p1(app)["pos"])
                 assert rect.collidelist(main.solid_rects(app["state"])) == -1
                 assert room_area.contains(rect)
 
@@ -443,7 +448,7 @@ def test_walking_between_deck_cabin_and_hold(app):
             came_from = app["state"]["room"]
             walk_into(app, door)
             assert app["state"]["room"] == room
-            assert app["player"] == main.spawn_in_front_of(main.return_door(room, came_from))
+            assert p1(app)["pos"] == main.spawn_in_front_of(main.return_door(room, came_from))
             assert app["banner"] == story.ROOMS[room]["name"]
             assert engine.restore_state(save.load_game()) == app["state"]
         playing(app, FIRST_HALF)  # the second time round, with the first half of the key: the hold opens
@@ -476,11 +481,11 @@ def test_locked_door_explains_and_keeps_the_player_on_the_deck(app):
 def test_walking_along_a_wall_past_a_door_does_not_go_through(app):
     """Only walking into a door counts: sliding along the wall in front of it does not."""
     start_new_game(app)
-    app["player"] = (main.tile_rect(1, 1).x, main.tile_rect(1, 1).y)  # top-left corner, against the top wall
+    p1(app)["pos"] = (main.tile_rect(1, 1).x, main.tile_rect(1, 1).y)  # top-left corner, against the top wall
     for _ in range(150):
         main.update(app, 1, 0)  # walk right, past the cabin door
     assert app["state"]["room"] == "deck"
-    assert main.player_rect(app["player"]).left > main.door_rect("deck_to_cabin").right
+    assert main.player_rect(p1(app)["pos"]).left > main.door_rect("deck_to_cabin").right
 
 
 def test_a_locked_door_speaks_once_per_push(app):
@@ -497,14 +502,14 @@ def test_a_locked_door_speaks_once_per_push(app):
 
 def test_player_cannot_move_while_reading(app):
     press(app, pygame.K_RETURN, pygame.K_RETURN)  # the opening scene is on screen
-    before = app["player"]
+    before = p1(app)["pos"]
     for _ in range(30):
         main.update(app, 1, 0)
-    assert app["player"] == before
+    assert p1(app)["pos"] == before
     read_all(app)
     for _ in range(30):
         main.update(app, 1, 0)
-    assert app["player"] != before
+    assert p1(app)["pos"] != before
 
 
 # --- Menus and saving (PT01, PT05, A6) -------------------------------------------------
@@ -522,7 +527,7 @@ def test_new_game_shows_the_opening_scene_and_saves_at_once(app):
     press(app, pygame.K_RETURN)
     assert app["scene"] == "play"
     assert dialog_text(app) == story.MESSAGES["intro"]
-    assert app["player"] == main.spawn_at_entry(story.START_ROOM)
+    assert p1(app)["pos"] == main.spawn_at_entry(story.START_ROOM)
     assert engine.restore_state(save.load_game()) == engine.new_game()
 
 
@@ -536,7 +541,7 @@ def test_resume_starts_at_the_entry_of_the_saved_room(app):
     press(again, pygame.K_DOWN, pygame.K_RETURN)  # "Riprendi"
     assert again["scene"] == "play"
     assert again["state"]["room"] == "cabin"
-    assert again["player"] == main.spawn_at_entry("cabin")
+    assert p1(again)["pos"] == main.spawn_at_entry("cabin")
 
 
 def test_new_game_over_a_save_asks_first(app):
@@ -632,7 +637,7 @@ def test_the_nearest_thing_is_the_one_e_acts_on(app):
     solved = play(CIRCUIT_COMPLETE)  # the key free on the altar
     app["state"] = solved
     stand_next_to(app, "key")
-    assert main.nearest_target(solved, app["player"]) == "key"
+    assert main.nearest_target(solved, p1(app)["pos"]) == "key"
 
 
 def test_e_with_nothing_near_does_nothing(app):
@@ -648,12 +653,12 @@ def test_e_ignores_furniture_and_reaches_what_matters_behind_it(app):
     """Next to a barrel, E does nothing: no barrel ever comes before something that matters. A note is still read."""
     start_new_game(app)
     stand_next_to(app, "deck_barrel_1")
-    assert main.nearest_target(app["state"], app["player"]) is None
+    assert main.nearest_target(app["state"], p1(app)["pos"]) is None
     press(app, pygame.K_e)
     assert app["dialog"] == []
     app["state"]["room"] = "infirmary"
     stand_next_to(app, "infirmary_notes")
-    assert main.nearest_target(app["state"], app["player"]) == "infirmary_notes"  # a note is still read
+    assert main.nearest_target(app["state"], p1(app)["pos"]) == "infirmary_notes"  # a note is still read
     press(app, pygame.K_e)
     assert dialog_text(app) == story.OBJECTS["infirmary_notes"]["look_text"]
 
@@ -707,7 +712,7 @@ def test_the_fused_key_opens_both_doors_on_screen(app):
     app["state"] = play(KEY_FUSED)
     main.set_scene(app, "play")
     for door, room in (("deck_to_crab", "crab_room"), ("deck_to_angel", "angel_room")):
-        app["player"] = main.spawn_in_front_of(door)
+        p1(app)["pos"] = main.spawn_in_front_of(door)
         press(app, pygame.K_e)
         choose_in_menu(app, "use_item", "fused_key")
         assert app["scene"] == "play"  # no question: nothing is lost
@@ -722,7 +727,7 @@ def test_the_fused_key_opens_both_doors_on_screen(app):
 def test_a_half_on_the_door_says_to_fuse_it(app):
     """PT04 on screen: the halves, even both, do not open the door, and the text says where to fuse them."""
     playing(app, BOTH_HALVES + [act("enter", "hold_to_deck")])
-    app["player"] = main.spawn_in_front_of("deck_to_crab")
+    p1(app)["pos"] = main.spawn_in_front_of("deck_to_crab")
     press(app, pygame.K_e)
     choose_in_menu(app, "use_item", "second_key")
     assert dialog_text(app) == story.MESSAGES["not_fused"]
@@ -820,7 +825,7 @@ def test_a_whole_game_on_screen(app, door, character, ending):
     read_all(app)
     walk_into(app, "galley_to_cabin")
     walk_into(app, "cabin_to_deck")
-    app["player"] = main.spawn_in_front_of(door)
+    p1(app)["pos"] = main.spawn_in_front_of(door)
     press(app, pygame.K_e)
     choose_in_menu(app, "use_item", "fused_key")
     read_all(app)
@@ -946,11 +951,11 @@ def test_the_triggers_remember_where_the_player_already_is(in_hold, heard):
     app = in_hold
     body = pygame.Rect(0, 0, main.PLAYER_SIZE, main.PLAYER_SIZE)
     body.center = main.thing_rect("tile_1").center
-    app["player"] = (body.x, body.y)
-    main.settle_on_floor(app)
+    p1(app)["pos"] = (body.x, body.y)
+    main.settle_on_floor(app, p1(app))
     main.update(app, 0, 0)
     assert heard == []
-    app["on_tile"] = None  # forget it: the same spot now counts as arriving on the tile
+    p1(app)["on_tile"] = None  # forget it: the same spot now counts as arriving on the tile
     main.update(app, 0, 0)
     assert heard == ["blip"]
 
@@ -1025,7 +1030,7 @@ def test_every_scene_and_room_can_be_drawn(app):
     states.append(play(KEY_FUSED + [act("use_item", "deck_to_angel", "fused_key"), act("enter", "deck_to_angel")]))
     for state in states:
         app["state"] = state
-        app["player"] = main.spawn_at_entry(state["room"])
+        p1(app)["pos"] = main.spawn_at_entry(state["room"])
         main.show_banner(app, "banner")
         main.say(app, story.MESSAGES["intro"])
         app["actions"] = engine.actions_for(state, state["room"])
@@ -1122,7 +1127,7 @@ def test_map_gives_no_hints(app):
     found_green = BOTH_HALVES + [act("enter", "hold_to_infirmary"), act("pick_up", "green_tincture")]
     for actions in (found_green, DOCTOR_AT_PEACE):
         app["state"] = play(actions)
-        app["player"] = main.spawn_at_entry(app["state"]["room"])
+        p1(app)["pos"] = main.spawn_at_entry(app["state"]["room"])
         corner = main.map_rect().inflate(4, 4)
         for frame in range(0, main.FPS, 5):
             app["frame"] = frame
@@ -1137,7 +1142,7 @@ def test_map_is_drawn_in_every_room(app):
     screen = pygame.Surface((main.WIDTH, main.HEIGHT))
     for room in story.ROOMS:
         app["state"] = in_room(room)
-        app["player"] = main.spawn_at_entry(room)
+        p1(app)["pos"] = main.spawn_at_entry(room)
         main.draw_hud(app, screen)
 
 
@@ -1187,11 +1192,11 @@ def test_walking_into_the_portal_leads_to_the_mine_and_back(app):
     app["state"] = in_room("corridor_end")
     stand_next_to(app, "corridor_portal")  # just below the ring
     walk_until(app, lambda x, y: app["state"]["room"] == "mine", lambda x, y: (0, -1), limit=60)
-    assert app["player"] == main.spawn_by_portal("mine_portal")
+    assert p1(app)["pos"] == main.spawn_by_portal("mine_portal")
     assert app["banner"] == story.ROOMS["mine"]["name"]
     assert engine.restore_state(save.load_game())["room"] == "mine"  # saved at once
     walk_until(app, lambda x, y: app["state"]["room"] == "corridor_end", lambda x, y: (0, -1), limit=60)
-    assert app["player"] == main.spawn_by_portal("corridor_portal")
+    assert p1(app)["pos"] == main.spawn_by_portal("corridor_portal")
 
 
 def test_arriving_by_a_portal_lands_on_free_floor():
@@ -1207,7 +1212,7 @@ def test_big_rooms_are_drawn_through_the_camera(app):
     screen = pygame.Surface((main.WIDTH, main.HEIGHT))
     for room in story.ROOMS:
         app["state"] = in_room(room)
-        app["player"] = main.spawn_at_entry(room)
+        p1(app)["pos"] = main.spawn_at_entry(room)
         main.draw_play_screen(app, screen)
 
 
@@ -1217,17 +1222,17 @@ def test_the_mine_portal_takes_the_player_to_the_helm_and_not_back(app, heard):
     app["state"] = in_room("mine")
     stand_next_to(app, "mine_exit")  # just below the ring
     walk_until(app, lambda x, y: app["state"]["room"] == "helm", lambda x, y: (0, -1), limit=60)
-    assert app["player"] == main.spawn_by_portal("helm_portal")
+    assert p1(app)["pos"] == main.spawn_by_portal("helm_portal")
     assert heard == ["ding"]
     assert engine.restore_state(save.load_game())["room"] == "helm"
     saved = save.load_game()
-    walk_until(app, lambda x, y: main.portal_touched(app["state"], app["player"]) == "helm_portal",
+    walk_until(app, lambda x, y: main.portal_touched(app["state"], p1(app)["pos"]) == "helm_portal",
                lambda x, y: (0, -1), limit=60)  # straight back into the ring
     for _ in range(30):
         main.update(app, 0, 0)  # and standing in it
     assert app["state"]["room"] == "helm"
     assert heard == ["ding"] and save.load_game() == saved and app["dialog"] == []
-    assert main.prompt(app["state"], app["player"]) == ""
+    assert main.prompt(app["state"], p1(app)["pos"]) == ""
     press(app, pygame.K_e)
     assert app["scene"] == "play" and app["dialog"] == []
 
@@ -1288,11 +1293,11 @@ def test_new_game_lets_the_player_choose_the_red_character(app):
     press(app, pygame.K_RETURN)
     assert app["scene"] == "play"
     assert app["state"]["flags"]["character"] == "red"
-    assert main.player_picture(app) is sprites.image("player_red_down_0")
+    assert main.player_picture(app, p1(app)) is sprites.image("player_red_down_0")
     assert engine.restore_state(save.load_game())["flags"]["character"] == "red"
     again = relaunch()
     press(again, pygame.K_DOWN, pygame.K_RETURN)  # "Resume"
-    assert main.player_picture(again) is sprites.image("player_red_down_0")
+    assert main.player_picture(again, p1(again)) is sprites.image("player_red_down_0")
 
 
 def test_the_choice_wraps_around_and_esc_goes_back(app):
@@ -1394,3 +1399,35 @@ def test_a_new_clue_chimes_and_glows_on_the_barrel(app, heard):
 
 def test_the_clue_sound_exists():
     assert "clue" in sounds.EFFECTS
+
+
+# --- The players: for now one, in app["players"] -------------------------------------------
+
+
+def test_a_new_app_has_one_player_with_the_old_starting_values(app):
+    assert len(app["players"]) == 1
+    assert p1(app) == {"pos": (0, 0), "facing": (0, 1), "touching": None, "walk": 0, "moving": False,
+                       "on_tile": None, "zones": set()}
+    assert main.new_player((5, 7))["pos"] == (5, 7)
+    for key in ("player", "facing", "touching", "walk", "moving", "on_tile", "zones"):
+        assert key not in app, key  # they all live in the player now
+
+
+def test_new_players_never_share_their_state():
+    first, second = main.new_player(), main.new_player()
+    first["zones"].add("hold_tiles")
+    assert second["zones"] == set()
+
+
+def test_the_second_direction_of_update_changes_nothing_yet(app):
+    """update takes a direction for a second player, but with one player it is ignored."""
+    start_new_game(app)
+    still, pushed = main.new_app(main.load_fonts()), main.new_app(main.load_fonts())
+    for other in (still, pushed):
+        press(other, pygame.K_RETURN, pygame.K_RETURN)
+        read_all(other)
+    for _ in range(60):
+        main.update(still, 1, 0)
+        main.update(pushed, 1, 0, -1, 1)
+    assert p1(still) == p1(pushed)
+    assert still["state"] == pushed["state"]

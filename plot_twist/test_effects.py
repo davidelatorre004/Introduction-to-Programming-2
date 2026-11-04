@@ -24,11 +24,14 @@ def app():
     return app
 
 
+p1 = game.p1
+
+
 def playing(app, actions, position=None):
     app["state"] = game.play(actions)
     app["dialog"] = []
     app["fade"] = 0
-    app["player"] = position or main.spawn_at_entry(app["state"]["room"])
+    p1(app)["pos"] = position or main.spawn_at_entry(app["state"]["room"])
     main.update(app, 0, 0)  # the effects settle into the room
     return app
 
@@ -262,7 +265,7 @@ def test_every_room_can_be_drawn_with_every_effect_running(app):
         state = engine.new_game()
         state["room"] = room
         app["state"] = state
-        app["player"] = main.spawn_at_entry(room)
+        p1(app)["pos"] = main.spawn_at_entry(room)
         for _ in range(3):
             main.update(app, 0, 0)
             main.draw(app, screen)

@@ -26,6 +26,11 @@ def app():
     return app
 
 
+def p1(app):
+    """The first (and for now only) player of the interface."""
+    return app["players"][0]
+
+
 def play(actions):
     state = engine.new_game()
     for verb, target, item in actions:
@@ -210,29 +215,29 @@ def test_an_unknown_character_is_drawn_as_a_box():
 
 def test_the_player_walks_in_two_steps_and_stands_still(app):
     main.update(app, 1, 0)
-    assert app["moving"]
+    assert p1(app)["moving"]
     steps = set()
     for _ in range(4 * main.WALK_STEP_FRAMES):
         main.update(app, 1, 0)
-        steps.add(main.player_picture(app))
+        steps.add(main.player_picture(app, p1(app)))
     assert steps == {sprites.image("player_right_1"), sprites.image("player_right_2")}
     main.update(app, 0, 0)
-    assert not app["moving"]
-    assert main.player_picture(app) is sprites.image("player_right_0")
+    assert not p1(app)["moving"]
+    assert main.player_picture(app, p1(app)) is sprites.image("player_right_0")
 
 
 def test_facing_left_mirrors_the_right_pictures(app):
     main.update(app, -1, 0)
     main.update(app, 0, 0)
-    assert main.player_picture(app) is sprites.image("player_right_0", flip=True)
+    assert main.player_picture(app, p1(app)) is sprites.image("player_right_0", flip=True)
 
 
 def test_a_room_comes_out_of_the_dark_after_a_door(app):
     for _ in range(main.FADE_FRAMES):
         main.update(app, 0, 0)
     assert app["fade"] == 0
-    app["player"] = main.spawn_in_front_of("deck_to_cabin")
-    app["touching"] = None
+    p1(app)["pos"] = main.spawn_in_front_of("deck_to_cabin")
+    p1(app)["touching"] = None
     while app["state"]["room"] == "deck":
         main.update(app, 0, -1)
     assert app["fade"] == main.FADE_FRAMES

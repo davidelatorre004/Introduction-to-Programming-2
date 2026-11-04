@@ -555,6 +555,19 @@ def text_width(font):
 # --- The interface state and what happens in each scene ------------------------------
 
 
+def new_player(position=(0, 0)):
+    """One player walking around the ship: where they are and what their feet and eyes are doing."""
+    return {
+        "pos": position,         # top-left corner of the player, in pixels
+        "facing": (0, 1),        # the direction the player looks at
+        "touching": None,        # the door the player is walking into: enter fires once per contact
+        "walk": 0,               # frames the player has spent walking, for the walking animation
+        "moving": False,         # whether the player moved in the last frame
+        "on_tile": None,         # the numbered tile the player stood on in the last frame
+        "zones": set(),          # the floor puzzles whose zone the player was in, in the last frame
+    }
+
+
 def new_app(fonts):
     """The state of the interface, starting on the main menu."""
     app = {
@@ -564,9 +577,7 @@ def new_app(fonts):
         "menu_index": 0,         # the highlighted entry of the menu on screen
         "existing": None,        # the saved game found when the main menu opened, or None
         "state": None,           # the game being played (the engine's state), or None in the main menu
-        "player": (0, 0),        # top-left corner of the player, in pixels
-        "facing": (0, 1),        # the direction the player looks at
-        "touching": None,        # the door the player is walking into: enter fires once per contact
+        "players": [new_player()],  # who walks around the ship: for now one player (see new_player)
         "dialog": [],            # pages of text waiting to be read; the player cannot move meanwhile
         "banner": "",            # room name shown for a moment after entering a room
         "banner_frames": 0,
@@ -578,11 +589,7 @@ def new_app(fonts):
         "character_back": "menu",  # the scene Esc goes back to from the choice of the character
         "frame": 0,              # frames since the game started, for everything that moves on screen
         "scene_frames": 0,       # frames since the current scene started
-        "walk": 0,               # frames the player has spent walking, for the walking animation
-        "moving": False,         # whether the player moved in the last frame
         "fade": 0,               # frames left before the room is out of the dark
-        "on_tile": None,         # the numbered tile the player stood on in the last frame
-        "zones": set(),          # the floor puzzles whose zone the player was in, in the last frame
         "flash_frames": 0,       # frames left of the tiles blinking red after a mistake
         "fx": effects.new_fx(),  # the visual effects: particles, dissolves, the warp (see effects.py)
         "inventory_scroll": 0,   # how many rows the list of items is scrolled down
@@ -751,27 +758,29 @@ def show_banner(app, text):
 
 
 def place_at_entry(app):
-    app["player"] = spawn_at_entry(app["state"]["room"])
-    app["touching"] = None
-    settle_on_floor(app)
+    player = app["players"][0]
+    player["pos"] = spawn_at_entry(app["state"]["room"])
+    player["touching"] = None
+    settle_on_floor(app, player)
 
 
 def place_after_door(app, came_from):
     """Put the player in front of the door that leads back where they came from."""
     room = app["state"]["room"]
     door = return_door(room, came_from)
+    player = app["players"][0]
     if door is None:
-        app["player"] = spawn_at_entry(room)
+        player["pos"] = spawn_at_entry(room)
     else:
-        app["player"] = spawn_in_front_of(door)
-    app["touching"] = None
-    settle_on_floor(app)
+        player["pos"] = spawn_in_front_of(door)
+    player["touching"] = None
+    settle_on_floor(app, player)
 
 
-def settle_on_floor(app):
+def settle_on_floor(app, player):
     """Appearing somewhere is not walking there: where the player appears fires no movement trigger."""
-    app["on_tile"] = tile_under(app["state"], app["player"])
-    app["zones"] = zones_around(app["state"], app["player"])
+    player["on_tile"] = tile_under(app["state"], player["pos"])
+    player["zones"] = zones_around(app["state"], player["pos"])
 
 
 def go_through(app, door):
@@ -796,9 +805,10 @@ def go_through_portal(app, portal):
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     app["state"] = state
     save_progress(app)
-    app["player"] = spawn_by_portal(story.OBJECTS[portal]["to"])
-    app["touching"] = None
-    settle_on_floor(app)
+    player = app["players"][0]
+    player["pos"] = spawn_by_portal(story.OBJECTS[portal]["to"])
+    player["touching"] = None
+    settle_on_floor(app, player)
     if effects.FX["portals"]:
         app["fx"]["warp"] = effects.WARP_FRAMES  # a purple warp instead of the dark fade
     else:
@@ -806,7 +816,7 @@ def go_through_portal(app, portal):
     show_banner(app, story.ROOMS[state["room"]]["name"])
 
 
-def floor_triggers(app):
+def floor_triggers(app, player):
     """The movement triggers of the room, checked in every frame after the player moves.
 
     Walking onto a numbered tile steps on it, and walking out of the zone around
@@ -814,12 +824,12 @@ def floor_triggers(app):
     a tile does not step on it again. The engine decides what it means.
     """
     state = app["state"]
-    tile = tile_under(state, app["player"])
-    zones = zones_around(state, app["player"])
-    stepped_on = tile if tile is not None and tile != app["on_tile"] else None
-    left = sorted(app["zones"] - zones)
-    app["on_tile"] = tile
-    app["zones"] = zones
+    tile = tile_under(state, player["pos"])
+    zones = zones_around(state, player["pos"])
+    stepped_on = tile if tile is not None and tile != player["on_tile"] else None
+    left = sorted(player["zones"] - zones)
+    player["on_tile"] = tile
+    player["zones"] = zones
     for puzzle in left:
         floor_action(app, {"verb": "leave_zone", "target": puzzle})
     if stepped_on is not None:
@@ -851,7 +861,7 @@ def floor_action(app, action):
 
 def interact(app):
     """E: act on the nearest thing, or look around. Several possible actions open a small menu."""
-    target, actions = target_and_actions(app["state"], app["player"])
+    target, actions = target_and_actions(app["state"], app["players"][0]["pos"])
     if len(actions) == 1:
         choose_action(app, actions[0])
     elif actions:
@@ -968,12 +978,16 @@ def held_direction(pressed):
     return (dx, dy)
 
 
-def update(app, dx, dy):
-    """Move the game on by one frame. (dx, dy) is the direction held on the keyboard."""
+def update(app, dx, dy, dx2=0, dy2=0):
+    """Move the game on by one frame. (dx, dy) is the direction held on the keyboard.
+
+    (dx2, dy2) is for a second player, and is not used yet.
+    """
+    player = app["players"][0]
     app["frame"] += 1
     app["scene_frames"] += 1
     update_effects(app)
-    app["moving"] = False
+    player["moving"] = False
     if app["banner_frames"] > 0:
         app["banner_frames"] -= 1
     if app["fade"] > 0:
@@ -986,25 +1000,25 @@ def update(app, dx, dy):
         set_scene(app, "ending")  # the last text has been read: on to the ending
         return
     if dy != 0:
-        app["facing"] = (0, dy)
+        player["facing"] = (0, dy)
     elif dx != 0:
-        app["facing"] = (dx, 0)
+        player["facing"] = (dx, 0)
     speed = PLAYER_SPEED
     if dx != 0 and dy != 0:
         speed = PLAYER_SPEED * 0.7071  # the same speed on diagonals
-    before = app["player"]
-    app["player"] = move(app["player"], dx * speed, dy * speed, solid_rects(app["state"]))
-    if app["player"] != before:
-        app["moving"] = True
-        app["walk"] += 1
-    door = door_touched(app["state"]["room"], app["player"], dx, dy)
+    before = player["pos"]
+    player["pos"] = move(player["pos"], dx * speed, dy * speed, solid_rects(app["state"]))
+    if player["pos"] != before:
+        player["moving"] = True
+        player["walk"] += 1
+    door = door_touched(app["state"]["room"], player["pos"], dx, dy)
     if door is None:
-        app["touching"] = None
-    elif door != app["touching"]:
-        app["touching"] = door
+        player["touching"] = None
+    elif door != player["touching"]:
+        player["touching"] = door
         go_through(app, door)
-    floor_triggers(app)
-    portal = portal_touched(app["state"], app["player"])
+    floor_triggers(app, player)
+    portal = portal_touched(app["state"], player["pos"])
     if portal is not None:
         go_through_portal(app, portal)
 
@@ -1065,7 +1079,7 @@ def show_outcome(app, action, before, after, outcome):
         if action["verb"] == "step_on":
             x, y = thing_rect(target).center
         else:
-            x, y = player_rect(app["player"]).center
+            x, y = player_rect(app["players"][0]["pos"]).center
         effects.spawn(fx, x, y, effects.MISTAKE_SPARKS, effects.RED, speed=1.8, life=24, gravity=0.05)
 
 
@@ -1130,9 +1144,10 @@ def update_effects(app):
                 effects.spawn(fx, rng.uniform(area.left, area.right), rng.uniform(area.top, area.bottom), 1,
                               effects.ENERGY, speed=1.2, life=16)
         if fx["wand_rise"] is not None:
-            body = player_rect(app["player"])
+            player = app["players"][0]
+            body = player_rect(player["pos"])
             climb = fx["wand_rise"]["age"] / effects.WAND_RISE_FRAMES
-            side = 1 if app["facing"][0] >= 0 else -1
+            side = 1 if player["facing"][0] >= 0 else -1
             effects.spawn(fx, body.centerx + side * 5, body.bottom - 3 - climb * 12, 1, [(255, 236, 140), (186, 116, 255)],
                           speed=0.2, life=16, up=0.5)
         clue = fx["clue"]
@@ -1505,9 +1520,9 @@ def draw_thing(screen, thing, lift=0):
             pygame.draw.rect(screen, COLORS["black"], eye)
 
 
-def player_picture(app):
+def player_picture(app, player):
     """The player's sprite for the direction they face, standing (0) or in one of the two walking steps."""
-    fx, fy = app["facing"]
+    fx, fy = player["facing"]
     if fy > 0:
         direction = "down"
     elif fy < 0:
@@ -1515,21 +1530,21 @@ def player_picture(app):
     else:
         direction = "right"  # left is right, mirrored
     step = 0
-    if app["moving"]:
-        step = 1 + (app["walk"] // WALK_STEP_FRAMES) % 2
+    if player["moving"]:
+        step = 1 + (player["walk"] // WALK_STEP_FRAMES) % 2
     character = story.CHARACTERS[app["state"]["flags"]["character"]]["sprite"]
     return sprites.image(character + "_" + direction + "_" + str(step), flip=fx < 0)
 
 
-def draw_player(app, screen):
-    body = player_rect(app["player"])
-    picture = player_picture(app)
+def draw_player(app, screen, player):
+    body = player_rect(player["pos"])
+    picture = player_picture(app, player)
     if picture is not None:
         # The sprite is taller than the body: it stands on it, feet on the bottom edge.
         screen.blit(picture, picture.get_rect(midbottom=(body.centerx, body.bottom + 1)))
         return
     pygame.draw.rect(screen, COLORS["player"], body)
-    fx, fy = app["facing"]
+    fx, fy = player["facing"]
     for side in (-1, 1):
         # Two eyes side by side, on the side the player is looking at.
         eye = pygame.Rect(0, 0, 2, 2)
@@ -1678,11 +1693,12 @@ def draw_room(app, screen):
         if thing["kind"] == "item":
             draw_thing(screen, thing, ALTAR_LIFT if on_an_altar(state, thing["id"]) else 0)
     # From the back of the room to the front: what stands lower on screen covers the rest.
-    feet = player_rect(app["player"]).bottom
+    player = app["players"][0]
+    feet = player_rect(player["pos"]).bottom
     for thing in standing:
         if thing_rect(thing["id"]).bottom <= feet:
             draw_standing(app, screen, thing)
-    draw_player(app, screen)
+    draw_player(app, screen, player)
     for thing in standing:
         if thing_rect(thing["id"]).bottom > feet:
             draw_standing(app, screen, thing)
@@ -1728,7 +1744,7 @@ def draw_hud(app, screen):
     right = map_rect().left - 6  # the map takes the right corner: the rest moves left of it
     draw_text(screen, font, story.MESSAGES["hint_inventory"], COLORS["dim_text"], (right, 4), "right")
     if app["scene"] == "play" and not app["dialog"]:
-        hint = prompt(state, app["player"])
+        hint = prompt(state, app["players"][0]["pos"])
         if hint:
             draw_text(screen, font, hint, COLORS["highlight"], (8, 18))
     x = right + 4
@@ -1865,7 +1881,7 @@ def draw_map(app, screen):
             else:
                 x = area.right
             pygame.draw.rect(screen, COLORS["dim_text"], (x, y, 1, 1))
-    x, y = map_dot(state["room"], app["player"])
+    x, y = map_dot(state["room"], app["players"][0]["pos"])
     pygame.draw.rect(screen, COLORS["black"], (x, y, 1, 1))
 
 
@@ -1917,7 +1933,7 @@ def draw_play_screen(app, screen):
     room = app["state"]["room"]
     whole = room_surface(room)
     draw_room(app, whole)
-    x, y = camera(room, app["player"])
+    x, y = camera(room, app["players"][0]["pos"])
     screen.fill(COLORS["black"])
     screen.set_clip(VIEW)
     screen.blit(whole, (-x, -y))

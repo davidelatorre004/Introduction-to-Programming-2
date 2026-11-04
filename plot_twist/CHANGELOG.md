@@ -2,9 +2,19 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v20](versions/v20.md) - Clues on the left, and a chime for a new one (2026-11-03)
+## [v21](versions/v21.md) - Ready for a second player (refactor only) (2026-11-04)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- The first step towards local co-op for two players. The game plays exactly as before.
+- In `main.py` the seven keys of the player (position, facing, touching, walk, moving, on_tile, zones) moved from the interface state into one player dict, made by `new_player()`, kept in the list `app["players"]`.
+- The functions that act on a player (`settle_on_floor`, `floor_triggers`, `player_picture`, `draw_player`) take it as an argument; the others use the first player. `update()` takes a second direction (`dx2`, `dy2`), not used yet.
+- The tests use a helper `p1(app)`; three new tests check the new structure.
+- `CLAUDE.md` holds the rules for every future change.
+
+## [v20](versions/v20.md) - Clues on the left, and a chime for a new one (2026-11-03)
+
+In commit [`bdd8fbe`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/bdd8fbe4e60ea8250229295a7e3e41d0e669c488/plot_twist).
 
 - The inventory screen (I) has two columns: the clues found on the left (or "No clues yet."), the items carried on the right. Same box, same font, same clues in the same order.
 - The list of items can be longer than the box: up and down scroll it one item at a time, small arrows show there is more above or below, and it always opens at the top.
