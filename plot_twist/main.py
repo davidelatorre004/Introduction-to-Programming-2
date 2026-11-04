@@ -828,17 +828,46 @@ def beside(state, position):
     return position  # nowhere free: on the same spot (players do not block each other)
 
 
-def place_after_door(app, came_from, leader=None):
-    """Put the player who went through (`leader`, player 1 if not said) in front of the door that leads
-    back where they came from, and the other player next to them."""
+def place_after_door(app, came_from):
+    """Put the players in front of the door that leads back where they came from, side by side."""
     room = app["state"]["room"]
     door = return_door(room, came_from)
-    player = leader or app["players"][0]
     if door is None:
-        player["pos"] = spawn_at_entry(room)
-    else:
-        player["pos"] = spawn_in_front_of(door)
-    place_beside(app, player)
+        place_at_entry(app)
+        return
+    place_at(app, door_arrivals(app["state"], door))
+
+
+def place_at(app, positions):
+    """Put each player on their own position, and let everyone settle: arriving is not walking."""
+    for player, position in zip(app["players"], positions):
+        player["pos"] = position
+        player["touching"] = None
+        settle_on_floor(app, player)
+
+
+def side_by_side(state, first, along):
+    """Where the players arrive: player 1 on `first`, player 2 next to them, PLAYER_SIZE + 2 pixels
+    along the direction `along` (a unit (x, y)), on whichever side is free floor."""
+    step = PLAYER_SIZE + 2
+    for sign in (1, -1):
+        second = (first[0] + sign * step * along[0], first[1] + sign * step * along[1])
+        if is_free_floor(state, second):
+            return [first, second]
+    return [first, first]  # nowhere free: on the same spot (players do not block each other)
+
+
+def door_arrivals(state, door):
+    """Where the players arrive through `door`, the door they will see behind them: in front of it,
+    side by side along its wall. Player 1 is where a player alone appears (spawn_in_front_of)."""
+    along = (1, 0) if story.DOORS[door]["side"] in ("N", "S") else (0, 1)
+    return side_by_side(state, spawn_in_front_of(door), along)
+
+
+def portal_arrivals(state, portal):
+    """Where the players arrive by `portal`: just below the ring, side by side. Player 1 is where a
+    player alone appears (spawn_by_portal)."""
+    return side_by_side(state, spawn_by_portal(portal), (1, 0))
 
 
 def settle_on_floor(app, player):
@@ -847,8 +876,8 @@ def settle_on_floor(app, player):
     player["zones"] = zones_around(app["state"], player["pos"])
 
 
-def go_through(app, door, player=None):
-    """A player walks into a door: ask the engine, then change room or explain why not."""
+def go_through(app, door):
+    """The players walk into a door: ask the engine, then change room or explain why not."""
     came_from = app["state"]["room"]
     state, outcome = engine.perform(app["state"], {"verb": "enter", "target": door})
     if not outcome["ok"]:
@@ -856,23 +885,20 @@ def go_through(app, door, player=None):
         return
     app["state"] = state
     save_progress(app)
-    place_after_door(app, came_from, player)
+    place_after_door(app, came_from)
     app["fade"] = FADE_FRAMES
     show_banner(app, outcome["text"])
 
 
-def go_through_portal(app, portal, player=None):
-    """A player steps into a portal: the engine moves them, and they appear by the twin portal,
-    the other player next to them."""
+def go_through_portal(app, portal):
+    """The players step into a portal: the engine moves them, and they appear by the twin portal, side by side."""
     state, outcome = engine.perform(app["state"], {"verb": "travel", "target": portal})
     if not outcome["ok"]:
         return
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     app["state"] = state
     save_progress(app)
-    player = player or app["players"][0]
-    player["pos"] = spawn_by_portal(story.OBJECTS[portal]["to"])
-    place_beside(app, player)
+    place_at(app, portal_arrivals(state, story.OBJECTS[portal]["to"]))
     if effects.FX["portals"]:
         app["fx"]["warp"] = effects.WARP_FRAMES  # a purple warp instead of the dark fade
     else:
@@ -881,17 +907,23 @@ def go_through_portal(app, portal, player=None):
 
 
 def floor_triggers(app, player):
-    """The movement triggers of the room, checked in every frame after the player moves.
+    """The movement triggers of the room, checked in every frame after a player moves.
 
-    Walking onto a numbered tile steps on it, and walking out of the zone around
-    the tiles leaves it. Each one fires once, when it happens: standing still on
-    a tile does not step on it again. The engine decides what it means.
+    Walking onto a numbered tile steps on it, whoever walks there. Walking out of
+    the zone around the tiles leaves it, but only when no player is left in it.
+    Each one fires once, when it happens: standing still on a tile does not step on
+    it again. The engine decides what it means.
     """
     state = app["state"]
     tile = tile_under(state, player["pos"])
     zones = zones_around(state, player["pos"])
     stepped_on = tile if tile is not None and tile != player["on_tile"] else None
-    left = sorted(player["zones"] - zones)
+    # The zones of all the players together: a zone is left only when nobody is in it any more.
+    others = set()
+    for other in app["players"]:
+        if other is not player:
+            others |= other["zones"]
+    left = sorted(player["zones"] - zones - others)
     player["on_tile"] = tile
     player["zones"] = zones
     for puzzle in left:
@@ -1105,7 +1137,8 @@ def update(app, dx, dy, dx2=0, dy2=0):
 def move_player(app, player, dx, dy):
     """One player's frame: walk, go through a door, step on the tiles, walk into a portal.
 
-    For now, whoever walks into a door or a portal takes the other player along.
+    Alone, a door or a portal is taken as soon as the player walks into it. Two players
+    go through together: only when both touch the same door, or stand in the same portal.
     """
     if dy != 0:
         player["facing"] = (0, dy)
@@ -1116,19 +1149,47 @@ def move_player(app, player, dx, dy):
         speed = PLAYER_SPEED * 0.7071  # the same speed on diagonals
     before = player["pos"]
     player["pos"] = move(player["pos"], dx * speed, dy * speed, solid_rects(app["state"]))
+    together = len(app["players"]) > 1
+    if together:
+        keep_in_room(app, player)  # waiting in a door's opening, a player does not walk out of the room
     if player["pos"] != before:
         player["moving"] = True
         player["walk"] += 1
     door = door_touched(app["state"]["room"], player["pos"], dx, dy)
-    if door is None:
-        player["touching"] = None
-    elif door != player["touching"]:
-        player["touching"] = door
-        go_through(app, door, player)
-    floor_triggers(app, player)
     portal = portal_touched(app["state"], player["pos"])
-    if portal is not None:
-        go_through_portal(app, portal, player)
+    if not together:
+        if door is None:
+            player["touching"] = None
+        elif door != player["touching"]:
+            player["touching"] = door
+            go_through(app, door)
+        floor_triggers(app, player)
+        portal = portal_touched(app["state"], player["pos"])
+        if portal is not None:
+            go_through_portal(app, portal)
+        return
+    # Two players: "touching" is the door or the portal the player is at.
+    contact = door or (portal if portal is not None and story.OBJECTS[portal]["to"] is not None else None)
+    if contact is None:
+        player["touching"] = None
+    elif contact != player["touching"]:
+        player["touching"] = contact
+        if all(other["touching"] == contact for other in app["players"]):
+            if door is not None:
+                go_through(app, door)
+            else:
+                go_through_portal(app, portal)
+            return
+        show_banner(app, story.MESSAGES["wait_partner"])  # once for each contact
+    floor_triggers(app, player)
+
+
+def keep_in_room(app, player):
+    """Keep a player's body inside the room: an open door's opening is in the wall, not beyond it."""
+    body = player_rect(player["pos"])
+    inside = body.clamp(tile_rect(0, 0, *room_size(app["state"]["room"])))
+    if inside.topleft != body.topleft:
+        player["pos"] = (player["pos"][0] + inside.x - body.x, player["pos"][1] + inside.y - body.y)
 
 
 # --- Visual effects: what happens on screen when something happens in the game -----------

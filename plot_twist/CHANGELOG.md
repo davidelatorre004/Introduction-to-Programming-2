@@ -2,9 +2,18 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v22](versions/v22.md) - Two players on one keyboard (2026-11-04)
+## [v23](versions/v23.md) - Two players go through together (2026-11-04)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- In a game for two, a door is taken only when both players touch the same door, and a portal only when both stand in it. A player alone at a door or in a portal sees "Wait for your partner", once for each time they get there, and waits in the opening instead of walking out of the room.
+- The players arrive side by side: player 1 where a player alone appears, player 2 next to them along the wall of the door (or below the ring of the portal), on whichever side is free floor.
+- The tiles of the hold: any player lights a tile by walking onto it, and the phase starts over only when nobody is left in the zone around the tiles.
+- The rule of the previous version (whoever goes through takes the other along) is gone. Alone, nothing changes.
+
+## [v22](versions/v22.md) - Two players on one keyboard (2026-11-04)
+
+In commit [`14684b2`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/14684b2ee9d168b79b29055af0d3b089dea5139a/plot_twist).
 
 - After New game, a new screen asks "How many players?": 1 player or 2 players. Then the choice of the character, which in a game for two is player 1's; player 2 gets the other one. Esc goes back one screen at a time.
 - A new flag `two_players` records the mode, so it is saved and Resume keeps it; `engine.partner_character()` gives player 2's character.

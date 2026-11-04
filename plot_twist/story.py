@@ -1675,6 +1675,8 @@ MESSAGES = {
     "choose_character": "Choose your character",
     "choose_character_p1": "Player 1: choose",
     "hint_inventory_2p": "Q, P: inventory",
+    # In a game for two, shown when one player is at a door or a portal and the other is not.
+    "wait_partner": "Wait for your partner",
     "choose_hint": "Left/Right: choose · E: confirm · Esc: back",
     "menu_no": "No",
     "pause": "Paused",

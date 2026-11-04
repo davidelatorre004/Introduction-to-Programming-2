@@ -1679,6 +1679,8 @@ MESSAGES = {
     "choose_character": "Choose your character",
     "choose_character_p1": "Player 1: choose",
     "hint_inventory_2p": "Q, P: inventory",
+    # In a game for two, shown when one player is at a door or a portal and the other is not.
+    "wait_partner": "Wait for your partner",
     "choose_hint": "Left/Right: choose · E: confirm · Esc: back",
     "menu_no": "No",
     "pause": "Paused",
@@ -3535,17 +3537,46 @@ def beside(state, position):
     return position  # nowhere free: on the same spot (players do not block each other)
 
 
-def place_after_door(app, came_from, leader=None):
-    """Put the player who went through (`leader`, player 1 if not said) in front of the door that leads
-    back where they came from, and the other player next to them."""
+def place_after_door(app, came_from):
+    """Put the players in front of the door that leads back where they came from, side by side."""
     room = app["state"]["room"]
     door = return_door(room, came_from)
-    player = leader or app["players"][0]
     if door is None:
-        player["pos"] = spawn_at_entry(room)
-    else:
-        player["pos"] = spawn_in_front_of(door)
-    place_beside(app, player)
+        place_at_entry(app)
+        return
+    place_at(app, door_arrivals(app["state"], door))
+
+
+def place_at(app, positions):
+    """Put each player on their own position, and let everyone settle: arriving is not walking."""
+    for player, position in zip(app["players"], positions):
+        player["pos"] = position
+        player["touching"] = None
+        settle_on_floor(app, player)
+
+
+def side_by_side(state, first, along):
+    """Where the players arrive: player 1 on `first`, player 2 next to them, PLAYER_SIZE + 2 pixels
+    along the direction `along` (a unit (x, y)), on whichever side is free floor."""
+    step = PLAYER_SIZE + 2
+    for sign in (1, -1):
+        second = (first[0] + sign * step * along[0], first[1] + sign * step * along[1])
+        if is_free_floor(state, second):
+            return [first, second]
+    return [first, first]  # nowhere free: on the same spot (players do not block each other)
+
+
+def door_arrivals(state, door):
+    """Where the players arrive through `door`, the door they will see behind them: in front of it,
+    side by side along its wall. Player 1 is where a player alone appears (spawn_in_front_of)."""
+    along = (1, 0) if story.DOORS[door]["side"] in ("N", "S") else (0, 1)
+    return side_by_side(state, spawn_in_front_of(door), along)
+
+
+def portal_arrivals(state, portal):
+    """Where the players arrive by `portal`: just below the ring, side by side. Player 1 is where a
+    player alone appears (spawn_by_portal)."""
+    return side_by_side(state, spawn_by_portal(portal), (1, 0))
 
 
 def settle_on_floor(app, player):
@@ -3554,8 +3585,8 @@ def settle_on_floor(app, player):
     player["zones"] = zones_around(app["state"], player["pos"])
 
 
-def go_through(app, door, player=None):
-    """A player walks into a door: ask the engine, then change room or explain why not."""
+def go_through(app, door):
+    """The players walk into a door: ask the engine, then change room or explain why not."""
     came_from = app["state"]["room"]
     state, outcome = engine.perform(app["state"], {"verb": "enter", "target": door})
     if not outcome["ok"]:
@@ -3563,23 +3594,20 @@ def go_through(app, door, player=None):
         return
     app["state"] = state
     save_progress(app)
-    place_after_door(app, came_from, player)
+    place_after_door(app, came_from)
     app["fade"] = FADE_FRAMES
     show_banner(app, outcome["text"])
 
 
-def go_through_portal(app, portal, player=None):
-    """A player steps into a portal: the engine moves them, and they appear by the twin portal,
-    the other player next to them."""
+def go_through_portal(app, portal):
+    """The players step into a portal: the engine moves them, and they appear by the twin portal, side by side."""
     state, outcome = engine.perform(app["state"], {"verb": "travel", "target": portal})
     if not outcome["ok"]:
         return
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     app["state"] = state
     save_progress(app)
-    player = player or app["players"][0]
-    player["pos"] = spawn_by_portal(story.OBJECTS[portal]["to"])
-    place_beside(app, player)
+    place_at(app, portal_arrivals(state, story.OBJECTS[portal]["to"]))
     if effects.FX["portals"]:
         app["fx"]["warp"] = effects.WARP_FRAMES  # a purple warp instead of the dark fade
     else:
@@ -3588,17 +3616,23 @@ def go_through_portal(app, portal, player=None):
 
 
 def floor_triggers(app, player):
-    """The movement triggers of the room, checked in every frame after the player moves.
+    """The movement triggers of the room, checked in every frame after a player moves.
 
-    Walking onto a numbered tile steps on it, and walking out of the zone around
-    the tiles leaves it. Each one fires once, when it happens: standing still on
-    a tile does not step on it again. The engine decides what it means.
+    Walking onto a numbered tile steps on it, whoever walks there. Walking out of
+    the zone around the tiles leaves it, but only when no player is left in it.
+    Each one fires once, when it happens: standing still on a tile does not step on
+    it again. The engine decides what it means.
     """
     state = app["state"]
     tile = tile_under(state, player["pos"])
     zones = zones_around(state, player["pos"])
     stepped_on = tile if tile is not None and tile != player["on_tile"] else None
-    left = sorted(player["zones"] - zones)
+    # The zones of all the players together: a zone is left only when nobody is in it any more.
+    others = set()
+    for other in app["players"]:
+        if other is not player:
+            others |= other["zones"]
+    left = sorted(player["zones"] - zones - others)
     player["on_tile"] = tile
     player["zones"] = zones
     for puzzle in left:
@@ -3812,7 +3846,8 @@ def update(app, dx, dy, dx2=0, dy2=0):
 def move_player(app, player, dx, dy):
     """One player's frame: walk, go through a door, step on the tiles, walk into a portal.
 
-    For now, whoever walks into a door or a portal takes the other player along.
+    Alone, a door or a portal is taken as soon as the player walks into it. Two players
+    go through together: only when both touch the same door, or stand in the same portal.
     """
     if dy != 0:
         player["facing"] = (0, dy)
@@ -3823,19 +3858,47 @@ def move_player(app, player, dx, dy):
         speed = PLAYER_SPEED * 0.7071  # the same speed on diagonals
     before = player["pos"]
     player["pos"] = move(player["pos"], dx * speed, dy * speed, solid_rects(app["state"]))
+    together = len(app["players"]) > 1
+    if together:
+        keep_in_room(app, player)  # waiting in a door's opening, a player does not walk out of the room
     if player["pos"] != before:
         player["moving"] = True
         player["walk"] += 1
     door = door_touched(app["state"]["room"], player["pos"], dx, dy)
-    if door is None:
-        player["touching"] = None
-    elif door != player["touching"]:
-        player["touching"] = door
-        go_through(app, door, player)
-    floor_triggers(app, player)
     portal = portal_touched(app["state"], player["pos"])
-    if portal is not None:
-        go_through_portal(app, portal, player)
+    if not together:
+        if door is None:
+            player["touching"] = None
+        elif door != player["touching"]:
+            player["touching"] = door
+            go_through(app, door)
+        floor_triggers(app, player)
+        portal = portal_touched(app["state"], player["pos"])
+        if portal is not None:
+            go_through_portal(app, portal)
+        return
+    # Two players: "touching" is the door or the portal the player is at.
+    contact = door or (portal if portal is not None and story.OBJECTS[portal]["to"] is not None else None)
+    if contact is None:
+        player["touching"] = None
+    elif contact != player["touching"]:
+        player["touching"] = contact
+        if all(other["touching"] == contact for other in app["players"]):
+            if door is not None:
+                go_through(app, door)
+            else:
+                go_through_portal(app, portal)
+            return
+        show_banner(app, story.MESSAGES["wait_partner"])  # once for each contact
+    floor_triggers(app, player)
+
+
+def keep_in_room(app, player):
+    """Keep a player's body inside the room: an open door's opening is in the wall, not beyond it."""
+    body = player_rect(player["pos"])
+    inside = body.clamp(tile_rect(0, 0, *room_size(app["state"]["room"])))
+    if inside.topleft != body.topleft:
+        player["pos"] = (player["pos"][0] + inside.x - body.x, player["pos"][1] + inside.y - body.y)
 
 
 # --- Visual effects: what happens on screen when something happens in the game -----------
@@ -10674,16 +10737,119 @@ def test_each_player_moves_with_their_own_direction_through_each_other(app):
     assert p1(app)["pos"][0] > p2(app)["pos"][0] + 40
 
 
-def test_for_now_the_player_at_a_door_takes_the_other_along(app):
+def walk_both(app, first, second, frames=40, until=None):
+    """Hold a direction for each player, frame by frame, until `until(app)` is true (or the frames run out)."""
+    for _ in range(frames):
+        if until is not None and until(app):
+            return
+        main.update(app, *first, *second)
+
+
+def at_door(app, player, door):
+    player["pos"] = main.spawn_in_front_of(door)
+    player["touching"] = None
+
+
+def test_one_player_at_a_door_waits_for_the_partner(app):
+    """Alone at the door the room does not change; the banner says to wait, once for each contact."""
     start_two_players(app)
-    p2(app)["pos"] = main.spawn_in_front_of("deck_to_cabin")
-    for _ in range(30):
-        main.update(app, 0, 0, 0, -1)  # only player 2 walks into the cabin's door
-        if app["state"]["room"] == "cabin":
-            break
+    at_door(app, p1(app), "deck_to_cabin")
+    walk_both(app, (0, -1), (0, 0))
+    assert app["state"]["room"] == "deck"
+    assert app["banner"] == story.MESSAGES["wait_partner"] and app["banner_frames"] > 0
+    assert p1(app)["touching"] == "deck_to_cabin"
+    assert main.tile_rect(0, 0, *main.room_size("deck")).contains(main.player_rect(p1(app)["pos"]))  # still on board
+    app["banner_frames"] = 0
+    walk_both(app, (0, -1), (0, 0))  # still there, still pushing: no new banner
+    assert app["banner_frames"] == 0
+    walk_both(app, (0, 1), (0, 0), until=lambda app: p1(app)["touching"] is None)  # stepping back out of the door...
+    walk_both(app, (0, -1), (0, 0))  # ...and in again: a new contact, a new banner
+    assert app["banner_frames"] > 0 and app["state"]["room"] == "deck"
+
+
+def test_both_players_at_the_same_door_go_through_side_by_side(app):
+    start_two_players(app)
+    at_door(app, p1(app), "deck_to_cabin")
+    walk_both(app, (0, -1), (0, 0))  # player 1 waits in the door
+    at_door(app, p2(app), "deck_to_cabin")
+    walk_both(app, (0, -1), (0, -1), until=lambda app: app["state"]["room"] == "cabin")
     assert app["state"]["room"] == "cabin"
-    assert p2(app)["pos"] == main.spawn_in_front_of("cabin_to_deck")
-    assert main.is_free_floor(app["state"], p1(app)["pos"]) and p1(app)["pos"] != p2(app)["pos"]
+    assert [p1(app)["pos"], p2(app)["pos"]] == main.door_arrivals(app["state"], "cabin_to_deck")
+    assert p1(app)["pos"] == main.spawn_in_front_of("cabin_to_deck")  # where a player alone appears
+
+
+def test_players_at_two_different_doors_stay(app):
+    start_two_players(app)
+    at_door(app, p1(app), "deck_to_cabin")
+    at_door(app, p2(app), "deck_to_hold")
+    walk_both(app, (0, -1), (0, 1))
+    assert app["state"]["room"] == "deck"
+
+
+def test_both_players_in_the_portal_travel_side_by_side(app):
+    start_two_players(app)
+    app["state"]["room"] = "corridor_end"
+    ring = main.thing_rect("corridor_portal")
+    below = (ring.centerx - main.PLAYER_SIZE // 2, ring.bottom + 2)
+    p1(app)["pos"], p2(app)["pos"] = below, (main.spawn_at_entry("corridor_end")[0] + 40, below[1] + 30)
+    for player in app["players"]:
+        player["touching"] = None
+    walk_both(app, (0, -1), (0, 0), until=lambda app: p1(app)["touching"] == "corridor_portal")  # player 1 alone in the ring
+    walk_both(app, (0, 0), (0, 0), frames=10)  # and waiting there
+    assert app["state"]["room"] == "corridor_end" and app["banner"] == story.MESSAGES["wait_partner"]
+    p2(app)["pos"] = below
+    walk_both(app, (0, 0), (0, -1), until=lambda app: app["state"]["room"] == "mine")
+    assert app["state"]["room"] == "mine"
+    assert [p1(app)["pos"], p2(app)["pos"]] == main.portal_arrivals(app["state"], "mine_portal")
+
+
+def test_the_helm_portal_does_not_ask_to_wait(app):
+    """The ring in the helm only receives: standing in it is not waiting for anyone."""
+    start_two_players(app)
+    app["state"]["room"] = "helm"
+    ring = main.thing_rect("helm_portal")
+    p1(app)["pos"] = (ring.centerx - main.PLAYER_SIZE // 2, ring.centery - main.PLAYER_SIZE // 2)
+    app["banner_frames"] = 0
+    walk_both(app, (0, 0), (0, 0), frames=5)
+    assert app["banner_frames"] == 0 and app["state"]["room"] == "helm"
+
+
+def test_arrivals_are_free_floor_side_by_side_for_every_door_and_portal():
+    for door, info in story.DOORS.items():
+        state = in_room(info["room"])
+        first, second = main.door_arrivals(state, door)
+        assert first == main.spawn_in_front_of(door), door
+        for spot in (first, second):
+            assert main.is_free_floor(state, spot), (door, spot)
+        assert not main.player_rect(first).colliderect(main.player_rect(second)), door
+    for portal, info in story.OBJECTS.items():
+        if info["kind"] == "portal":
+            state = in_room(info["room"])
+            first, second = main.portal_arrivals(state, portal)
+            assert first == main.spawn_by_portal(portal), portal
+            for spot in (first, second):
+                assert main.is_free_floor(state, spot), (portal, spot)
+            assert not main.player_rect(first).colliderect(main.player_rect(second)), portal
+
+
+def test_the_tiles_start_over_only_when_both_players_are_out_of_the_zone(app, heard):
+    start_two_players(app)
+    app["state"] = play(IN_THE_HOLD)
+    app["state"]["flags"]["two_players"] = True
+    main.place_at_entry(app)
+    walk_onto(app, "tile_1")  # player 1 lights tile 1 (player 2 stands still)
+    assert app["state"]["flags"]["hold_step"] == 1
+    zone = main.zone_rect("hold_tiles")
+    tile_2 = main.thing_rect("tile_2")
+    p2(app)["pos"] = (tile_2.centerx - main.PLAYER_SIZE // 2, tile_2.top - main.TILE // 2 - main.PLAYER_SIZE // 2)
+    main.settle_on_floor(app, p2(app))  # player 2 is in the zone too, above tile 2
+    walk_both(app, (0, 1), (0, 1), until=lambda app: app["state"]["flags"]["hold_step"] == 2)
+    assert app["state"]["flags"]["hold_step"] == 2  # player 2 stepped on tile 2: any player lights tiles
+    walk_both(app, (0, -1), (0, 0), frames=60)  # player 1 walks out of the zone, player 2 stays in it
+    assert not zone.collidepoint(main.player_rect(p1(app)["pos"]).center)
+    assert app["state"]["flags"]["hold_step"] == 2 and "buzz" not in heard
+    walk_both(app, (0, 0), (0, -1), frames=60)  # now player 2 walks out too
+    assert app["state"]["flags"]["hold_step"] == 0 and heard[-1] == "buzz"
 
 
 def test_player_two_appears_on_free_floor_in_every_room(app):

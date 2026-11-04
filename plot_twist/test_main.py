@@ -1539,16 +1539,119 @@ def test_each_player_moves_with_their_own_direction_through_each_other(app):
     assert p1(app)["pos"][0] > p2(app)["pos"][0] + 40
 
 
-def test_for_now_the_player_at_a_door_takes_the_other_along(app):
+def walk_both(app, first, second, frames=40, until=None):
+    """Hold a direction for each player, frame by frame, until `until(app)` is true (or the frames run out)."""
+    for _ in range(frames):
+        if until is not None and until(app):
+            return
+        main.update(app, *first, *second)
+
+
+def at_door(app, player, door):
+    player["pos"] = main.spawn_in_front_of(door)
+    player["touching"] = None
+
+
+def test_one_player_at_a_door_waits_for_the_partner(app):
+    """Alone at the door the room does not change; the banner says to wait, once for each contact."""
     start_two_players(app)
-    p2(app)["pos"] = main.spawn_in_front_of("deck_to_cabin")
-    for _ in range(30):
-        main.update(app, 0, 0, 0, -1)  # only player 2 walks into the cabin's door
-        if app["state"]["room"] == "cabin":
-            break
+    at_door(app, p1(app), "deck_to_cabin")
+    walk_both(app, (0, -1), (0, 0))
+    assert app["state"]["room"] == "deck"
+    assert app["banner"] == story.MESSAGES["wait_partner"] and app["banner_frames"] > 0
+    assert p1(app)["touching"] == "deck_to_cabin"
+    assert main.tile_rect(0, 0, *main.room_size("deck")).contains(main.player_rect(p1(app)["pos"]))  # still on board
+    app["banner_frames"] = 0
+    walk_both(app, (0, -1), (0, 0))  # still there, still pushing: no new banner
+    assert app["banner_frames"] == 0
+    walk_both(app, (0, 1), (0, 0), until=lambda app: p1(app)["touching"] is None)  # stepping back out of the door...
+    walk_both(app, (0, -1), (0, 0))  # ...and in again: a new contact, a new banner
+    assert app["banner_frames"] > 0 and app["state"]["room"] == "deck"
+
+
+def test_both_players_at_the_same_door_go_through_side_by_side(app):
+    start_two_players(app)
+    at_door(app, p1(app), "deck_to_cabin")
+    walk_both(app, (0, -1), (0, 0))  # player 1 waits in the door
+    at_door(app, p2(app), "deck_to_cabin")
+    walk_both(app, (0, -1), (0, -1), until=lambda app: app["state"]["room"] == "cabin")
     assert app["state"]["room"] == "cabin"
-    assert p2(app)["pos"] == main.spawn_in_front_of("cabin_to_deck")
-    assert main.is_free_floor(app["state"], p1(app)["pos"]) and p1(app)["pos"] != p2(app)["pos"]
+    assert [p1(app)["pos"], p2(app)["pos"]] == main.door_arrivals(app["state"], "cabin_to_deck")
+    assert p1(app)["pos"] == main.spawn_in_front_of("cabin_to_deck")  # where a player alone appears
+
+
+def test_players_at_two_different_doors_stay(app):
+    start_two_players(app)
+    at_door(app, p1(app), "deck_to_cabin")
+    at_door(app, p2(app), "deck_to_hold")
+    walk_both(app, (0, -1), (0, 1))
+    assert app["state"]["room"] == "deck"
+
+
+def test_both_players_in_the_portal_travel_side_by_side(app):
+    start_two_players(app)
+    app["state"]["room"] = "corridor_end"
+    ring = main.thing_rect("corridor_portal")
+    below = (ring.centerx - main.PLAYER_SIZE // 2, ring.bottom + 2)
+    p1(app)["pos"], p2(app)["pos"] = below, (main.spawn_at_entry("corridor_end")[0] + 40, below[1] + 30)
+    for player in app["players"]:
+        player["touching"] = None
+    walk_both(app, (0, -1), (0, 0), until=lambda app: p1(app)["touching"] == "corridor_portal")  # player 1 alone in the ring
+    walk_both(app, (0, 0), (0, 0), frames=10)  # and waiting there
+    assert app["state"]["room"] == "corridor_end" and app["banner"] == story.MESSAGES["wait_partner"]
+    p2(app)["pos"] = below
+    walk_both(app, (0, 0), (0, -1), until=lambda app: app["state"]["room"] == "mine")
+    assert app["state"]["room"] == "mine"
+    assert [p1(app)["pos"], p2(app)["pos"]] == main.portal_arrivals(app["state"], "mine_portal")
+
+
+def test_the_helm_portal_does_not_ask_to_wait(app):
+    """The ring in the helm only receives: standing in it is not waiting for anyone."""
+    start_two_players(app)
+    app["state"]["room"] = "helm"
+    ring = main.thing_rect("helm_portal")
+    p1(app)["pos"] = (ring.centerx - main.PLAYER_SIZE // 2, ring.centery - main.PLAYER_SIZE // 2)
+    app["banner_frames"] = 0
+    walk_both(app, (0, 0), (0, 0), frames=5)
+    assert app["banner_frames"] == 0 and app["state"]["room"] == "helm"
+
+
+def test_arrivals_are_free_floor_side_by_side_for_every_door_and_portal():
+    for door, info in story.DOORS.items():
+        state = in_room(info["room"])
+        first, second = main.door_arrivals(state, door)
+        assert first == main.spawn_in_front_of(door), door
+        for spot in (first, second):
+            assert main.is_free_floor(state, spot), (door, spot)
+        assert not main.player_rect(first).colliderect(main.player_rect(second)), door
+    for portal, info in story.OBJECTS.items():
+        if info["kind"] == "portal":
+            state = in_room(info["room"])
+            first, second = main.portal_arrivals(state, portal)
+            assert first == main.spawn_by_portal(portal), portal
+            for spot in (first, second):
+                assert main.is_free_floor(state, spot), (portal, spot)
+            assert not main.player_rect(first).colliderect(main.player_rect(second)), portal
+
+
+def test_the_tiles_start_over_only_when_both_players_are_out_of_the_zone(app, heard):
+    start_two_players(app)
+    app["state"] = play(IN_THE_HOLD)
+    app["state"]["flags"]["two_players"] = True
+    main.place_at_entry(app)
+    walk_onto(app, "tile_1")  # player 1 lights tile 1 (player 2 stands still)
+    assert app["state"]["flags"]["hold_step"] == 1
+    zone = main.zone_rect("hold_tiles")
+    tile_2 = main.thing_rect("tile_2")
+    p2(app)["pos"] = (tile_2.centerx - main.PLAYER_SIZE // 2, tile_2.top - main.TILE // 2 - main.PLAYER_SIZE // 2)
+    main.settle_on_floor(app, p2(app))  # player 2 is in the zone too, above tile 2
+    walk_both(app, (0, 1), (0, 1), until=lambda app: app["state"]["flags"]["hold_step"] == 2)
+    assert app["state"]["flags"]["hold_step"] == 2  # player 2 stepped on tile 2: any player lights tiles
+    walk_both(app, (0, -1), (0, 0), frames=60)  # player 1 walks out of the zone, player 2 stays in it
+    assert not zone.collidepoint(main.player_rect(p1(app)["pos"]).center)
+    assert app["state"]["flags"]["hold_step"] == 2 and "buzz" not in heard
+    walk_both(app, (0, 0), (0, -1), frames=60)  # now player 2 walks out too
+    assert app["state"]["flags"]["hold_step"] == 0 and heard[-1] == "buzz"
 
 
 def test_player_two_appears_on_free_floor_in_every_room(app):
