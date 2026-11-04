@@ -18,8 +18,10 @@ CHARACTERS = {
 # What the game remembers about the player's progress and choices, with the
 # value each flag has at the start of a new game.
 FLAGS = {
-    # The character chosen for this game (one of CHARACTERS).
+    # The character chosen for this game (one of CHARACTERS): player 1's, in a game for two.
     "character": "green",
+    # A game for two players on the same keyboard: player 2 is the other character.
+    "two_players": False,
     # The eight generators of the captain's cabin, in a ring: True is on, False is
     # off. The puzzle starts with H, A, C and D off and B, E, F and G on, and goes
     # back to that every time the player walks into the cabin, until the circuit
@@ -1666,8 +1668,13 @@ MESSAGES = {
     "menu_restart": "Restart",
     "menu_main_menu": "Main menu",
     "menu_yes": "Yes",
-    # The choice of the character, after "New game".
+    # The choice of the mode, after "New game", then of the character.
+    "choose_mode": "How many players?",
+    "menu_one_player": "1 player",
+    "menu_two_players": "2 players",
     "choose_character": "Choose your character",
+    "choose_character_p1": "Player 1: choose",
+    "hint_inventory_2p": "Q, P: inventory",
     "choose_hint": "Left/Right: choose · E: confirm · Esc: back",
     "menu_no": "No",
     "pause": "Paused",

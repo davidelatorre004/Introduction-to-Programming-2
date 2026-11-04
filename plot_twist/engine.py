@@ -38,10 +38,11 @@ STATE_KEYS = {"room", "inventory", "flags", "ending"}
 # --- Starting, restarting and resuming ---------------------------------------
 
 
-def new_game(character=None):
+def new_game(character=None, two_players=False):
     """Return the state of a brand-new game: on the deck, empty-handed, nothing decided.
 
-    `character` is one of story.CHARACTERS; without it, the first one.
+    `character` is one of story.CHARACTERS; without it, the first one. With
+    `two_players`, it is a game for two on the same keyboard.
     """
     state = {
         "room": story.START_ROOM,
@@ -54,19 +55,21 @@ def new_game(character=None):
         if character not in story.CHARACTERS:
             raise ValueError(f"Unknown character: {character!r}")
         state["flags"]["character"] = character
+    state["flags"]["two_players"] = bool(two_players)
     return state
 
 
-def start_new_game(existing, confirmed=False, character=None):
+def start_new_game(existing, confirmed=False, character=None, two_players=False):
     """Start a new game, asking for confirmation first if there is progress to lose.
 
     `existing` is the current or saved game, or None if there is none. Without
     confirmation it comes back untouched, with the question to ask the player.
-    `character` is the character chosen for the new game.
+    `character` is the character chosen for the new game, and `two_players`
+    whether it is a game for two.
     """
     if existing is not None and not confirmed:
         return _refuse(existing, "needs_confirmation", story.MESSAGES["confirm_restart"])
-    return _accept(new_game(character), "started", story.MESSAGES["intro"])
+    return _accept(new_game(character, two_players), "started", story.MESSAGES["intro"])
 
 
 def menu_options(existing):
@@ -136,6 +139,14 @@ def restore_state(data):
 def is_over(state):
     """True once an ending has been reached."""
     return state["ending"] is not None
+
+
+def partner_character(state):
+    """Player 2's character: the first one of story.CHARACTERS that player 1 did not choose."""
+    for character in story.CHARACTERS:
+        if character != state["flags"]["character"]:
+            return character
+    raise ValueError("There is only one character")
 
 
 def has_item(state, item):
@@ -908,6 +919,8 @@ def _allowed_values(flag):
             values.append(True)
     if flag == "character":
         values += list(story.CHARACTERS)
+    if flag == "two_players":
+        values.append(True)
     return values
 
 

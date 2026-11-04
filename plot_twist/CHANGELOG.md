@@ -2,9 +2,19 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v21](versions/v21.md) - Ready for a second player (refactor only) (2026-11-04)
+## [v22](versions/v22.md) - Two players on one keyboard (2026-11-04)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- After New game, a new screen asks "How many players?": 1 player or 2 players. Then the choice of the character, which in a game for two is player 1's; player 2 gets the other one. Esc goes back one screen at a time.
+- A new flag `two_players` records the mode, so it is saved and Resume keeps it; `engine.partner_character()` gives player 2's character.
+- Alone, nothing changes: arrows or WASD, E and I. For two: player 1 has WASD, E (act) and Q (inventory); player 2 the arrows, right Shift (act) and P (inventory). In menus everyone's keys work.
+- Each player moves with their own keys, and they walk through each other. E acts for the player who pressed it. Each has their own sprite, and the lower one is drawn in front. The camera looks half way between them, and the map shows both.
+- For now, whoever walks into a door or a portal takes the other along, next to them.
+
+## [v21](versions/v21.md) - Ready for a second player (refactor only) (2026-11-04)
+
+In commit [`5803a61`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/5803a61cb42cdbb2f6f365cf7b019f812d435e66/plot_twist).
 
 - The first step towards local co-op for two players. The game plays exactly as before.
 - In `main.py` the seven keys of the player (position, facing, touching, walk, moving, on_tile, zones) moved from the interface state into one player dict, made by `new_player()`, kept in the list `app["players"]`.

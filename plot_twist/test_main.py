@@ -94,8 +94,8 @@ def dialog_text(app):
 
 
 def start_new_game(app):
-    """Choose "New game" on a menu without saves, keep the first character, and read the opening scene."""
-    press(app, pygame.K_RETURN, pygame.K_RETURN)
+    """Choose "New game" on a menu without saves, then "1 player", keep the first character, and read the opening scene."""
+    press(app, pygame.K_RETURN, pygame.K_RETURN, pygame.K_RETURN)
     read_all(app)
 
 
@@ -124,7 +124,7 @@ def walk_until(app, arrived, direction, limit=300):
         if arrived(x, y):
             return
         main.update(app, *direction(x, y))
-    raise AssertionError(f"the player never arrived; now at {app['player']}")
+    raise AssertionError(f"the player never arrived; now at {p1(app)['pos']}")
 
 
 def walk_onto(app, tile):
@@ -501,7 +501,7 @@ def test_a_locked_door_speaks_once_per_push(app):
 
 
 def test_player_cannot_move_while_reading(app):
-    press(app, pygame.K_RETURN, pygame.K_RETURN)  # the opening scene is on screen
+    press(app, pygame.K_RETURN, pygame.K_RETURN, pygame.K_RETURN)  # the opening scene is on screen
     before = p1(app)["pos"]
     for _ in range(30):
         main.update(app, 1, 0)
@@ -523,7 +523,9 @@ def test_menu_offers_resume_only_when_a_game_is_saved(app):
 
 def test_new_game_shows_the_opening_scene_and_saves_at_once(app):
     press(app, pygame.K_RETURN)
-    assert app["scene"] == "character"  # first the choice of the character
+    assert app["scene"] == "mode"  # first the choice of the mode
+    press(app, pygame.K_RETURN)  # "1 player"
+    assert app["scene"] == "character"  # then of the character
     press(app, pygame.K_RETURN)
     assert app["scene"] == "play"
     assert dialog_text(app) == story.MESSAGES["intro"]
@@ -556,7 +558,7 @@ def test_new_game_over_a_save_asks_first(app):
     press(again, pygame.K_RETURN)  # "No"
     assert again["scene"] == "menu"
     assert save.load_game() == saved
-    press(again, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN)  # "New game", then "Yes"
+    press(again, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN, pygame.K_RETURN)  # "New game", "Yes", "1 player"
     assert again["scene"] == "character"
     assert save.load_game() == saved  # nothing replaced until the character is chosen
     press(again, pygame.K_RETURN)
@@ -593,7 +595,7 @@ def test_a_failed_save_is_reported_not_fatal(app, monkeypatch):
     def full_disk(state, path=None):
         raise OSError("No space left on device")
     monkeypatch.setattr(save, "save_game", full_disk)
-    press(app, pygame.K_RETURN, pygame.K_RETURN)
+    press(app, pygame.K_RETURN, pygame.K_RETURN, pygame.K_RETURN)
     assert app["scene"] == "play"
     assert story.MESSAGES["save_failed"] in dialog_text(app)
 
@@ -1286,7 +1288,7 @@ def test_the_sea_is_a_storm_except_in_the_good_ending(app):
 
 def test_new_game_lets_the_player_choose_the_red_character(app):
     """Right, then Enter: the game starts with the red character, saved, and Resume keeps it."""
-    press(app, pygame.K_RETURN)  # "New game"
+    press(app, pygame.K_RETURN, pygame.K_RETURN)  # "New game", "1 player"
     assert app["scene"] == "character" and main.character_entries()[app["menu_index"]] == "green"
     press(app, pygame.K_RIGHT)
     assert main.character_entries()[app["menu_index"]] == "red"
@@ -1301,11 +1303,13 @@ def test_new_game_lets_the_player_choose_the_red_character(app):
 
 
 def test_the_choice_wraps_around_and_esc_goes_back(app):
-    press(app, pygame.K_RETURN)
+    press(app, pygame.K_RETURN, pygame.K_RETURN)  # "New game", "1 player"
     press(app, pygame.K_LEFT)  # from the first, left goes round to the last
     assert main.character_entries()[app["menu_index"]] == "red"
     press(app, pygame.K_d)  # WASD works too
     assert main.character_entries()[app["menu_index"]] == "green"
+    press(app, pygame.K_ESCAPE)
+    assert app["scene"] == "mode"  # one step back: the choice of the mode
     press(app, pygame.K_ESCAPE)
     assert app["scene"] == "menu" and app["state"] is None
     assert save.load_game() is None  # nothing was started
@@ -1316,11 +1320,14 @@ def test_restarting_from_the_pause_menu_also_asks_for_a_character(app):
     start_new_game(app)
     before = app["state"]
     press(app, pygame.K_ESCAPE, pygame.K_DOWN, pygame.K_RETURN)  # "Restart"
-    press(app, pygame.K_UP, pygame.K_RETURN)  # "Yes"
+    press(app, pygame.K_UP, pygame.K_RETURN, pygame.K_RETURN)  # "Yes", "1 player"
     assert app["scene"] == "character"
     press(app, pygame.K_ESCAPE)
+    assert app["scene"] == "mode"
+    press(app, pygame.K_ESCAPE)
     assert app["scene"] == "pause" and app["state"] == before
-    press(app, pygame.K_DOWN, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN, pygame.K_RIGHT, pygame.K_RETURN)
+    press(app, pygame.K_DOWN, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN, pygame.K_RETURN, pygame.K_RIGHT,
+          pygame.K_RETURN)
     assert app["scene"] == "play" and app["state"]["flags"]["character"] == "red"
 
 
@@ -1337,7 +1344,7 @@ def test_the_two_characters_differ_only_in_the_shirt():
 
 def test_the_choice_screen_can_be_drawn(app):
     screen = pygame.Surface((main.WIDTH, main.HEIGHT))
-    press(app, pygame.K_RETURN)
+    press(app, pygame.K_RETURN, pygame.K_RETURN)
     for index in range(len(main.character_entries())):
         app["menu_index"] = index
         main.draw(app, screen)
@@ -1424,10 +1431,155 @@ def test_the_second_direction_of_update_changes_nothing_yet(app):
     start_new_game(app)
     still, pushed = main.new_app(main.load_fonts()), main.new_app(main.load_fonts())
     for other in (still, pushed):
-        press(other, pygame.K_RETURN, pygame.K_RETURN)
+        press(other, pygame.K_RETURN, pygame.K_RETURN, pygame.K_RETURN)
         read_all(other)
     for _ in range(60):
         main.update(still, 1, 0)
         main.update(pushed, 1, 0, -1, 1)
     assert p1(still) == p1(pushed)
     assert still["state"] == pushed["state"]
+
+
+# --- Two players (step 2: two players, for now the one who goes through a door takes the other) ---
+
+
+def start_two_players(app, character_keys=()):
+    """New game, "2 players", then the character of player 1 (the first, or as the keys say)."""
+    press(app, pygame.K_RETURN, pygame.K_DOWN, pygame.K_RETURN, *character_keys, pygame.K_RETURN)
+    read_all(app)
+
+
+def p2(app):
+    return app["players"][1]
+
+
+def test_the_mode_menu_offers_one_or_two_players(app):
+    press(app, pygame.K_RETURN)
+    assert app["scene"] == "mode"
+    assert main.menu_entries(app) == ["one_player", "two_players"]
+    assert main.menu_labels(app) == [story.MESSAGES["menu_one_player"], story.MESSAGES["menu_two_players"]]
+    assert main.menu_entries(app)[app["menu_index"]] == "one_player"  # one player is the first choice
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+    press(app, pygame.K_DOWN, pygame.K_RETURN)
+    assert app["scene"] == "character" and app["two_players"]
+    main.draw(app, screen)  # "Player 1: choose"
+    press(app, pygame.K_ESCAPE, pygame.K_ESCAPE)
+    assert app["scene"] == "menu" and app["state"] is None
+
+
+def test_two_players_start_side_by_side_with_their_own_characters(app):
+    start_two_players(app, (pygame.K_RIGHT,))  # player 1 takes the red one
+    state = app["state"]
+    assert state["flags"]["two_players"] and len(app["players"]) == 2
+    assert engine.restore_state(save.load_game()) == state
+    assert p1(app)["pos"] == main.spawn_at_entry("deck")
+    assert main.player_rect(p2(app)["pos"]).colliderect(main.player_rect(p1(app)["pos"])) is False
+    assert main.player_picture(app, p1(app)) is sprites.image("player_red_down_0")
+    assert main.player_picture(app, p2(app)) is sprites.image("player_down_0")  # the partner: green
+    again = relaunch()
+    press(again, pygame.K_DOWN, pygame.K_RETURN)  # "Resume": two players again
+    assert len(again["players"]) == 2
+
+
+def test_one_player_keeps_the_keys_of_always():
+    assert main.KEYS_1P[0]["act"] == (pygame.K_e,) and main.KEYS_1P[0]["inventory"] == (pygame.K_i,)
+    both = collections.defaultdict(bool, {pygame.K_UP: True, pygame.K_d: True})
+    assert main.held_direction(both) == (1, -1)  # arrows and WASD move the one player
+    assert main.held_direction(both, main.KEYS_1P[0]) == (1, -1)
+
+
+def test_two_players_have_their_own_keys():
+    one, two = main.KEYS_2P
+    pressed = collections.defaultdict(bool, {pygame.K_w: True, pygame.K_RIGHT: True})
+    assert main.held_direction(pressed, one) == (0, -1)  # WASD: player 1
+    assert main.held_direction(pressed, two) == (1, 0)   # arrows: player 2
+    assert one["act"] == (pygame.K_e,) and one["inventory"] == (pygame.K_q,)
+    assert two["act"] == (pygame.K_RSHIFT,) and two["inventory"] == (pygame.K_p,)
+
+
+def test_in_two_players_each_action_key_acts_for_its_player(app):
+    start_two_players(app)
+    stand_next_to(app, "wand")  # player 1 on the wand, player 2 far away
+    p2(app)["pos"] = main.spawn_at_entry("deck")
+    press(app, pygame.K_RSHIFT)  # player 2 acts: nothing near them
+    assert app["dialog"] == [] and app["state"]["inventory"] == []
+    p2(app)["pos"], p1(app)["pos"] = p1(app)["pos"], main.spawn_at_entry("deck")
+    press(app, pygame.K_e)  # player 1 acts: nothing near them either
+    assert app["state"]["inventory"] == []
+    press(app, pygame.K_RSHIFT)  # player 2 on the wand
+    assert app["state"]["inventory"] == ["wand"]
+    read_all(app)  # the text box turns with anyone's key
+    for key, other in ((pygame.K_q, pygame.K_p), (pygame.K_p, pygame.K_q)):
+        press(app, key)
+        assert app["scene"] == "inventory"
+        press(app, other)  # anyone's inventory key closes it
+        assert app["scene"] == "play"
+    press(app, pygame.K_i)  # I is only for one player
+    assert app["scene"] == "play"
+
+
+def test_menus_take_everyones_keys(app):
+    start_two_players(app)
+    press(app, pygame.K_ESCAPE)
+    assert app["scene"] == "pause"
+    press(app, pygame.K_RSHIFT)  # player 2's action key chooses "Continue"
+    assert app["scene"] == "play"
+
+
+def test_each_player_moves_with_their_own_direction_through_each_other(app):
+    start_two_players(app)
+    start_one, start_two = p1(app)["pos"], p2(app)["pos"]
+    for _ in range(20):
+        main.update(app, 0, 1, 0, -1)  # player 1 down, player 2 up
+    assert p1(app)["pos"][1] > start_one[1] and p2(app)["pos"][1] < start_two[1]
+    p2(app)["pos"] = p1(app)["pos"]
+    for _ in range(20):
+        main.update(app, 1, 0, -1, 0)  # straight through each other: they do not block
+    assert p1(app)["pos"][0] > p2(app)["pos"][0] + 40
+
+
+def test_for_now_the_player_at_a_door_takes_the_other_along(app):
+    start_two_players(app)
+    p2(app)["pos"] = main.spawn_in_front_of("deck_to_cabin")
+    for _ in range(30):
+        main.update(app, 0, 0, 0, -1)  # only player 2 walks into the cabin's door
+        if app["state"]["room"] == "cabin":
+            break
+    assert app["state"]["room"] == "cabin"
+    assert p2(app)["pos"] == main.spawn_in_front_of("cabin_to_deck")
+    assert main.is_free_floor(app["state"], p1(app)["pos"]) and p1(app)["pos"] != p2(app)["pos"]
+
+
+def test_player_two_appears_on_free_floor_in_every_room(app):
+    start_two_players(app)
+    for room in story.ROOMS:
+        app["state"] = in_room(room)
+        app["state"]["flags"]["two_players"] = True
+        main.place_at_entry(app)
+        one, two = main.player_rect(p1(app)["pos"]), main.player_rect(p2(app)["pos"])
+        assert main.is_free_floor(app["state"], p2(app)["pos"]), room
+        assert not one.colliderect(two), room
+        assert abs(one.centerx - two.centerx) == main.PLAYER_SIZE + 2 and one.y == two.y, room
+
+
+def test_the_lower_player_is_drawn_in_front(app):
+    """Two players on the same spot, one a little lower: the lower one covers the other."""
+    start_two_players(app, (pygame.K_RIGHT,))  # player 1 red, player 2 green
+    app["fade"] = 0
+    x, y = main.tile_rect(4, 8).topleft
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+
+    def shirt_color(lower):
+        p1(app)["pos"], p2(app)["pos"] = (x, y + 6), (x, y)
+        if lower == "p2":
+            p1(app)["pos"], p2(app)["pos"] = (x, y), (x, y + 6)
+        for one in app["players"]:
+            one["facing"], one["moving"] = (0, 1), False
+        main.draw(app, screen)
+        cam_x, cam_y = main.camera("deck", main.view_position(app))
+        front = p1(app) if lower == "p1" else p2(app)
+        body = main.player_rect(front["pos"])
+        return tuple(screen.get_at((body.centerx - cam_x, body.bottom + 1 - 5 - cam_y)))[:3]
+    assert shirt_color("p1") == sprites.PALETTE["r"]  # player 1, red, in front
+    assert shirt_color("p2") == sprites.PALETTE["g"]  # player 2, green, in front

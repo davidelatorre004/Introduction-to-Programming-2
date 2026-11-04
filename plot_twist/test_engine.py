@@ -1617,3 +1617,32 @@ def test_a_new_game_remembers_the_character_chosen():
     with pytest.raises(ValueError):
         engine.new_game("blue")
     assert engine.restore_state(restorable(flags={"character": "blue"})) is None
+
+
+# --- Two players ----------------------------------------------------------------------
+
+
+def test_partner_character_is_the_other_one():
+    for character in story.CHARACTERS:
+        state = engine.new_game(character, two_players=True)
+        partner = engine.partner_character(state)
+        assert partner in story.CHARACTERS and partner != character
+    assert engine.partner_character(engine.new_game("green")) == "red"
+    assert engine.partner_character(engine.new_game("red")) == "green"
+
+
+def test_a_new_game_remembers_the_mode():
+    assert engine.new_game()["flags"]["two_players"] is False
+    state, outcome = engine.start_new_game(None, character="red", two_players=True)
+    assert outcome["ok"] and state["flags"]["two_players"] is True and state["flags"]["character"] == "red"
+
+
+def test_restore_state_of_a_game_for_two():
+    """A game for two goes through the save file unchanged; a save made before the mode existed is for one."""
+    state = play(GET_KEY, engine.new_game("red", two_players=True))
+    assert reopen(state) == state
+    assert reopen(state)["flags"]["two_players"] is True
+    old = restorable(flags={"cabin_solved": True})
+    assert engine.restore_state(old)["flags"]["two_players"] is False
+    for wrong in ("yes", 1, 2):
+        assert engine.restore_state(restorable(flags={"two_players": wrong})) is None, wrong

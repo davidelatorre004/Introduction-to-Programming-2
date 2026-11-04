@@ -73,6 +73,20 @@ LEFT_KEYS = (pygame.K_LEFT, pygame.K_a)
 RIGHT_KEYS = (pygame.K_RIGHT, pygame.K_d)
 CONFIRM_KEYS = (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE, pygame.K_e)
 
+# The keys of each player: to move, to act (E) and to open the inventory.
+# Alone, the arrows and WASD both move the one player, as always.
+KEYS_1P = [
+    {"up": UP_KEYS, "down": DOWN_KEYS, "left": LEFT_KEYS, "right": RIGHT_KEYS,
+     "act": (pygame.K_e,), "inventory": (pygame.K_i,)},
+]
+# Two players on one keyboard: player 1 on the left of it, player 2 on the right.
+KEYS_2P = [
+    {"up": (pygame.K_w,), "down": (pygame.K_s,), "left": (pygame.K_a,), "right": (pygame.K_d,),
+     "act": (pygame.K_e,), "inventory": (pygame.K_q,)},
+    {"up": (pygame.K_UP,), "down": (pygame.K_DOWN,), "left": (pygame.K_LEFT,), "right": (pygame.K_RIGHT,),
+     "act": (pygame.K_RSHIFT,), "inventory": (pygame.K_p,)},
+]
+
 # --- Colors ------------------------------------------------------------------------
 
 COLORS = {
@@ -573,7 +587,7 @@ def new_app(fonts):
     app = {
         "running": True,
         "fonts": fonts,
-        "scene": "menu",         # "menu", "confirm", "character", "play", "actions", "inventory", "pause" or "ending"
+        "scene": "menu",         # "menu", "confirm", "mode", "character", "play", "actions", "inventory", "pause" or "ending"
         "menu_index": 0,         # the highlighted entry of the menu on screen
         "existing": None,        # the saved game found when the main menu opened, or None
         "state": None,           # the game being played (the engine's state), or None in the main menu
@@ -587,6 +601,8 @@ def new_app(fonts):
         "confirming": "new_game",  # what "Yes" does: start a new game, or the action waiting for it
         "confirm_back": "menu",  # the scene to go back to if the answer is no
         "character_back": "menu",  # the scene Esc goes back to from the choice of the character
+        "mode_back": "menu",     # the scene Esc goes back to from the choice of the mode
+        "two_players": False,    # the mode chosen for the new game, until it starts
         "frame": 0,              # frames since the game started, for everything that moves on screen
         "scene_frames": 0,       # frames since the current scene started
         "fade": 0,               # frames left before the room is out of the dark
@@ -624,6 +640,8 @@ def menu_entries(app):
         return ["yes", "no"]
     if scene == "ending":
         return ["new_game", "main_menu"]
+    if scene == "mode":
+        return ["one_player", "two_players"]
     if scene == "actions":
         return app["actions"]
     return []
@@ -658,6 +676,9 @@ def choose(app, entry):
             do_action(app, app["confirming"])
     elif entry == "no":
         set_scene(app, app["confirm_back"])
+    elif entry == "one_player" or entry == "two_players":
+        app["two_players"] = entry == "two_players"
+        choose_character(app, "mode")  # Esc on the characters comes back to the mode
 
 
 def go_back(app):
@@ -671,6 +692,8 @@ def go_back(app):
         open_main_menu(app)
     elif scene == "character":
         set_scene(app, app["character_back"])
+    elif scene == "mode":
+        set_scene(app, app["mode_back"])
 
 
 def progress(app):
@@ -681,7 +704,7 @@ def progress(app):
 
 
 def request_new_game(app):
-    """Start a new game, but ask first if there is progress to lose. Then the player chooses a character."""
+    """Start a new game, but ask first if there is progress to lose. Then the mode, then the character."""
     _, outcome = engine.start_new_game(progress(app))
     if outcome["event"] == "needs_confirmation":
         app["question"] = outcome["text"]
@@ -689,12 +712,18 @@ def request_new_game(app):
         app["confirm_back"] = app["scene"]
         set_scene(app, "confirm", menu_index=1)  # "No" is highlighted: the safe answer
     else:
-        choose_character(app, app["scene"])
+        choose_mode(app, app["scene"])
 
 
 def confirm_new_game(app):
-    """The player said yes: the progress can go. Now they choose a character; Esc takes them back."""
-    choose_character(app, app["confirm_back"])
+    """The player said yes: the progress can go. Now the mode and the character; Esc takes them back."""
+    choose_mode(app, app["confirm_back"])
+
+
+def choose_mode(app, back):
+    """Show the choice between one and two players. Nothing is replaced yet: Esc goes back to `back`."""
+    app["mode_back"] = back
+    set_scene(app, "mode")
 
 
 def choose_character(app, back):
@@ -710,7 +739,8 @@ def character_entries():
 
 def start_with_character(app, character):
     """The character is chosen: the new game replaces the progress and starts."""
-    state, outcome = engine.start_new_game(progress(app), confirmed=True, character=character)
+    state, outcome = engine.start_new_game(progress(app), confirmed=True, character=character,
+                                           two_players=app["two_players"])
     begin_game(app, state, outcome["text"])
 
 
@@ -718,6 +748,7 @@ def begin_game(app, state, opening_text):
     """Play a brand-new game: put the player at the start, show the opening scene, save at once."""
     app["state"] = state
     app["dialog"] = []
+    set_up_players(app)
     place_at_entry(app)
     app["fade"] = FADE_FRAMES
     say(app, opening_text)
@@ -732,6 +763,7 @@ def resume_game(app):
     if engine.is_over(app["state"]):
         set_scene(app, "ending")
         return
+    set_up_players(app)
     place_at_entry(app)
     app["fade"] = FADE_FRAMES
     show_banner(app, story.ROOMS[app["state"]["room"]]["name"])
@@ -757,24 +789,56 @@ def show_banner(app, text):
     app["banner_frames"] = BANNER_FRAMES
 
 
+def set_up_players(app):
+    """As many players as the game has: one, or two in a game for two."""
+    count = 2 if app["state"]["flags"]["two_players"] else 1
+    app["players"] = [new_player() for _ in range(count)]
+
+
 def place_at_entry(app):
-    player = app["players"][0]
-    player["pos"] = spawn_at_entry(app["state"]["room"])
-    player["touching"] = None
-    settle_on_floor(app, player)
+    """Put player 1 at the entry of the room, and player 2 next to them."""
+    first = app["players"][0]
+    first["pos"] = spawn_at_entry(app["state"]["room"])
+    place_beside(app, first)
 
 
-def place_after_door(app, came_from):
-    """Put the player in front of the door that leads back where they came from."""
+def place_beside(app, leader):
+    """Put the other players next to `leader`, and let everyone settle: arriving is not walking."""
+    for player in app["players"]:
+        if player is not leader:
+            player["pos"] = beside(app["state"], leader["pos"])
+        player["touching"] = None
+        settle_on_floor(app, player)
+
+
+def is_free_floor(state, position):
+    """True if a player can stand here: inside the room, touching nothing solid, no door and no portal."""
+    body = player_rect(position)
+    if not tile_rect(0, 0, *room_size(state["room"])).contains(body) or body.collidelist(solid_rects(state)) != -1:
+        return False
+    return door_touched(state["room"], position, 0, 0) is None and portal_touched(state, position) is None
+
+
+def beside(state, position):
+    """Where a second player stands next to the one at `position`: on the right, else on the left."""
+    x, y = position
+    for dx in (PLAYER_SIZE + 2, -(PLAYER_SIZE + 2)):
+        if is_free_floor(state, (x + dx, y)):
+            return (x + dx, y)
+    return position  # nowhere free: on the same spot (players do not block each other)
+
+
+def place_after_door(app, came_from, leader=None):
+    """Put the player who went through (`leader`, player 1 if not said) in front of the door that leads
+    back where they came from, and the other player next to them."""
     room = app["state"]["room"]
     door = return_door(room, came_from)
-    player = app["players"][0]
+    player = leader or app["players"][0]
     if door is None:
         player["pos"] = spawn_at_entry(room)
     else:
         player["pos"] = spawn_in_front_of(door)
-    player["touching"] = None
-    settle_on_floor(app, player)
+    place_beside(app, player)
 
 
 def settle_on_floor(app, player):
@@ -783,8 +847,8 @@ def settle_on_floor(app, player):
     player["zones"] = zones_around(app["state"], player["pos"])
 
 
-def go_through(app, door):
-    """The player walks into a door: ask the engine, then change room or explain why not."""
+def go_through(app, door, player=None):
+    """A player walks into a door: ask the engine, then change room or explain why not."""
     came_from = app["state"]["room"]
     state, outcome = engine.perform(app["state"], {"verb": "enter", "target": door})
     if not outcome["ok"]:
@@ -792,23 +856,23 @@ def go_through(app, door):
         return
     app["state"] = state
     save_progress(app)
-    place_after_door(app, came_from)
+    place_after_door(app, came_from, player)
     app["fade"] = FADE_FRAMES
     show_banner(app, outcome["text"])
 
 
-def go_through_portal(app, portal):
-    """The player steps into a portal: the engine moves them, and they appear by the twin portal."""
+def go_through_portal(app, portal, player=None):
+    """A player steps into a portal: the engine moves them, and they appear by the twin portal,
+    the other player next to them."""
     state, outcome = engine.perform(app["state"], {"verb": "travel", "target": portal})
     if not outcome["ok"]:
         return
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     app["state"] = state
     save_progress(app)
-    player = app["players"][0]
+    player = player or app["players"][0]
     player["pos"] = spawn_by_portal(story.OBJECTS[portal]["to"])
-    player["touching"] = None
-    settle_on_floor(app, player)
+    place_beside(app, player)
     if effects.FX["portals"]:
         app["fx"]["warp"] = effects.WARP_FRAMES  # a purple warp instead of the dark fade
     else:
@@ -859,9 +923,11 @@ def floor_action(app, action):
     save_progress(app)
 
 
-def interact(app):
-    """E: act on the nearest thing, or look around. Several possible actions open a small menu."""
-    target, actions = target_and_actions(app["state"], app["players"][0]["pos"])
+def interact(app, player=None):
+    """E: act on the thing nearest to the player who pressed it (player 1 if not said).
+    Several possible actions open a small menu."""
+    player = player or app["players"][0]
+    target, actions = target_and_actions(app["state"], player["pos"])
     if len(actions) == 1:
         choose_action(app, actions[0])
     elif actions:
@@ -906,7 +972,7 @@ def handle_key(app, key):
     if scene == "play":
         handle_play_key(app, key)
     elif scene == "inventory":
-        if key == pygame.K_i or key == pygame.K_ESCAPE or key in CONFIRM_KEYS:
+        if key in inventory_keys(app) or key == pygame.K_ESCAPE or key in confirm_keys(app):
             set_scene(app, "play")
         elif key in UP_KEYS or key in DOWN_KEYS:
             scroll_inventory(app, -1 if key in UP_KEYS else 1)
@@ -916,6 +982,27 @@ def handle_key(app, key):
         handle_menu_key(app, key)
 
 
+def controls(app):
+    """The keys of each player, in the order of app["players"]."""
+    state = app["state"]
+    if state is not None and state["flags"]["two_players"]:
+        return KEYS_2P
+    return KEYS_1P
+
+
+def confirm_keys(app):
+    """The keys that choose in a menu or turn the page of the text box: everyone's."""
+    keys = list(CONFIRM_KEYS)
+    for player_keys in controls(app):
+        keys += [key for key in player_keys["act"] if key not in keys]
+    return keys
+
+
+def inventory_keys(app):
+    """The keys that open and close the inventory: everyone's."""
+    return [key for player_keys in controls(app) for key in player_keys["inventory"]]
+
+
 def handle_character_key(app, key):
     """Keys on the choice of the character: left and right to move, E or Enter to choose, Esc to go back."""
     entries = character_entries()
@@ -923,24 +1010,29 @@ def handle_character_key(app, key):
         app["menu_index"] = (app["menu_index"] - 1) % len(entries)
     elif key in RIGHT_KEYS:
         app["menu_index"] = (app["menu_index"] + 1) % len(entries)
-    elif key in CONFIRM_KEYS:
+    elif key in confirm_keys(app):
         start_with_character(app, entries[app["menu_index"]])
     elif key == pygame.K_ESCAPE:
         go_back(app)
 
 
 def handle_play_key(app, key):
-    """Keys while playing: E acts (or turns the page of the text box), I opens the inventory, Esc pauses."""
+    """Keys while playing: a player's action key acts (or turns the page of the text box), their
+    inventory key opens the inventory, Esc pauses. Alone: E and I, as always."""
     if key == pygame.K_ESCAPE:
         set_scene(app, "pause")
     elif app["dialog"]:
-        if key in CONFIRM_KEYS:
+        if key in confirm_keys(app):
             app["dialog"].pop(0)
-    elif key == pygame.K_e:
-        interact(app)
-    elif key == pygame.K_i:
-        app["inventory_scroll"] = 0  # the list of items always opens at the top
-        set_scene(app, "inventory")
+        return
+    for player, keys in zip(app["players"], controls(app)):
+        if key in keys["act"]:
+            interact(app, player)
+            return
+        if key in keys["inventory"]:
+            app["inventory_scroll"] = 0  # the list of items always opens at the top
+            set_scene(app, "inventory")
+            return
 
 
 def handle_menu_key(app, key):
@@ -950,7 +1042,7 @@ def handle_menu_key(app, key):
         app["menu_index"] = (app["menu_index"] - 1) % len(entries)
     elif key in DOWN_KEYS:
         app["menu_index"] = (app["menu_index"] + 1) % len(entries)
-    elif key in CONFIRM_KEYS:
+    elif key in confirm_keys(app):
         choose(app, entries[app["menu_index"]])
     elif key == pygame.K_ESCAPE:
         go_back(app)
@@ -963,31 +1055,35 @@ def is_held(pressed, keys):
     return False
 
 
-def held_direction(pressed):
-    """The direction (dx, dy) that the arrow keys or WASD are pushing, each -1, 0 or 1."""
+def held_direction(pressed, keys=KEYS_1P[0]):
+    """The direction (dx, dy) that a player's keys are pushing, each -1, 0 or 1.
+
+    `keys` is the set of keys of that player (see KEYS_1P and KEYS_2P): alone, the
+    arrows and WASD.
+    """
     dx = 0
     dy = 0
-    if is_held(pressed, LEFT_KEYS):
+    if is_held(pressed, keys["left"]):
         dx -= 1
-    if is_held(pressed, RIGHT_KEYS):
+    if is_held(pressed, keys["right"]):
         dx += 1
-    if is_held(pressed, UP_KEYS):
+    if is_held(pressed, keys["up"]):
         dy -= 1
-    if is_held(pressed, DOWN_KEYS):
+    if is_held(pressed, keys["down"]):
         dy += 1
     return (dx, dy)
 
 
 def update(app, dx, dy, dx2=0, dy2=0):
-    """Move the game on by one frame. (dx, dy) is the direction held on the keyboard.
+    """Move the game on by one frame. (dx, dy) is the direction held by player 1, (dx2, dy2) by player 2.
 
-    (dx2, dy2) is for a second player, and is not used yet.
+    Each player moves with their own direction; they do not block each other.
     """
-    player = app["players"][0]
     app["frame"] += 1
     app["scene_frames"] += 1
     update_effects(app)
-    player["moving"] = False
+    for player in app["players"]:
+        player["moving"] = False
     if app["banner_frames"] > 0:
         app["banner_frames"] -= 1
     if app["fade"] > 0:
@@ -999,6 +1095,18 @@ def update(app, dx, dy, dx2=0, dy2=0):
     if engine.is_over(app["state"]):
         set_scene(app, "ending")  # the last text has been read: on to the ending
         return
+    room = app["state"]["room"]
+    for player, (pdx, pdy) in zip(app["players"], [(dx, dy), (dx2, dy2)]):
+        if app["state"]["room"] != room or app["scene"] != "play":
+            return  # someone went through: the others have been placed by them
+        move_player(app, player, pdx, pdy)
+
+
+def move_player(app, player, dx, dy):
+    """One player's frame: walk, go through a door, step on the tiles, walk into a portal.
+
+    For now, whoever walks into a door or a portal takes the other player along.
+    """
     if dy != 0:
         player["facing"] = (0, dy)
     elif dx != 0:
@@ -1016,11 +1124,11 @@ def update(app, dx, dy, dx2=0, dy2=0):
         player["touching"] = None
     elif door != player["touching"]:
         player["touching"] = door
-        go_through(app, door)
+        go_through(app, door, player)
     floor_triggers(app, player)
     portal = portal_touched(app["state"], player["pos"])
     if portal is not None:
-        go_through_portal(app, portal)
+        go_through_portal(app, portal, player)
 
 
 # --- Visual effects: what happens on screen when something happens in the game -----------
@@ -1520,6 +1628,13 @@ def draw_thing(screen, thing, lift=0):
             pygame.draw.rect(screen, COLORS["black"], eye)
 
 
+def player_character(app, player):
+    """The character a player plays: player 1 the one chosen, player 2 the other one."""
+    if player is app["players"][0]:
+        return app["state"]["flags"]["character"]
+    return engine.partner_character(app["state"])
+
+
 def player_picture(app, player):
     """The player's sprite for the direction they face, standing (0) or in one of the two walking steps."""
     fx, fy = player["facing"]
@@ -1532,7 +1647,7 @@ def player_picture(app, player):
     step = 0
     if player["moving"]:
         step = 1 + (player["walk"] // WALK_STEP_FRAMES) % 2
-    character = story.CHARACTERS[app["state"]["flags"]["character"]]["sprite"]
+    character = story.CHARACTERS[player_character(app, player)]["sprite"]
     return sprites.image(character + "_" + direction + "_" + str(step), flip=fx < 0)
 
 
@@ -1693,14 +1808,17 @@ def draw_room(app, screen):
         if thing["kind"] == "item":
             draw_thing(screen, thing, ALTAR_LIFT if on_an_altar(state, thing["id"]) else 0)
     # From the back of the room to the front: what stands lower on screen covers the rest.
-    player = app["players"][0]
-    feet = player_rect(player["pos"]).bottom
+    # The players go in order of their feet, the lower one in front.
+    drawn = set()
+    for player in sorted(app["players"], key=lambda one: player_rect(one["pos"]).bottom):
+        feet = player_rect(player["pos"]).bottom
+        for thing in standing:
+            if thing["id"] not in drawn and thing_rect(thing["id"]).bottom <= feet:
+                draw_standing(app, screen, thing)
+                drawn.add(thing["id"])
+        draw_player(app, screen, player)
     for thing in standing:
-        if thing_rect(thing["id"]).bottom <= feet:
-            draw_standing(app, screen, thing)
-    draw_player(app, screen, player)
-    for thing in standing:
-        if thing_rect(thing["id"]).bottom > feet:
+        if thing["id"] not in drawn:
             draw_standing(app, screen, thing)
     # The effects on top: barriers dissolving, the key welding, particles, dust, and the light.
     draw_fading_barriers(app, screen)
@@ -1742,7 +1860,8 @@ def draw_hud(app, screen):
     pygame.draw.line(screen, COLORS["dim_text"], (0, HUD_HEIGHT - 1), (WIDTH, HUD_HEIGHT - 1))
     draw_text(screen, font, story.ROOMS[state["room"]]["name"], COLORS["text"], (8, 4))
     right = map_rect().left - 6  # the map takes the right corner: the rest moves left of it
-    draw_text(screen, font, story.MESSAGES["hint_inventory"], COLORS["dim_text"], (right, 4), "right")
+    inventory_hint = story.MESSAGES["hint_inventory_2p" if state["flags"]["two_players"] else "hint_inventory"]
+    draw_text(screen, font, inventory_hint, COLORS["dim_text"], (right, 4), "right")
     if app["scene"] == "play" and not app["dialog"]:
         hint = prompt(state, app["players"][0]["pos"])
         if hint:
@@ -1881,8 +2000,9 @@ def draw_map(app, screen):
             else:
                 x = area.right
             pygame.draw.rect(screen, COLORS["dim_text"], (x, y, 1, 1))
-    x, y = map_dot(state["room"], app["players"][0]["pos"])
-    pygame.draw.rect(screen, COLORS["black"], (x, y, 1, 1))
+    for player in app["players"]:
+        x, y = map_dot(state["room"], player["pos"])
+        pygame.draw.rect(screen, COLORS["black"], (x, y, 1, 1))
 
 
 def draw_banner(app, screen):
@@ -1924,6 +2044,12 @@ def room_surface(room):
     return _room_surfaces[size]
 
 
+def view_position(app):
+    """Where the camera looks: at the player, or half way between the two players."""
+    players = app["players"]
+    return (sum(one["pos"][0] for one in players) / len(players), sum(one["pos"][1] for one in players) / len(players))
+
+
 def draw_play_screen(app, screen):
     """The room, seen through the camera, then the bar on top.
 
@@ -1933,7 +2059,7 @@ def draw_play_screen(app, screen):
     room = app["state"]["room"]
     whole = room_surface(room)
     draw_room(app, whole)
-    x, y = camera(room, app["players"][0]["pos"])
+    x, y = camera(room, view_position(app))
     screen.fill(COLORS["black"])
     screen.set_clip(VIEW)
     screen.blit(whole, (-x, -y))
@@ -2147,8 +2273,8 @@ def draw_character_choice(app, screen):
     the highlighted one in a frame that blinks."""
     draw_sea(app, screen, screen.get_rect(), calm=True)
     font = app["fonts"]["text"]
-    draw_text(screen, app["fonts"]["title"], story.MESSAGES["choose_character"], COLORS["text"], (WIDTH // 2, 36),
-              "center", True)
+    title = story.MESSAGES["choose_character_p1" if app["two_players"] else "choose_character"]
+    draw_text(screen, app["fonts"]["title"], title, COLORS["text"], (WIDTH // 2, 36), "center", True)
     entries = character_entries()
     first = WIDTH // 2 - (len(entries) - 1) * CHARACTER_GAP // 2
     for index, character in enumerate(entries):
@@ -2167,6 +2293,14 @@ def draw_character_choice(app, screen):
     for index, line in enumerate(lines):
         y = HEIGHT - 6 - (len(lines) - index) * font.get_linesize()
         draw_text(screen, font, line, COLORS["foam"], (WIDTH // 2, y), "center", True)
+
+
+def draw_mode_choice(app, screen):
+    """The choice between one and two players, over the calm sea of the title."""
+    draw_sea(app, screen, screen.get_rect(), calm=True)
+    draw_text(screen, app["fonts"]["title"], story.MESSAGES["choose_mode"], COLORS["text"], (WIDTH // 2, 36),
+              "center", True)
+    draw_menu(app, screen, 100)
 
 
 def draw_question(app, screen):
@@ -2210,6 +2344,8 @@ def draw(app, screen):
         draw_menu(app, screen, ENDING_MENU_TOP)
     elif scene == "character":
         draw_character_choice(app, screen)
+    elif scene == "mode":
+        draw_mode_choice(app, screen)
     elif scene == "confirm":
         back = app["confirm_back"]
         if back == "menu":
@@ -2239,8 +2375,10 @@ def main():
                 app["running"] = False
             elif event.type == pygame.KEYDOWN:
                 handle_key(app, event.key)
-        dx, dy = held_direction(pygame.key.get_pressed())
-        update(app, dx, dy)
+        pressed = pygame.key.get_pressed()
+        directions = [held_direction(pressed, keys) for keys in controls(app)] + [(0, 0)]
+        (dx, dy), (dx2, dy2) = directions[0], directions[1]
+        update(app, dx, dy, dx2, dy2)
         draw(app, screen)
         pygame.transform.scale(screen, window.get_size(), window)  # plain scaling: sharp pixels
         pygame.display.flip()
