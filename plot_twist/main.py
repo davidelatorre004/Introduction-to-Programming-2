@@ -22,6 +22,7 @@ import pygame
 
 import effects
 import engine
+import net
 import save
 import sounds
 import sprites
@@ -73,19 +74,21 @@ LEFT_KEYS = (pygame.K_LEFT, pygame.K_a)
 RIGHT_KEYS = (pygame.K_RIGHT, pygame.K_d)
 CONFIRM_KEYS = (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE, pygame.K_e)
 
-# The keys of each player: to move, to act (E) and to open the inventory.
-# Alone, the arrows and WASD both move the one player, as always.
+# The keys of the player: to move, to act (E) and to open the inventory. In a game
+# for two, each computer has its own keyboard, and the same keys.
 KEYS_1P = [
     {"up": UP_KEYS, "down": DOWN_KEYS, "left": LEFT_KEYS, "right": RIGHT_KEYS,
      "act": (pygame.K_e,), "inventory": (pygame.K_i,)},
 ]
-# Two players on one keyboard: player 1 on the left of it, player 2 on the right.
-KEYS_2P = [
-    {"up": (pygame.K_w,), "down": (pygame.K_s,), "left": (pygame.K_a,), "right": (pygame.K_d,),
-     "act": (pygame.K_e,), "inventory": (pygame.K_q,)},
-    {"up": (pygame.K_UP,), "down": (pygame.K_DOWN,), "left": (pygame.K_LEFT,), "right": (pygame.K_RIGHT,),
-     "act": (pygame.K_RSHIFT,), "inventory": (pygame.K_p,)},
-]
+
+# The keys that type an address on the "Join game" screen.
+ADDRESS_KEYS = {getattr(pygame, f"K_{digit}"): str(digit) for digit in range(10)}
+ADDRESS_KEYS.update({getattr(pygame, f"K_KP{digit}"): str(digit) for digit in range(10)})
+ADDRESS_KEYS.update({pygame.K_PERIOD: ".", pygame.K_KP_PERIOD: "."})
+ADDRESS_LENGTH = 15  # "255.255.255.255"
+
+NET_PORT = net.PORT  # where the host waits (the tests use any free port)
+SYNC_EVERY = 1       # frames between two messages with where the players are
 
 # --- Colors ------------------------------------------------------------------------
 
@@ -598,7 +601,8 @@ def new_app(fonts):
     app = {
         "running": True,
         "fonts": fonts,
-        "scene": "menu",         # "menu", "confirm", "mode", "character", "play", "actions", "inventory", "pause" or "ending"
+        "scene": "menu",         # "menu", "confirm", "mode", "character", "lobby", "join", "play", "actions",
+                                 # "inventory", "pause" or "ending"
         "menu_index": 0,         # the highlighted entry of the menu on screen
         "existing": None,        # the saved game found when the main menu opened, or None
         "state": None,           # the game being played (the engine's state), or None in the main menu
@@ -622,6 +626,12 @@ def new_app(fonts):
         "inventory_scroll": 0,   # how many rows the list of items is scrolled down
         "inventory_player": 1,   # whose items the inventory screen shows: who opened it
         "actor": 1,              # who pressed E last: the player the chosen action is for
+        "me": 0,                 # which of app["players"] plays on this computer: 0, or 1 for the one who joined
+        "net": None,             # the connection to the other computer, in a game for two (see start_network)
+        "lobby": None,           # the host's game waiting for the other computer: (state, opening text)
+        "join_text": "",         # the address typed on the "Join game" screen
+        "join_error": "",        # why the last try to join failed
+        "notice": "",            # a line on the title screen: why the last game for two ended
     }
     open_main_menu(app)
     return app
@@ -634,7 +644,13 @@ def set_scene(app, scene, menu_index=0):
 
 
 def open_main_menu(app):
-    """Show the main menu. "Riprendi" is offered only if the save file holds a valid game."""
+    """Show the main menu. "Resume" is offered only if the save file holds a valid game.
+
+    A game for two ends here: the connection to the other computer closes.
+    """
+    end_network(app)
+    app["me"] = 0
+    app["players"] = [new_player()]
     app["state"] = None
     app["existing"] = engine.restore_state(save.load_game())
     app["dialog"] = []
@@ -646,8 +662,10 @@ def menu_entries(app):
     """The entries of the menu showing in the current scene: ids, or the actions of the E menu."""
     scene = app["scene"]
     if scene == "menu":
-        return engine.menu_options(app["existing"]) + ["quit"]
+        return engine.menu_options(app["existing"]) + ["join_game", "quit"]
     if scene == "pause":
+        if app["net"] is not None:
+            return ["continue", "main_menu", "quit"]  # a game for two cannot restart from one side
         return ["continue", "restart", "main_menu", "quit"]
     if scene == "confirm":
         return ["yes", "no"]
@@ -689,6 +707,8 @@ def choose(app, entry):
             do_action(app, app["confirming"])
     elif entry == "no":
         set_scene(app, app["confirm_back"])
+    elif entry == "join_game":
+        open_join(app)
     elif entry == "one_player" or entry == "two_players":
         app["two_players"] = entry == "two_players"
         choose_character(app, "mode")  # Esc on the characters comes back to the mode
@@ -707,6 +727,8 @@ def go_back(app):
         set_scene(app, app["character_back"])
     elif scene == "mode":
         set_scene(app, app["mode_back"])
+    elif scene == "lobby" or scene == "join":
+        open_main_menu(app)
 
 
 def progress(app):
@@ -754,17 +776,26 @@ def start_with_character(app, character):
     """The character is chosen: the new game replaces the progress and starts."""
     state, outcome = engine.start_new_game(progress(app), confirmed=True, character=character,
                                            two_players=app["two_players"])
-    begin_game(app, state, outcome["text"])
+    if app["two_players"]:
+        open_lobby(app, state, outcome["text"])  # first the other computer joins
+    else:
+        begin_game(app, state, outcome["text"])
 
 
 def begin_game(app, state, opening_text):
-    """Play a brand-new game: put the player at the start, show the opening scene, save at once."""
+    """Play a game: put the players at the start, show the opening scene, save at once.
+
+    Without an opening text (a game for two that is resumed) the room's name shows instead.
+    """
     app["state"] = state
     app["dialog"] = []
     set_up_players(app)
     place_at_entry(app)
     app["fade"] = FADE_FRAMES
-    say(app, opening_text)
+    if opening_text:
+        say(app, opening_text)
+    else:
+        show_banner(app, story.ROOMS[engine.player_room(state, my_number(app))]["name"])
     save_progress(app)
     set_scene(app, "play")
 
@@ -776,6 +807,9 @@ def resume_game(app):
     if engine.is_over(app["state"]):
         set_scene(app, "ending")
         return
+    if app["state"]["flags"]["two_players"]:
+        open_lobby(app, app["state"], None)  # a game for two goes on when the other computer joins
+        return
     set_up_players(app)
     place_at_entry(app)
     app["fade"] = FADE_FRAMES
@@ -784,7 +818,12 @@ def resume_game(app):
 
 
 def save_progress(app):
-    """Save the game after an accepted action. If the disk refuses, tell the player instead of crashing."""
+    """Save the game after an accepted action. If the disk refuses, tell the player instead of crashing.
+
+    In a game for two only the host saves: the game is kept on its computer.
+    """
+    if app["net"] is not None and app["net"]["role"] == "client":
+        return
     try:
         save.save_game(app["state"])
     except OSError:
@@ -808,18 +847,42 @@ def set_up_players(app):
     app["players"] = [new_player() for _ in range(count)]
 
 
+def my_number(app):
+    """The number of the player on this computer: 1, or 2 for the one who joined a game for two."""
+    return app["me"] + 1
+
+
+def local_player(app):
+    """The player on this computer, moved by its keyboard."""
+    return app["players"][app["me"]]
+
+
+def view(app):
+    """The game as the player on this computer sees it: their room is "room" (see engine.seen_by).
+
+    Alone, or on the host, it is the game itself.
+    """
+    return engine.seen_by(app["state"], my_number(app))
+
+
+def same_room(app, player):
+    """True if `player` is in the room of the player on this computer."""
+    number = player_number(app, player)
+    return engine.player_room(app["state"], number) == engine.player_room(app["state"], my_number(app))
+
+
 def place_at_entry(app):
-    """Put player 1 at the entry of the room, and player 2 next to them."""
+    """Put each player at the entry of their room; player 2 next to player 1 if they share it."""
+    state = app["state"]
     first = app["players"][0]
-    first["pos"] = spawn_at_entry(app["state"]["room"])
-    place_beside(app, first)
-
-
-def place_beside(app, leader):
-    """Put the other players next to `leader`, and let everyone settle: arriving is not walking."""
-    for player in app["players"]:
-        if player is not leader:
-            player["pos"] = beside(app["state"], leader["pos"])
+    first["pos"] = spawn_at_entry(state["room"])
+    for number, player in enumerate(app["players"], start=1):
+        room = engine.player_room(state, number)
+        if number > 1:
+            if room == state["room"]:
+                player["pos"] = beside(state, first["pos"])
+            else:
+                player["pos"] = spawn_at_entry(room)
         player["touching"] = None
         settle_on_floor(app, player)
 
@@ -842,62 +905,54 @@ def beside(state, position):
 
 
 def place_after_door(app, came_from):
-    """Put the players in front of the door that leads back where they came from, side by side."""
-    room = app["state"]["room"]
-    door = return_door(room, came_from)
-    if door is None:
-        place_at_entry(app)
-        return
-    place_at(app, door_arrivals(app["state"], door))
-
-
-def place_at(app, positions):
-    """Put each player on their own position, and let everyone settle: arriving is not walking."""
-    for player, position in zip(app["players"], positions):
-        player["pos"] = position
-        player["touching"] = None
-        settle_on_floor(app, player)
-
-
-def side_by_side(state, first, along):
-    """Where the players arrive: player 1 on `first`, player 2 next to them, PLAYER_SIZE + 2 pixels
-    along the direction `along` (a unit (x, y)), on whichever side is free floor."""
-    step = PLAYER_SIZE + 2
-    for sign in (1, -1):
-        second = (first[0] + sign * step * along[0], first[1] + sign * step * along[1])
-        if is_free_floor(state, second):
-            return [first, second]
-    return [first, first]  # nowhere free: on the same spot (players do not block each other)
-
-
-def door_arrivals(state, door):
-    """Where the players arrive through `door`, the door they will see behind them: in front of it,
-    side by side along its wall. Player 1 is where a player alone appears (spawn_in_front_of)."""
-    along = (1, 0) if story.DOORS[door]["side"] in ("N", "S") else (0, 1)
-    return side_by_side(state, spawn_in_front_of(door), along)
-
-
-def portal_arrivals(state, portal):
-    """Where the players arrive by `portal`: just below the ring, side by side. Player 1 is where a
-    player alone appears (spawn_by_portal)."""
-    return side_by_side(state, spawn_by_portal(portal), (1, 0))
+    """Put the player on this computer in front of the door that leads back where they came from."""
+    seen = view(app)
+    door = return_door(seen["room"], came_from)
+    player = local_player(app)
+    player["pos"] = spawn_at_entry(seen["room"]) if door is None else spawn_in_front_of(door)
+    player["touching"] = None
+    settle_on_floor(app, player)
 
 
 def settle_on_floor(app, player):
     """Appearing somewhere is not walking there: where the player appears fires no movement trigger."""
-    player["on_tile"] = tile_under(app["state"], player["pos"])
-    player["zones"] = zones_around(app["state"], player["pos"])
+    seen = engine.seen_by(app["state"], player_number(app, player))
+    player["on_tile"] = tile_under(seen, player["pos"])
+    player["zones"] = zones_around(seen, player["pos"])
+
+
+# --- Asking the engine: here, or the host --------------------------------------------------
+
+
+def request(app, action, finish):
+    """Ask the engine to do an action for the player on this computer, then call
+    finish(app, action, before, state, outcome) with the result.
+
+    Alone, and on the host, it happens at once. On the computer that joined, the
+    host does it (the game is kept in one place only) and the answer comes back a
+    moment later, with the new state.
+    """
+    before = app["state"]
+    connection = app["net"]
+    if connection is not None and connection["role"] == "client":
+        connection["next_id"] += 1
+        connection["pending"][connection["next_id"]] = (action, before, finish)
+        send(app, {"t": "do", "id": connection["next_id"], "action": action})
+        return
+    state, outcome = engine.perform(before, action, my_number(app))
+    finish(app, action, before, state, outcome)
 
 
 def go_through(app, door):
-    """The players walk into a door: ask the engine, then change room or explain why not."""
-    came_from = app["state"]["room"]
-    state, outcome = engine.perform(app["state"], {"verb": "enter", "target": door})
+    """The player walks into a door: ask the engine, then change room or explain why not."""
+    request(app, {"verb": "enter", "target": door, "item": None}, finish_door)
+
+
+def finish_door(app, action, before, state, outcome):
     if not outcome["ok"]:
         say(app, outcome["text"])
         return
-    if len(app["players"]) > 1:  # together: player 2 goes through the same door
-        state, _ = engine.perform(state, {"verb": "enter", "target": door}, 2)
+    came_from = engine.player_room(before, my_number(app))
     app["state"] = state
     save_progress(app)
     place_after_door(app, came_from)
@@ -906,62 +961,66 @@ def go_through(app, door):
 
 
 def go_through_portal(app, portal):
-    """The players step into a portal: the engine moves them, and they appear by the twin portal, side by side."""
-    state, outcome = engine.perform(app["state"], {"verb": "travel", "target": portal})
+    """The player steps into a portal: the engine moves them, and they appear by the twin portal."""
+    request(app, {"verb": "travel", "target": portal, "item": None}, finish_portal)
+
+
+def finish_portal(app, action, before, state, outcome):
     if not outcome["ok"]:
         return
-    if len(app["players"]) > 1:  # together: player 2 steps in the same portal
-        state, _ = engine.perform(state, {"verb": "travel", "target": portal}, 2)
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     app["state"] = state
     save_progress(app)
-    place_at(app, portal_arrivals(state, story.OBJECTS[portal]["to"]))
+    player = local_player(app)
+    player["pos"] = spawn_by_portal(story.OBJECTS[action["target"]]["to"])
+    player["touching"] = None
+    settle_on_floor(app, player)
     if effects.FX["portals"]:
         app["fx"]["warp"] = effects.WARP_FRAMES  # a purple warp instead of the dark fade
     else:
         app["fade"] = FADE_FRAMES
-    show_banner(app, story.ROOMS[state["room"]]["name"])
+    show_banner(app, story.ROOMS[engine.player_room(state, my_number(app))]["name"])
 
 
 def floor_triggers(app, player):
-    """The movement triggers of the room, checked in every frame after a player moves.
+    """The movement triggers of the room, checked in every frame after the player moves.
 
     Walking onto a numbered tile steps on it, whoever walks there. Walking out of
     the zone around the tiles leaves it, but only when no player is left in it.
     Each one fires once, when it happens: standing still on a tile does not step on
     it again. The engine decides what it means.
     """
-    state = app["state"]
+    state = view(app)
     tile = tile_under(state, player["pos"])
     zones = zones_around(state, player["pos"])
     stepped_on = tile if tile is not None and tile != player["on_tile"] else None
-    # The zones of all the players together: a zone is left only when nobody is in it any more.
+    # The zones of all the players in the room together: a zone is left only when nobody is in it any more.
     others = set()
     for other in app["players"]:
-        if other is not player:
-            others |= other["zones"]
+        if other is not player and same_room(app, other):
+            others |= zones_around(state, other["pos"])
     left = sorted(player["zones"] - zones - others)
     player["on_tile"] = tile
     player["zones"] = zones
-    number = player_number(app, player)
     for puzzle in left:
-        floor_action(app, {"verb": "leave_zone", "target": puzzle}, number)
+        floor_action(app, {"verb": "leave_zone", "target": puzzle, "item": None})
     if stepped_on is not None:
-        floor_action(app, {"verb": "step_on", "target": stepped_on}, number)
+        floor_action(app, {"verb": "step_on", "target": stepped_on, "item": None})
 
 
-def floor_action(app, action, player=1):
-    """Tell the engine what the player's feet did, then play and show what happens, without stopping them.
+def floor_action(app, action, player=None):
+    """Tell the engine what the player's feet did, then play and show what happens, without stopping them."""
+    request(app, action, finish_floor)
 
-    Refusals stay silent: walking around is not a request. The other outcomes
+
+def finish_floor(app, action, before, state, outcome):
+    """Refusals stay silent: walking around is not a request. The other outcomes
     play their sound and show in the banner, except the solved puzzle, which
-    opens the text box. A mistake also makes the tiles blink red.
-    """
-    state, outcome = engine.perform(app["state"], action, player)
+    opens the text box. A mistake also makes the tiles blink red."""
     if not outcome["ok"]:
         return
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
-    show_outcome(app, action, app["state"], state, outcome)
+    show_outcome(app, action, before, state, outcome)
     if outcome["event"] == "tiles_reset":
         app["flash_frames"] = FLASH_FRAMES
     if outcome["event"] == "tiles_complete":
@@ -979,16 +1038,16 @@ def player_number(app, player):
 
 
 def partner_near(app, player):
-    """The other player, if they are within reach of `player`, or None."""
+    """The other player, if they are in the same room and within reach of `player`, or None."""
     reach = player_rect(player["pos"]).inflate(2 * REACH, 2 * REACH)
     for other in app["players"]:
-        if other is not player and reach.colliderect(player_rect(other["pos"])):
+        if other is not player and same_room(app, other) and reach.colliderect(player_rect(other["pos"])):
             return other
     return None
 
 
 def give_actions(app, player):
-    """Near the partner, E offers to hand them each item the player carries."""
+    """Next to the partner, E offers to hand them each item the player carries."""
     if partner_near(app, player) is None:
         return []
     number = player_number(app, player)
@@ -1000,9 +1059,9 @@ def give_actions(app, player):
 
 
 def interact(app, player=None):
-    """E: act on the thing nearest to the player who pressed it (player 1 if not said).
-    Several possible actions open a small menu. Near the partner, it also offers to give them items."""
-    player = player or app["players"][0]
+    """E: act on the thing nearest to the player on this computer. Several possible actions
+    open a small menu. Next to the partner, it also offers to give them items."""
+    player = player or local_player(app)
     app["actor"] = player_number(app, player)
     target, actions = target_and_actions(app["state"], player["pos"], app["actor"])
     gifts = give_actions(app, player)
@@ -1035,7 +1094,10 @@ def do_action(app, action):
     if action["verb"] == "enter":
         go_through(app, action["target"])
         return
-    state, outcome = engine.perform(app["state"], action, app["actor"])
+    request(app, action, finish_action)
+
+
+def finish_action(app, action, before, state, outcome):
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     if outcome["event"] == "toggled":
         show_banner(app, outcome["text"])  # a generator clicks: no text box to close every time
@@ -1043,7 +1105,7 @@ def do_action(app, action):
         app["banner_frames"] = 0  # the text box takes over from an older banner
         say(app, outcome["text"])
     if outcome["ok"]:
-        show_outcome(app, action, app["state"], state, outcome)
+        show_outcome(app, action, before, state, outcome)
         app["state"] = state
         save_progress(app)
 
@@ -1051,6 +1113,7 @@ def do_action(app, action):
 def handle_key(app, key):
     """React to one key press."""
     scene = app["scene"]
+    app["notice"] = ""  # the line about the last game for two goes away at the first key
     if scene == "play":
         handle_play_key(app, key)
     elif scene == "inventory":
@@ -1060,29 +1123,28 @@ def handle_key(app, key):
             scroll_inventory(app, -1 if key in UP_KEYS else 1)
     elif scene == "character":
         handle_character_key(app, key)
+    elif scene == "join":
+        handle_join_key(app, key)
+    elif scene == "lobby":
+        if key == pygame.K_ESCAPE:
+            go_back(app)
     else:
         handle_menu_key(app, key)
 
 
 def controls(app):
-    """The keys of each player, in the order of app["players"]."""
-    state = app["state"]
-    if state is not None and state["flags"]["two_players"]:
-        return KEYS_2P
+    """The keys of the player on this computer."""
     return KEYS_1P
 
 
 def confirm_keys(app):
-    """The keys that choose in a menu or turn the page of the text box: everyone's."""
-    keys = list(CONFIRM_KEYS)
-    for player_keys in controls(app):
-        keys += [key for key in player_keys["act"] if key not in keys]
-    return keys
+    """The keys that choose in a menu or turn the page of the text box."""
+    return CONFIRM_KEYS
 
 
 def inventory_keys(app):
-    """The keys that open and close the inventory: everyone's."""
-    return [key for player_keys in controls(app) for key in player_keys["inventory"]]
+    """The keys that open and close the inventory."""
+    return KEYS_1P[0]["inventory"]
 
 
 def handle_character_key(app, key):
@@ -1098,24 +1160,39 @@ def handle_character_key(app, key):
         go_back(app)
 
 
+def handle_join_key(app, key):
+    """Keys on the "Join game" screen: digits and dots type the address, Enter joins, Esc goes back."""
+    if key in ADDRESS_KEYS and len(app["join_text"]) < ADDRESS_LENGTH:
+        app["join_text"] += ADDRESS_KEYS[key]
+        app["join_error"] = ""
+    elif key == pygame.K_BACKSPACE:
+        app["join_text"] = app["join_text"][:-1]
+        app["join_error"] = ""
+    elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+        join(app, app["join_text"])
+    elif key == pygame.K_ESCAPE:
+        go_back(app)
+
+
 def handle_play_key(app, key):
-    """Keys while playing: a player's action key acts (or turns the page of the text box), their
-    inventory key opens the inventory, Esc pauses. Alone: E and I, as always."""
+    """Keys while playing: E acts (or turns the page of the text box), I opens the inventory, Esc pauses.
+
+    In a game for two the pause menu is only on this screen: the game goes on.
+    """
     if key == pygame.K_ESCAPE:
         set_scene(app, "pause")
     elif app["dialog"]:
         if key in confirm_keys(app):
             app["dialog"].pop(0)
         return
-    for player, keys in zip(app["players"], controls(app)):
-        if key in keys["act"]:
-            interact(app, player)
-            return
-        if key in keys["inventory"]:
-            app["inventory_scroll"] = 0  # the list of items always opens at the top
-            app["inventory_player"] = player_number(app, player)
-            set_scene(app, "inventory")
-            return
+    keys = controls(app)[0]
+    player = local_player(app)
+    if key in keys["act"]:
+        interact(app, player)
+    elif key in keys["inventory"]:
+        app["inventory_scroll"] = 0  # the list of items always opens at the top
+        app["inventory_player"] = my_number(app)
+        set_scene(app, "inventory")
 
 
 def handle_menu_key(app, key):
@@ -1141,7 +1218,7 @@ def is_held(pressed, keys):
 def held_direction(pressed, keys=KEYS_1P[0]):
     """The direction (dx, dy) that a player's keys are pushing, each -1, 0 or 1.
 
-    `keys` is the set of keys of that player (see KEYS_1P and KEYS_2P): alone, the
+    `keys` is the set of keys of that player (see KEYS_1P): alone, the
     arrows and WASD.
     """
     dx = 0
@@ -1158,15 +1235,17 @@ def held_direction(pressed, keys=KEYS_1P[0]):
 
 
 def update(app, dx, dy, dx2=0, dy2=0):
-    """Move the game on by one frame. (dx, dy) is the direction held by player 1, (dx2, dy2) by player 2.
+    """Move the game on by one frame. (dx, dy) is the direction held on this computer's keyboard.
 
-    Each player moves with their own direction; they do not block each other.
+    (dx2, dy2) is not used: in a game for two, the other player moves on their own computer.
     """
     app["frame"] += 1
     app["scene_frames"] += 1
+    pump_network(app)
     update_effects(app)
     for player in app["players"]:
-        player["moving"] = False
+        if player is local_player(app):
+            player["moving"] = False
     if app["banner_frames"] > 0:
         app["banner_frames"] -= 1
     if app["fade"] > 0:
@@ -1178,19 +1257,12 @@ def update(app, dx, dy, dx2=0, dy2=0):
     if engine.is_over(app["state"]):
         set_scene(app, "ending")  # the last text has been read: on to the ending
         return
-    room = app["state"]["room"]
-    for player, (pdx, pdy) in zip(app["players"], [(dx, dy), (dx2, dy2)]):
-        if app["state"]["room"] != room or app["scene"] != "play":
-            return  # someone went through: the others have been placed by them
-        move_player(app, player, pdx, pdy)
+    move_player(app, local_player(app), dx, dy)
 
 
 def move_player(app, player, dx, dy):
-    """One player's frame: walk, go through a door, step on the tiles, walk into a portal.
-
-    Alone, a door or a portal is taken as soon as the player walks into it. Two players
-    go through together: only when both touch the same door, or stand in the same portal.
-    """
+    """The frame of the player on this computer: walk, go through a door, step on the tiles,
+    walk into a portal. Each player goes through doors and portals on their own."""
     if dy != 0:
         player["facing"] = (0, dy)
     elif dx != 0:
@@ -1199,48 +1271,167 @@ def move_player(app, player, dx, dy):
     if dx != 0 and dy != 0:
         speed = PLAYER_SPEED * 0.7071  # the same speed on diagonals
     before = player["pos"]
-    player["pos"] = move(player["pos"], dx * speed, dy * speed, solid_rects(app["state"]))
-    together = len(app["players"]) > 1
-    if together:
-        keep_in_room(app, player)  # waiting in a door's opening, a player does not walk out of the room
+    seen = view(app)
+    player["pos"] = move(player["pos"], dx * speed, dy * speed, solid_rects(seen))
     if player["pos"] != before:
         player["moving"] = True
         player["walk"] += 1
-    door = door_touched(app["state"]["room"], player["pos"], dx, dy)
-    portal = portal_touched(app["state"], player["pos"])
-    if not together:
-        if door is None:
-            player["touching"] = None
-        elif door != player["touching"]:
-            player["touching"] = door
-            go_through(app, door)
-        floor_triggers(app, player)
-        portal = portal_touched(app["state"], player["pos"])
-        if portal is not None:
-            go_through_portal(app, portal)
-        return
-    # Two players: "touching" is the door or the portal the player is at.
-    contact = door or (portal if portal is not None and story.OBJECTS[portal]["to"] is not None else None)
-    if contact is None:
+    door = door_touched(seen["room"], player["pos"], dx, dy)
+    if door is None:
         player["touching"] = None
-    elif contact != player["touching"]:
-        player["touching"] = contact
-        if all(other["touching"] == contact for other in app["players"]):
-            if door is not None:
-                go_through(app, door)
-            else:
-                go_through_portal(app, portal)
-            return
-        show_banner(app, story.MESSAGES["wait_partner"])  # once for each contact
+    elif door != player["touching"]:
+        player["touching"] = door
+        go_through(app, door)
     floor_triggers(app, player)
+    portal = portal_touched(view(app), player["pos"])
+    if portal is not None:
+        go_through_portal(app, portal)
 
 
-def keep_in_room(app, player):
-    """Keep a player's body inside the room: an open door's opening is in the wall, not beyond it."""
-    body = player_rect(player["pos"])
-    inside = body.clamp(tile_rect(0, 0, *room_size(app["state"]["room"])))
-    if inside.topleft != body.topleft:
-        player["pos"] = (player["pos"][0] + inside.x - body.x, player["pos"][1] + inside.y - body.y)
+# --- Two computers: hosting, joining, and keeping the two games in step ---------------------
+#
+# The host keeps the game: the rules run there, and only there is it saved. The
+# computer that joined moves its own player and draws its own room; for anything
+# else it asks the host (see request) and gets back the new state. Every frame each
+# side tells the other where its player is.
+
+
+def player_info(player):
+    """What the other computer needs to draw a player."""
+    return {"pos": list(player["pos"]), "facing": list(player["facing"]), "moving": player["moving"],
+            "walk": player["walk"]}
+
+
+def take_player_info(player, info):
+    """Copy what the other computer said about its player."""
+    player["pos"] = tuple(info["pos"])
+    player["facing"] = tuple(info["facing"])
+    player["moving"] = bool(info["moving"])
+    player["walk"] = int(info["walk"])
+
+
+def send(app, message):
+    connection = app["net"]
+    if connection is not None and connection["conn"] is not None:
+        connection["conn"].send(message)
+
+
+def end_network(app):
+    """Close the connection, and stop waiting for the other computer."""
+    connection = app["net"]
+    if connection is None:
+        return
+    if connection["conn"] is not None:
+        connection["conn"].close()
+    if connection.get("host") is not None:
+        connection["host"].close()
+    app["net"] = None
+    app["lobby"] = None
+
+
+def open_lobby(app, state, opening_text):
+    """The host's game is ready: wait for the other computer to join, showing this computer's address."""
+    try:
+        host = net.Host(NET_PORT)
+    except OSError:
+        app["notice"] = story.MESSAGES["cannot_host"]
+        open_main_menu(app)
+        return
+    app["net"] = {"role": "host", "host": host, "conn": None, "pending": {}, "next_id": 0, "sent_state": None,
+                  "address": net.local_address()}
+    app["lobby"] = (state, opening_text)
+    set_scene(app, "lobby")
+
+
+def open_join(app):
+    """The "Join game" screen. The address starts with this computer's network, to save typing."""
+    address = net.local_address()
+    app["join_text"] = address[:address.rfind(".") + 1] if "." in address else ""
+    app["join_error"] = ""
+    set_scene(app, "join")
+
+
+def join(app, address):
+    """Try to join the game hosted at `address`; the game starts when the host sends it."""
+    try:
+        conn = net.connect(address, NET_PORT)
+    except (OSError, ValueError):
+        app["join_error"] = story.MESSAGES["cannot_join"]
+        return
+    app["net"] = {"role": "client", "host": None, "conn": conn, "pending": {}, "next_id": 0, "sent_state": None}
+    app["join_error"] = story.MESSAGES["joining"]
+
+
+def pump_network(app):
+    """Every frame: let the other computer in, read what it said, and tell it where this player is."""
+    connection = app["net"]
+    if connection is None:
+        return
+    if connection["role"] == "host" and connection["conn"] is None:
+        conn = connection["host"].accept()
+        if conn is None:
+            return
+        connection["host"].close()  # one partner only: stop listening
+        connection["host"] = None
+        connection["conn"] = conn
+        state, opening_text = app["lobby"]
+        app["lobby"] = None
+        send(app, {"t": "start", "state": state, "text": opening_text})
+        connection["sent_state"] = state
+        begin_game(app, state, opening_text)
+    for message in connection["conn"].poll():
+        handle_message(app, message)
+        if app["net"] is None:
+            return  # the message ended the game for two
+    if connection["conn"].closed:
+        app["notice"] = story.MESSAGES["partner_left"]
+        open_main_menu(app)
+        return
+    if app["state"] is None or len(app["players"]) < 2:
+        return
+    message = {"t": "sync", "player": player_info(local_player(app))}
+    if connection["role"] == "host" and app["state"] is not connection["sent_state"]:
+        message["state"] = app["state"]  # the game changed: the other computer gets the new one
+        connection["sent_state"] = app["state"]
+    if app["frame"] % SYNC_EVERY == 0 or "state" in message:
+        send(app, message)
+
+
+def handle_message(app, message):
+    """One message from the other computer."""
+    kind = message.get("t")
+    connection = app["net"]
+    if kind == "start" and connection["role"] == "client":
+        state = engine.restore_state(message.get("state"))
+        if state is None:
+            app["notice"] = story.MESSAGES["partner_left"]
+            open_main_menu(app)
+            return
+        app["me"] = 1
+        begin_game(app, state, message.get("text"))
+    elif kind == "sync" and len(app["players"]) == 2:
+        other = app["players"][1 - app["me"]]
+        if isinstance(message.get("player"), dict):
+            take_player_info(other, message["player"])
+        if connection["role"] == "client" and "state" in message:
+            state = engine.restore_state(message["state"])
+            if state is not None:
+                app["state"] = state
+    elif kind == "do" and connection["role"] == "host" and app["state"] is not None:
+        # The other player asks for an action: the host plays it as player 2.
+        state, outcome = engine.perform(app["state"], message["action"], 2)
+        if outcome["ok"]:
+            app["state"] = state
+            save_progress(app)
+        send(app, {"t": "done", "id": message.get("id"), "state": app["state"], "outcome": outcome})
+        connection["sent_state"] = app["state"]
+    elif kind == "done" and connection["role"] == "client":
+        waiting = connection["pending"].pop(message.get("id"), None)
+        state = engine.restore_state(message.get("state"))
+        if waiting is None or state is None:
+            return
+        action, before, finish = waiting
+        finish(app, action, before, state, message["outcome"])
 
 
 # --- Visual effects: what happens on screen when something happens in the game -----------
@@ -1267,6 +1458,7 @@ def show_outcome(app, action, before, after, outcome):
     fx = app["fx"]
     event = outcome["event"]
     target = action.get("target")
+    before, after = engine.seen_by(before, my_number(app)), engine.seen_by(after, my_number(app))  # in this room
     if len(engine.clues(after)) > len(engine.clues(before)):
         show_new_clue(app, action)
     if effects.FX["barriers"] and after["room"] == before["room"]:
@@ -1299,7 +1491,7 @@ def show_outcome(app, action, before, after, outcome):
         if action["verb"] == "step_on":
             x, y = thing_rect(target).center
         else:
-            x, y = player_rect(app["players"][0]["pos"]).center
+            x, y = player_rect(local_player(app)["pos"]).center
         effects.spawn(fx, x, y, effects.MISTAKE_SPARKS, effects.RED, speed=1.8, life=24, gravity=0.05)
 
 
@@ -1336,10 +1528,10 @@ def liquid_center(cauldron):
 def update_effects(app):
     """Move the effects on by one frame, and add the particles that keep coming (sparks, bubbles)."""
     fx = app["fx"]
-    state = app["state"]
-    if state is None:
+    if app["state"] is None:
         effects.update(fx)
         return
+    state = view(app)
     room = state["room"]
     if fx["room"] != room:
         effects.reset_room(fx, room, floor_rect(room), not story.ROOMS[room]["outdoor"])
@@ -1364,7 +1556,7 @@ def update_effects(app):
                 effects.spawn(fx, rng.uniform(area.left, area.right), rng.uniform(area.top, area.bottom), 1,
                               effects.ENERGY, speed=1.2, life=16)
         if fx["wand_rise"] is not None:
-            player = app["players"][0]
+            player = local_player(app)
             body = player_rect(player["pos"])
             climb = fx["wand_rise"]["age"] / effects.WAND_RISE_FRAMES
             side = 1 if player["facing"][0] >= 0 else -1
@@ -1670,6 +1862,8 @@ def draw_title_screen(app, screen):
     for index, line in enumerate(lines):
         y = HEIGHT - 6 - (len(lines) - index) * font.get_linesize()
         draw_text(screen, font, line, COLORS["foam"], (WIDTH // 2, y), "center", True)
+    if app["notice"]:  # why the last game for two ended
+        draw_text(screen, font, app["notice"], COLORS["highlight"], (WIDTH // 2, 84), "center", True)
 
 
 def draw_door(screen, door, status):
@@ -1841,7 +2035,7 @@ def draw_cables(screen, state, frame=0):
 def draw_floor_puzzles(app, screen, things):
     """The zones of the room's floor puzzles, then their numbered tiles: lit, dark, or blinking red after a mistake."""
     plate = sprites.image("zone")
-    for puzzle in floor_puzzles_in(app["state"]["room"]):
+    for puzzle in floor_puzzles_in(view(app)["room"]):
         area = zone_rect(puzzle)
         if plate is None:
             pygame.draw.rect(screen, COLORS["cable"], area, 1)
@@ -1877,7 +2071,8 @@ def on_an_altar(state, item):
 
 
 def draw_room(app, screen):
-    state = app["state"]
+    """The room of the player on this computer, with everything in it, the players who are there and the effects."""
+    state = view(app)
     room = state["room"]
     floor_color, wall_color = ROOM_COLORS.get(room, DEFAULT_ROOM_COLORS)
     floor = sprites.image("floor_" + room)
@@ -1922,7 +2117,8 @@ def draw_room(app, screen):
     # From the back of the room to the front: what stands lower on screen covers the rest.
     # The players go in order of their feet, the lower one in front.
     drawn = set()
-    for player in sorted(app["players"], key=lambda one: player_rect(one["pos"]).bottom):
+    here = [player for player in app["players"] if same_room(app, player)]
+    for player in sorted(here, key=lambda one: player_rect(one["pos"]).bottom):
         feet = player_rect(player["pos"]).bottom
         for thing in standing:
             if thing["id"] not in drawn and thing_rect(thing["id"]).bottom <= feet:
@@ -1968,25 +2164,21 @@ def draw_hud(app, screen):
     """
     font = app["fonts"]["text"]
     state = app["state"]
+    number = my_number(app)
     pygame.draw.rect(screen, COLORS["hud"], (0, 0, WIDTH, HUD_HEIGHT))
     pygame.draw.line(screen, COLORS["dim_text"], (0, HUD_HEIGHT - 1), (WIDTH, HUD_HEIGHT - 1))
-    draw_text(screen, font, story.ROOMS[state["room"]]["name"], COLORS["text"], (8, 4))
+    draw_text(screen, font, story.ROOMS[engine.player_room(state, number)]["name"], COLORS["text"], (8, 4))
     right = map_rect().left - 6  # the map takes the right corner: the rest moves left of it
-    inventory_hint = story.MESSAGES["hint_inventory_2p" if state["flags"]["two_players"] else "hint_inventory"]
-    draw_text(screen, font, inventory_hint, COLORS["dim_text"], (right, 4), "right")
+    draw_text(screen, font, story.MESSAGES["hint_inventory"], COLORS["dim_text"], (right, 4), "right")
     if app["scene"] == "play" and not app["dialog"]:
-        hint = prompt(state, app["players"][0]["pos"])
+        hint = prompt(state, local_player(app)["pos"], number)
         if hint:
             draw_text(screen, font, hint, COLORS["highlight"], (8, 18))
     x = right + 4
     # 18 pixels for each item; with many items they move closer, so they never reach the hint on the left.
-    groups = [carried(state, number) for number in range(1, len(app["players"]) + 1)]
-    shown = [item for group in reversed(groups) for item in reversed(group)]
-    gap = min(18, max(10, INVENTORY_ROOM // max(len(shown) + len(groups) - 1, 1)))
-    second = set(groups[1]) if len(groups) > 1 else set()
-    for index, item in enumerate(shown):
-        if index > 0 and shown[index - 1] in second and item not in second:
-            x -= gap // 2  # a little space between player 2's items and player 1's
+    shown = list(reversed(carried(state, number)))  # the items of the player on this computer
+    gap = min(18, max(10, INVENTORY_ROOM // max(len(shown), 1)))
+    for item in shown:
         x -= gap
         picture = sprites.image(item)
         if item == "wand":
@@ -2078,8 +2270,8 @@ def map_dot(room, position):
 
 
 def draw_map(app, screen):
-    """The map of the ship: only the rooms visited so far, the doors out of them, and the player."""
-    state = app["state"]
+    """The map of the ship: only the rooms visited so far, the doors out of them, and the players."""
+    state = view(app)
     visited = engine.visited_rooms(state)
     for room in visited:
         # A visited room has a soft halo around it; the one the player is in, a halo that pulses.
@@ -2117,8 +2309,8 @@ def draw_map(app, screen):
             else:
                 x = area.right
             pygame.draw.rect(screen, COLORS["dim_text"], (x, y, 1, 1))
-    for player in app["players"]:
-        x, y = map_dot(state["room"], player["pos"])
+    for number, player in enumerate(app["players"], start=1):
+        x, y = map_dot(engine.player_room(app["state"], number), player["pos"])  # each in their own room
         pygame.draw.rect(screen, COLORS["black"], (x, y, 1, 1))
 
 
@@ -2162,9 +2354,8 @@ def room_surface(room):
 
 
 def view_position(app):
-    """Where the camera looks: at the player, or half way between the two players."""
-    players = app["players"]
-    return (sum(one["pos"][0] for one in players) / len(players), sum(one["pos"][1] for one in players) / len(players))
+    """Where the camera looks: at the player on this computer."""
+    return local_player(app)["pos"]
 
 
 def draw_play_screen(app, screen):
@@ -2173,7 +2364,7 @@ def draw_play_screen(app, screen):
     The whole room is drawn on its own surface, in room pixels, so nothing else
     needs to know about the camera: walls, things and the player keep their places.
     """
-    room = app["state"]["room"]
+    room = view(app)["room"]
     whole = room_surface(room)
     draw_room(app, whole)
     x, y = camera(room, view_position(app))
@@ -2381,6 +2572,47 @@ def draw_ending_screen(app, screen):
             y += font.get_linesize()
 
 
+def draw_lines_at_bottom(app, screen, text):
+    """A hint at the bottom of a screen over the sea, wrapped to its width."""
+    font = app["fonts"]["text"]
+    lines = wrap(text, WIDTH - 16, text_width(font))
+    for index, line in enumerate(lines):
+        y = HEIGHT - 6 - (len(lines) - index) * font.get_linesize()
+        draw_text(screen, font, line, COLORS["foam"], (WIDTH // 2, y), "center", True)
+
+
+def draw_lobby(app, screen):
+    """The host waits for the other computer: its address, to type over there."""
+    draw_sea(app, screen, screen.get_rect(), calm=True)
+    font = app["fonts"]["text"]
+    draw_text(screen, app["fonts"]["title"], story.MESSAGES["lobby_title"], COLORS["text"], (WIDTH // 2, 36),
+              "center", True)
+    address = app["net"]["address"] if app["net"] is not None else ""
+    draw_text(screen, font, story.MESSAGES["lobby_address"].format(address=address), COLORS["highlight"],
+              (WIDTH // 2, 96), "center", True)
+    dots = "." * ((app["frame"] // 20) % 4)  # something moves: the game is waiting, not stuck
+    draw_text(screen, font, dots, COLORS["text"], (WIDTH // 2, 112), "center", True)
+    draw_lines_at_bottom(app, screen, story.MESSAGES["lobby_hint"])
+
+
+def draw_join_screen(app, screen):
+    """The address of the host, as it is being typed, and why the last try failed."""
+    draw_sea(app, screen, screen.get_rect(), calm=True)
+    font = app["fonts"]["text"]
+    draw_text(screen, app["fonts"]["title"], story.MESSAGES["join_title"], COLORS["text"], (WIDTH // 2, 36),
+              "center", True)
+    draw_text(screen, font, story.MESSAGES["join_prompt"], COLORS["text"], (WIDTH // 2, 80), "center", True)
+    box = pygame.Rect(WIDTH // 2 - 60, 94, 120, font.get_linesize() + 6)
+    draw_box(screen, box)
+    draw_text(screen, font, app["join_text"], COLORS["highlight"], (WIDTH // 2, box.top + 3), "center")
+    if (app["frame"] // 24) % 2 == 0:  # a blinking bar after the address: the font has no "_"
+        width, height = font.size(app["join_text"])
+        pygame.draw.rect(screen, COLORS["highlight"], (WIDTH // 2 + width // 2 + 1, box.top + 3 + height - 1, 4, 1))
+    if app["join_error"]:
+        draw_text(screen, font, app["join_error"], COLORS["foam"], (WIDTH // 2, 124), "center", True)
+    draw_lines_at_bottom(app, screen, story.MESSAGES["join_hint"])
+
+
 CHARACTER_ZOOM = 3   # the characters are shown three times bigger on the choice screen
 CHARACTER_GAP = 72   # pixels between the middles of two characters
 
@@ -2463,6 +2695,10 @@ def draw(app, screen):
         draw_character_choice(app, screen)
     elif scene == "mode":
         draw_mode_choice(app, screen)
+    elif scene == "lobby":
+        draw_lobby(app, screen)
+    elif scene == "join":
+        draw_join_screen(app, screen)
     elif scene == "confirm":
         back = app["confirm_back"]
         if back == "menu":
@@ -2493,13 +2729,13 @@ def main():
             elif event.type == pygame.KEYDOWN:
                 handle_key(app, event.key)
         pressed = pygame.key.get_pressed()
-        directions = [held_direction(pressed, keys) for keys in controls(app)] + [(0, 0)]
-        (dx, dy), (dx2, dy2) = directions[0], directions[1]
-        update(app, dx, dy, dx2, dy2)
+        dx, dy = held_direction(pressed, controls(app)[0])
+        update(app, dx, dy)
         draw(app, screen)
         pygame.transform.scale(screen, window.get_size(), window)  # plain scaling: sharp pixels
         pygame.display.flip()
         clock.tick(FPS)
+    end_network(app)  # the other computer learns at once that this one has gone
     pygame.quit()
 
 

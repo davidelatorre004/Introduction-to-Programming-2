@@ -2,9 +2,21 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v24](versions/v24.md) - Two players, two inventories (2026-11-05)
+## [v25](versions/v25.md) - Two computers (2026-11-05)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- A game for two is now played on two computers on the same network, each with its own screen. It replaces the two players on one keyboard.
+- New game → "Host game for 2" waits for the other computer and shows this computer's address. On the other one, "Join game" asks for that address (digits and dots) and Enter joins.
+- Each player moves on their own and goes through doors and portals alone: there is no more "Wait for your partner". Each screen shows its own room, the partner only when you share it, and the map shows both.
+- The host keeps the game: the rules run only there, and only there is it saved. The computer that joined asks the host for every action and gets the new game back. Every frame each side says where its player is.
+- Esc opens the menu without stopping the game (the other player keeps playing): Continue, Main menu, Quit. If one computer leaves, the other goes back to the title, which says the connection was lost.
+- A game for two is resumed by the host (Resume), and the other computer joins again.
+- New module net.py: the connection, with the standard library only (messages are lines of JSON). The tests play over a real connection on the same computer.
+
+## [v24](versions/v24.md) - Two players, two inventories (2026-11-05)
+
+In commit [`52d4c1a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/52d4c1af02a0b5d422988c9d1d2e649a11f97a96/plot_twist).
 
 - The rules now know two players apart. Each has their own room: player 1's is "room" in the state, player 2's a new flag `partner_room`. `engine.perform(state, action, player)` plays an action as that player sees the game (`seen_by` swaps the two rooms), so every rule works for both.
 - Each has their own items: a flag `holder_<item>` says who carries each one. Whoever picks an item up carries it, and only they can use it; the two halves fuse only in the hands of one player.

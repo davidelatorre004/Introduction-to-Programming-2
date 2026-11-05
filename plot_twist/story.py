@@ -1677,12 +1677,21 @@ MESSAGES = {
     # The choice of the mode, after "New game", then of the character.
     "choose_mode": "How many players?",
     "menu_one_player": "1 player",
-    "menu_two_players": "2 players",
+    "menu_two_players": "Host game for 2",
     "choose_character": "Choose your character",
     "choose_character_p1": "Player 1: choose",
-    "hint_inventory_2p": "Q, P: inventory",
-    # In a game for two, shown when one player is at a door or a portal and the other is not.
-    "wait_partner": "Wait for your partner",
+    # A game for two, on two computers on the same network: one hosts, the other joins.
+    "menu_join_game": "Join game",
+    "lobby_title": "Waiting for player 2",
+    "lobby_address": "Your address: {address}",
+    "lobby_hint": "On the other computer: Join game",
+    "join_title": "Join game",
+    "join_prompt": "Address of the host:",
+    "join_hint": "Type the address · Enter: join · Esc: back",
+    "joining": "Joining...",
+    "cannot_host": "Could not host a game on this computer.",
+    "cannot_join": "No game found at that address.",
+    "partner_left": "The connection with the other player was lost.",
     # Handing an item to the other player, in a game for two.
     "partner": "Partner",
     "label_hand": "Give to partner: {item}",

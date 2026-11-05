@@ -70,6 +70,20 @@ Qualche aiuto:
 - **Porte:** per passare basta camminarci contro. Se una porta è chiusa, te lo dice.
 - **Scelte definitive:** il gioco chiede conferma, con "No" già selezionato. Per confermare scegli "Yes".
 
+### In due, su due computer
+
+Si gioca in due su due computer collegati alla stessa rete (lo stesso Wi‑Fi). Ognuno ha il suo schermo e si muove per conto suo.
+
+1. Sul primo computer: **New game**, poi **Host game for 2**, poi scegli il personaggio. Lo schermo mostra "Your address: …", per esempio `192.168.1.23`.
+2. Sul secondo computer: **Join game**, scrivi quell'indirizzo (solo cifre e punti) e premi Invio.
+3. La partita parte su tutti e due gli schermi.
+
+Qualche aiuto:
+- Ognuno ha il suo inventario. Per dare un oggetto all'altro, avvicinati a lui e premi E: "Give to partner: …".
+- Esc apre il menu, ma il gioco non si ferma, perché l'altro continua a giocare. Main menu o Quit chiudono la partita per tutti e due.
+- Il gioco si salva solo sul computer che ospita la partita. Per riprenderla, su quel computer scegli **Resume**; poi l'altro rientra con Join game.
+- Se il secondo computer non trova la partita, controlla che i due computer siano sulla stessa rete. Controlla anche che il firewall del primo lasci entrare il gioco (porta 50555).
+
 ## 5. Lo scopo (senza spoiler)
 
 - Dal ponte si va in quattro stanze:
