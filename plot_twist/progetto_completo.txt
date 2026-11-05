@@ -24,8 +24,10 @@ CHARACTERS = {
 FLAGS = {
     # The character chosen for this game (one of CHARACTERS): player 1's, in a game for two.
     "character": "green",
-    # A game for two players on the same keyboard: player 2 is the other character.
+    # A game for two players: player 2 is the other character.
     "two_players": False,
+    # In a game for two, the room player 2 is in ("room" in the state is player 1's).
+    "partner_room": "deck",
     # The eight generators of the captain's cabin, in a ring: True is on, False is
     # off. The puzzle starts with H, A, C and D off and B, E, F and G on, and goes
     # back to that every time the player walks into the cabin, until the circuit
@@ -315,6 +317,10 @@ ITEMS = {
         "pickup_text": None,
     },
 }
+
+# Who carries each item in a game for two: 1 or 2 ("holder_<item>"). Alone, it stays 1.
+for _item in ITEMS:
+    FLAGS["holder_" + _item] = 1
 
 # Doors, one per direction: each door is in one room and leads to another, from the
 # middle of one wall ("side": N, S, E or W). The way back is on the opposite wall.
@@ -1681,6 +1687,11 @@ MESSAGES = {
     "hint_inventory_2p": "Q, P: inventory",
     # In a game for two, shown when one player is at a door or a portal and the other is not.
     "wait_partner": "Wait for your partner",
+    # Handing an item to the other player, in a game for two.
+    "partner": "Partner",
+    "label_hand": "Give to partner: {item}",
+    "given": "You hand over: {item}.",
+    "no_partner": "Your partner is not here.",
     "choose_hint": "Left/Right: choose · E: confirm · Esc: back",
     "menu_no": "No",
     "pause": "Paused",
@@ -1863,8 +1874,36 @@ def partner_character(state):
 
 
 def has_item(state, item):
-    """True if the item is in the inventory."""
+    """True if the item is in the inventory: someone has picked it up (in a game for two, either player)."""
     return item in state["inventory"]
+
+
+def carries(state, item, player=1):
+    """True if `player` (1 or 2) carries the item. Alone, player 1 carries the whole inventory."""
+    if not has_item(state, item):
+        return False
+    if not state["flags"]["two_players"]:
+        return player == 1
+    return state["flags"]["holder_" + item] == player
+
+
+def player_room(state, player=1):
+    """The room a player is in: "room" for player 1, the flag "partner_room" for player 2."""
+    return state["room"] if player == 1 else state["flags"]["partner_room"]
+
+
+def seen_by(state, player):
+    """The game as `player` sees it: their room in "room", the other player's in "partner_room".
+
+    For player 1 it is the state itself. For player 2 the two rooms swap places, so
+    every rule written for "the current room" works for them too; swapping again
+    gives the state back.
+    """
+    if player == 1:
+        return state
+    view = copy.deepcopy(state)
+    view["room"], view["flags"]["partner_room"] = state["flags"]["partner_room"], state["room"]
+    return view
 
 
 def door_status(state, door):
@@ -1890,8 +1929,8 @@ def door_status(state, door):
     return "sealed"
 
 
-def things_here(state):
-    """List what is in the current room right now, as dicts with "id", "kind" and "status".
+def things_here(state, player=1):
+    """List what is in the room of `player` right now, as dicts with "id", "kind" and "status".
 
     Items are listed only while they lie on the floor, and a barrier only while
     it stands. The status is "on_floor" for items, or "guarded" if they cannot be
@@ -1899,6 +1938,7 @@ def things_here(state):
     "lit" or "dark" for tiles; "up" for barriers; "present" for characters and
     altars; and "open", "barred", "locked" or "sealed" for doors.
     """
+    state = seen_by(state, player)
     room = state["room"]
     things = []
     for item in story.ITEMS:
@@ -1914,7 +1954,7 @@ def things_here(state):
     return things
 
 
-def actions_for(state, target):
+def actions_for(state, target, player=1):
     """List the actions the E key offers near a target: anything in the room, or the room itself.
 
     Each action is a dict with "verb", "target", "item", "label" and
@@ -1924,8 +1964,10 @@ def actions_for(state, target):
 
     E only acts on what matters to the story: the room itself and decor offer
     nothing, so E does nothing there. Decor that is a "clue" (the doctor's notes)
-    can still be read.
+    can still be read. In a game for two, `player` is who presses E: what is near
+    them, and the items they carry.
     """
+    state = seen_by(state, player)
     kind = _kind(target)
     if kind == "floor" or is_over(state) or not _is_here(state, target):
         return []  # a floor puzzle is not for E: the player's feet act on its tiles
@@ -1961,10 +2003,12 @@ def actions_for(state, target):
         actions = [_action("examine", target, story.MESSAGES["label_examine"])]
         use_label = story.MESSAGES["label_use"]
     for item in state["inventory"]:
+        if not carries(state, item, player):
+            continue  # the other player's
         label = use_label.format(item=story.ITEMS[item]["name"])
         if kind == "cauldron" and _potion_puzzle_of(item) is not None:
             label = story.MESSAGES["label_pour"].format(name=story.ITEMS[item]["name"])
-        irreversible = _is_irreversible(state, item, target)
+        irreversible = _is_irreversible(state, item, target, player)
         actions.append(_action("use_item", target, label, item, irreversible))
     return actions
 
@@ -1981,8 +2025,8 @@ def clues(state):
 # --- Actions: each one returns (state, outcome) ------------------------------
 
 
-def pick_up(state, item):
-    """Pick up an item lying on the floor of the current room."""
+def pick_up(state, item, player=1):
+    """Pick up an item lying on the floor of the current room. In a game for two, `player` carries it."""
     _expect(item, "item")
     if is_over(state):
         return _refuse(state, "game_over", story.MESSAGES["game_over"])
@@ -1994,6 +2038,8 @@ def pick_up(state, item):
         return _refuse(state, "guarded", story.MESSAGES["guarded"])
     new = copy.deepcopy(state)
     new["inventory"].append(item)
+    if new["flags"]["two_players"]:
+        new["flags"]["holder_" + item] = player
     flag = story.ITEMS[item].get("sets_flag")
     if flag is not None:
         new["flags"][flag] = True  # the green tincture: the other three appear around the ship
@@ -2016,10 +2062,12 @@ def enter(state, door):
     if status == "sealed":
         return _refuse(state, "sealed", info["sealed_text"])
     new = copy.deepcopy(state)
-    _leave_floor_puzzles(new)  # walking out of a room is walking out of its tile zones
+    if not _partner_in(new, new["room"]):
+        _leave_floor_puzzles(new)  # walking out of a room is walking out of its tile zones
     new["room"] = info["to"]
     new["flags"]["visited_" + info["to"]] = True  # for the map
-    _reset_circuits(new)
+    if not _partner_in(new, new["room"]):
+        _reset_circuits(new)  # with the partner already there, the generators are as they left them
     return _accept(new, "entered", story.ROOMS[info["to"]]["name"])
 
 
@@ -2122,7 +2170,7 @@ def leave_zone(state, floor_puzzle):
     return _accept(new, "tiles_reset", puzzle["left_text"])
 
 
-def use_item(state, item, target):
+def use_item(state, item, target, player=1):
     """Use an item from the inventory on something in the room: a door, a puzzle, a character,
     the anvil or the cauldron.
 
@@ -2137,16 +2185,16 @@ def use_item(state, item, target):
     _not_a_floor_puzzle(target)
     if is_over(state):
         return _refuse(state, "game_over", story.MESSAGES["game_over"])
-    if not has_item(state, item):
+    if not carries(state, item, player):
         return _refuse(state, "no_item", story.MESSAGES["no_item"])
     if not _is_here(state, target):
         return _refuse(state, "not_here", story.MESSAGES["not_here"])
     if kind == "door":
-        return _use_on_door(state, item, target)
+        return _use_on_door(state, item, target, player)
     if kind == "puzzle" or kind == "character":
         return _use_on_object(state, item, target)
     if kind == "anvil":
-        return _use_on_anvil(state, item, target)
+        return _use_on_anvil(state, item, target, player)
     if kind == "cauldron":
         return _use_on_cauldron(state, item, target)
     return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
@@ -2192,11 +2240,32 @@ def travel(state, portal):
         return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
     destination = story.OBJECTS[story.OBJECTS[portal]["to"]]["room"]
     new = copy.deepcopy(state)
-    _leave_floor_puzzles(new)
+    if not _partner_in(new, new["room"]):
+        _leave_floor_puzzles(new)
     new["room"] = destination
     new["flags"]["visited_" + destination] = True
-    _reset_circuits(new)
+    if not _partner_in(new, new["room"]):
+        _reset_circuits(new)
     return _accept(new, "teleported", story.MESSAGES["portal_text"])
+
+
+def give(state, item, player=1):
+    """In a game for two, hand an item to the other player, who must be in the same room.
+
+    main.py decides whether they stand close enough; the engine checks the rest.
+    """
+    _expect(item, "item")
+    if is_over(state):
+        return _refuse(state, "game_over", story.MESSAGES["game_over"])
+    if not state["flags"]["two_players"]:
+        return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
+    if not carries(state, item, player):
+        return _refuse(state, "no_item", story.MESSAGES["no_item"])
+    if player_room(state, 1) != player_room(state, 2):
+        return _refuse(state, "not_here", story.MESSAGES["no_partner"])
+    new = copy.deepcopy(state)
+    new["flags"]["holder_" + item] = 3 - player
+    return _accept(new, "given", story.MESSAGES["given"].format(item=story.ITEMS[item]["name"]))
 
 
 def visited_rooms(state):
@@ -2213,20 +2282,33 @@ def is_standing(state, thing):
     return _is_standing(state, thing)
 
 
-def perform(state, action):
+def perform(state, action, player=1):
     """Carry out an action given as data, such as one returned by actions_for().
 
     The action is a dict with a "verb" ("pick_up", "enter", "use_item",
-    "examine", "activate", "step_on", "leave_zone" or "travel"), a "target" and, for
-    "use_item", an "item". The target of "leave_zone" is a floor puzzle.
+    "examine", "activate", "step_on", "leave_zone", "travel" or "give"), a
+    "target" and, for "use_item" and "give", an "item". The target of
+    "leave_zone" is a floor puzzle. `player` (1 or 2) is who does it: player 2
+    acts in their own room, with the items they carry.
     """
+    view = seen_by(state, player)
+    new, outcome = _perform(view, action, player)
+    if new is view:
+        return state, outcome  # refused: the very state it received
+    return seen_by(new, player), outcome
+
+
+def _perform(state, action, player):
+    """perform(), on the game as the player sees it."""
     verb = action["verb"]
     if verb == "pick_up":
-        return pick_up(state, action["target"])
+        return pick_up(state, action["target"], player)
     if verb == "enter":
         return enter(state, action["target"])
     if verb == "use_item":
-        return use_item(state, action["item"], action["target"])
+        return use_item(state, action["item"], action["target"], player)
+    if verb == "give":
+        return give(state, action["item"], player)
     if verb == "examine":
         return examine(state, action["target"])
     if verb == "activate":
@@ -2302,6 +2384,16 @@ def _is_here(state, thing):
     if kind == "floor":
         return story.FLOOR_PUZZLES[thing]["room"] == state["room"]
     return story.OBJECTS[thing]["room"] == state["room"] and _is_standing(state, thing)
+
+
+def _partner_in(state, room):
+    """True if, in a game for two, the other player is in `room` (the state as one player sees it)."""
+    return state["flags"]["two_players"] and state["flags"]["partner_room"] == room
+
+
+def _forget_holder(state, item):
+    """An item has left the inventory: whoever carried it, nobody does now. Changes the state given."""
+    state["flags"]["holder_" + item] = 1
 
 
 def _has_or_fused(state, item):
@@ -2464,7 +2556,7 @@ def _door_text(state, door):
     return story.MESSAGES["door_open"].format(room=destination)
 
 
-def _use_on_door(state, item, door):
+def _use_on_door(state, item, door, player=1):
     """Open a locked door with the items it needs. Opening a choice door seals the others.
 
     The item must be one the lock "requires", and the player must carry all of
@@ -2482,14 +2574,14 @@ def _use_on_door(state, item, door):
             return _refuse(state, "not_fused", story.MESSAGES["not_fused"])
         return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
     for needed in info["requires"]:
-        if not has_item(state, needed):
+        if not carries(state, needed, player):
             return _refuse(state, "missing_item", story.MESSAGES["missing_item"])
     new = copy.deepcopy(state)
     new["flags"][info["choice_flag"]] = door
     return _accept(new, "door_opened", info["open_text"])
 
 
-def _use_on_anvil(state, item, anvil):
+def _use_on_anvil(state, item, anvil, player=1):
     """Fuse the parts of an item into the whole: one part is used on the anvil, and the player carries them all.
 
     The parts leave the inventory for good, and the whole takes the place of the first one.
@@ -2499,12 +2591,16 @@ def _use_on_anvil(state, item, anvil):
         return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
     parts = [part for part, info in story.ITEMS.items() if info["part_of"] == whole]
     for part in parts:
-        if not has_item(state, part):
+        if not carries(state, part, player):
             return _refuse(state, "missing_item", story.MESSAGES["missing_item"])
     new = copy.deepcopy(state)
     first = min(new["inventory"].index(part) for part in parts)
     new["inventory"] = [held for held in new["inventory"] if held not in parts]
     new["inventory"].insert(first, whole)
+    for part in parts:
+        _forget_holder(new, part)
+    if new["flags"]["two_players"]:
+        new["flags"]["holder_" + whole] = player  # the one who fused them
     return _accept(new, "fused", story.OBJECTS[anvil]["fuse_text"])
 
 
@@ -2546,6 +2642,8 @@ def _use_on_cauldron(state, item, cauldron):
         new["flags"][puzzle["step_flag"]] = 0  # the cauldron is empty: the remedy is in the bottle
         new["flags"][puzzle["solved_flag"]] = True
         new["inventory"] = [held for held in new["inventory"] if held not in recipe]  # used up
+        for tincture in recipe:
+            _forget_holder(new, tincture)
         return _accept(new, "potion_ready", puzzle["solved_text"])
     new["flags"][puzzle["step_flag"]] = step
     return _accept(new, "potion_poured", puzzle["pour_texts"][item])
@@ -2569,15 +2667,16 @@ def _use_on_object(state, item, thing):
     new["flags"][reaction["set_flag"]] = reaction["value"]
     if reaction.get("consumes"):
         new["inventory"].remove(item)  # drunk, eaten, used up: it is gone
+        _forget_holder(new, item)
     return _accept(new, "flag_set", reaction["text"])
 
 
-def _is_irreversible(state, item, target):
+def _is_irreversible(state, item, target, player=1):
     """True if using the item on the target would open a choice door or end the game.
 
     Actions never change the state they receive, so we can simply try it.
     """
-    _, outcome = use_item(state, item, target)
+    _, outcome = use_item(state, item, target, player)
     if outcome["event"] == "ending":
         return True
     return outcome["event"] == "door_opened" and _is_choice_door(target)
@@ -2634,6 +2733,10 @@ def _allowed_values(flag):
         values += list(story.CHARACTERS)
     if flag == "two_players":
         values.append(True)
+    if flag == "partner_room":
+        values += list(story.ROOMS)
+    if flag.startswith("holder_") and flag[len("holder_"):] in story.ITEMS:
+        values.append(2)
     return values
 
 
@@ -3156,7 +3259,7 @@ def reach_rect(thing):
     return thing_rect(thing)
 
 
-def nearest_target(state, position):
+def nearest_target(state, position, player=1):
     """The thing within reach of the player that is closest to them, or None.
 
     Only things E can act on count: not the numbered tiles (the feet act on them),
@@ -3167,8 +3270,8 @@ def nearest_target(state, position):
     reach = body.inflate(2 * REACH, 2 * REACH)
     nearest = None
     nearest_distance = 0
-    for thing in engine.things_here(state):
-        if thing["kind"] == "tile" or not engine.actions_for(state, thing["id"]):
+    for thing in engine.things_here(state, player):
+        if thing["kind"] == "tile" or not engine.actions_for(state, thing["id"], player):
             continue
         rect = reach_rect(thing["id"])
         if not reach.colliderect(rect):
@@ -3180,12 +3283,15 @@ def nearest_target(state, position):
     return nearest
 
 
-def target_and_actions(state, position):
-    """What E would act on, and the actions it offers: the nearest thing, or else the room (which offers nothing)."""
-    target = nearest_target(state, position)
+def target_and_actions(state, position, player=1):
+    """What E would act on, and the actions it offers: the nearest thing, or else the room (which offers nothing).
+
+    `player` is who presses E (1 or 2): what is near them, and the items they carry.
+    """
+    target = nearest_target(state, position, player)
     if target is None:
-        target = state["room"]
-    return target, engine.actions_for(state, target)
+        target = engine.player_room(state, player)
+    return target, engine.actions_for(state, target, player)
 
 
 def target_name(target):
@@ -3196,12 +3302,14 @@ def target_name(target):
         return story.OBJECTS[target]["name"]
     if target in story.DOORS:
         return story.MESSAGES["door"]
+    if target == "partner":
+        return story.MESSAGES["partner"]
     return story.ROOMS[target]["name"]
 
 
-def prompt(state, position):
+def prompt(state, position, player=1):
     """The hint at the top of the screen: what E does here. With several actions, the thing's name."""
-    target, actions = target_and_actions(state, position)
+    target, actions = target_and_actions(state, position, player)
     if not actions:
         return ""
     if len(actions) == 1:
@@ -3220,12 +3328,18 @@ def inventory_lines(state):
     return lines
 
 
-def item_lines(state):
-    """The items carried, as (style, text) pairs: each name, then its description."""
-    if not state["inventory"]:
+def carried(state, player=1):
+    """The items a player carries, in the order they were found. Alone: the whole inventory."""
+    return [item for item in state["inventory"] if engine.carries(state, item, player)]
+
+
+def item_lines(state, player=1):
+    """The items a player carries, as (style, text) pairs: each name, then its description."""
+    items = carried(state, player)
+    if not items:
         return [("text", story.MESSAGES["inventory_empty"])]
     lines = []
-    for item in state["inventory"]:
+    for item in items:
         lines.append(("name", story.ITEMS[item]["name"]))
         lines.append(("text", story.ITEMS[item]["description"]))
     return lines
@@ -3318,6 +3432,8 @@ def new_app(fonts):
         "flash_frames": 0,       # frames left of the tiles blinking red after a mistake
         "fx": effects.new_fx(),  # the visual effects: particles, dissolves, the warp (see effects.py)
         "inventory_scroll": 0,   # how many rows the list of items is scrolled down
+        "inventory_player": 1,   # whose items the inventory screen shows: who opened it
+        "actor": 1,              # who pressed E last: the player the chosen action is for
     }
     open_main_menu(app)
     return app
@@ -3592,6 +3708,8 @@ def go_through(app, door):
     if not outcome["ok"]:
         say(app, outcome["text"])
         return
+    if len(app["players"]) > 1:  # together: player 2 goes through the same door
+        state, _ = engine.perform(state, {"verb": "enter", "target": door}, 2)
     app["state"] = state
     save_progress(app)
     place_after_door(app, came_from)
@@ -3604,6 +3722,8 @@ def go_through_portal(app, portal):
     state, outcome = engine.perform(app["state"], {"verb": "travel", "target": portal})
     if not outcome["ok"]:
         return
+    if len(app["players"]) > 1:  # together: player 2 steps in the same portal
+        state, _ = engine.perform(state, {"verb": "travel", "target": portal}, 2)
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     app["state"] = state
     save_progress(app)
@@ -3635,20 +3755,21 @@ def floor_triggers(app, player):
     left = sorted(player["zones"] - zones - others)
     player["on_tile"] = tile
     player["zones"] = zones
+    number = player_number(app, player)
     for puzzle in left:
-        floor_action(app, {"verb": "leave_zone", "target": puzzle})
+        floor_action(app, {"verb": "leave_zone", "target": puzzle}, number)
     if stepped_on is not None:
-        floor_action(app, {"verb": "step_on", "target": stepped_on})
+        floor_action(app, {"verb": "step_on", "target": stepped_on}, number)
 
 
-def floor_action(app, action):
+def floor_action(app, action, player=1):
     """Tell the engine what the player's feet did, then play and show what happens, without stopping them.
 
     Refusals stay silent: walking around is not a request. The other outcomes
     play their sound and show in the banner, except the solved puzzle, which
     opens the text box. A mistake also makes the tiles blink red.
     """
-    state, outcome = engine.perform(app["state"], action)
+    state, outcome = engine.perform(app["state"], action, player)
     if not outcome["ok"]:
         return
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
@@ -3664,11 +3785,43 @@ def floor_action(app, action):
     save_progress(app)
 
 
+def player_number(app, player):
+    """1 for the first player, 2 for the second."""
+    return app["players"].index(player) + 1
+
+
+def partner_near(app, player):
+    """The other player, if they are within reach of `player`, or None."""
+    reach = player_rect(player["pos"]).inflate(2 * REACH, 2 * REACH)
+    for other in app["players"]:
+        if other is not player and reach.colliderect(player_rect(other["pos"])):
+            return other
+    return None
+
+
+def give_actions(app, player):
+    """Near the partner, E offers to hand them each item the player carries."""
+    if partner_near(app, player) is None:
+        return []
+    number = player_number(app, player)
+    actions = []
+    for item in carried(app["state"], number):
+        label = story.MESSAGES["label_hand"].format(item=story.ITEMS[item]["name"])
+        actions.append({"verb": "give", "target": "partner", "item": item, "label": label, "irreversible": False})
+    return actions
+
+
 def interact(app, player=None):
     """E: act on the thing nearest to the player who pressed it (player 1 if not said).
-    Several possible actions open a small menu."""
+    Several possible actions open a small menu. Near the partner, it also offers to give them items."""
     player = player or app["players"][0]
-    target, actions = target_and_actions(app["state"], player["pos"])
+    app["actor"] = player_number(app, player)
+    target, actions = target_and_actions(app["state"], player["pos"], app["actor"])
+    gifts = give_actions(app, player)
+    if gifts:
+        if not actions:
+            target = "partner"
+        actions = actions + gifts
     if len(actions) == 1:
         choose_action(app, actions[0])
     elif actions:
@@ -3694,7 +3847,7 @@ def do_action(app, action):
     if action["verb"] == "enter":
         go_through(app, action["target"])
         return
-    state, outcome = engine.perform(app["state"], action)
+    state, outcome = engine.perform(app["state"], action, app["actor"])
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     if outcome["event"] == "toggled":
         show_banner(app, outcome["text"])  # a generator clicks: no text box to close every time
@@ -3772,6 +3925,7 @@ def handle_play_key(app, key):
             return
         if key in keys["inventory"]:
             app["inventory_scroll"] = 0  # the list of items always opens at the top
+            app["inventory_player"] = player_number(app, player)
             set_scene(app, "inventory")
             return
 
@@ -4638,8 +4792,13 @@ def draw_hud(app, screen):
             draw_text(screen, font, hint, COLORS["highlight"], (8, 18))
     x = right + 4
     # 18 pixels for each item; with many items they move closer, so they never reach the hint on the left.
-    gap = min(18, max(10, INVENTORY_ROOM // max(len(state["inventory"]), 1)))
-    for item in reversed(state["inventory"]):
+    groups = [carried(state, number) for number in range(1, len(app["players"]) + 1)]
+    shown = [item for group in reversed(groups) for item in reversed(group)]
+    gap = min(18, max(10, INVENTORY_ROOM // max(len(shown) + len(groups) - 1, 1)))
+    second = set(groups[1]) if len(groups) > 1 else set()
+    for index, item in enumerate(shown):
+        if index > 0 and shown[index - 1] in second and item not in second:
+            x -= gap // 2  # a little space between player 2's items and player 1's
         x -= gap
         picture = sprites.image(item)
         if item == "wand":
@@ -4888,14 +5047,14 @@ def visible_rows(app, column):
 def inventory_scroll_limit(app):
     """How far down the list of items can scroll: until its last row is in view."""
     _, items = inventory_columns()
-    rows = column_rows(app, item_lines(app["state"]), items.width)
+    rows = column_rows(app, item_lines(app["state"], app["inventory_player"]), items.width)
     return max(0, len(rows) - visible_rows(app, items))
 
 
 def scroll_inventory(app, direction):
     """Up or down the list of items, one item at a time: the next item's name goes to the top."""
     _, items = inventory_columns()
-    rows = column_rows(app, item_lines(app["state"]), items.width)
+    rows = column_rows(app, item_lines(app["state"], app["inventory_player"]), items.width)
     starts = [index for index, (style, _) in enumerate(rows) if style == "name"] or [0]
     now = app["inventory_scroll"]
     if direction > 0:
@@ -4931,7 +5090,7 @@ def draw_inventory(app, screen):
     divider = box.left + CLUE_COLUMN
     pygame.draw.line(screen, COLORS["dim_text"], (divider, box.top + 8), (divider, box.bottom - COLUMN_BOTTOM))
     draw_column(app, screen, clues, column_rows(app, clue_lines(app["state"]), clues.width))
-    rows = column_rows(app, item_lines(app["state"]), items.width)
+    rows = column_rows(app, item_lines(app["state"], app["inventory_player"]), items.width)
     app["inventory_scroll"] = min(app["inventory_scroll"], inventory_scroll_limit(app))
     first = app["inventory_scroll"]
     draw_column(app, screen, items, rows, first)
@@ -9090,6 +9249,107 @@ def test_restore_state_of_a_game_for_two():
         assert engine.restore_state(restorable(flags={"two_players": wrong})) is None, wrong
 
 
+# --- Two players: their own rooms and their own items ------------------------------------
+
+
+def two(steps=()):
+    """A game for two after the steps, all played by player 1."""
+    return play(steps, engine.new_game(two_players=True))
+
+
+def as_player(state, steps, player):
+    for step in steps:
+        before = copy.deepcopy(state)
+        new, outcome = engine.perform(state, step, player)
+        assert outcome["ok"], (step, outcome)
+        assert state == before, f"{step} modified the state it received"
+        state = new
+    return state
+
+
+def test_seen_by_swaps_the_rooms_and_back():
+    state = two()
+    state["flags"]["partner_room"] = "cabin"
+    view = engine.seen_by(state, 2)
+    assert view["room"] == "cabin" and view["flags"]["partner_room"] == "deck"
+    assert engine.seen_by(view, 2) == state
+    assert engine.seen_by(state, 1) is state
+
+
+def test_player_two_walks_in_their_own_room():
+    state = two()
+    after = as_player(state, [TO_CABIN], 2)
+    assert after["room"] == "deck" and after["flags"]["partner_room"] == "cabin"
+    assert engine.player_room(after, 2) == "cabin"
+    assert "generator_a" in [thing["id"] for thing in engine.things_here(after, 2)]
+    assert "generator_a" not in [thing["id"] for thing in engine.things_here(after, 1)]
+    _, outcome = engine.perform(after, ACTIVATE_A, 1)  # player 1 is on the deck: no generator there
+    assert outcome["event"] == "not_here"
+
+
+def test_whoever_picks_up_an_item_carries_it():
+    state = as_player(two(), [TAKE_WAND], 2)
+    assert engine.carries(state, "wand", 2) and not engine.carries(state, "wand", 1)
+    assert state["flags"]["holder_wand"] == 2
+    state = as_player(state, [TO_CABIN], 1)
+    state = as_player(state, [TO_CABIN], 2)
+    _, outcome = engine.perform(state, act("use_item", "barrier", item="wand"), 1)
+    assert outcome["event"] == "no_item"  # player 1 does not carry it
+    assert ("use_item", "wand") not in [(a["verb"], a["item"]) for a in engine.actions_for(state, "barrier", 1)]
+    assert ("use_item", "wand") in [(a["verb"], a["item"]) for a in engine.actions_for(state, "barrier", 2)]
+
+
+def test_giving_an_item_to_the_partner():
+    state = as_player(two(), [TAKE_WAND], 1)
+    given, outcome = engine.perform(state, act("give", "partner", item="wand"), 1)
+    assert outcome["event"] == "given" and engine.carries(given, "wand", 2)
+    back, _ = engine.perform(given, act("give", "partner", item="wand"), 2)
+    assert engine.carries(back, "wand", 1)
+    _, outcome = engine.perform(given, act("give", "partner", item="wand"), 1)
+    assert outcome["event"] == "no_item"  # it is not theirs any more
+    apart = as_player(state, [TO_CABIN], 2)
+    after, outcome = engine.perform(apart, act("give", "partner", item="wand"), 1)
+    assert outcome["event"] == "not_here" and after is apart  # not in the same room
+    _, outcome = engine.perform(play([TAKE_WAND]), act("give", "partner", item="wand"))
+    assert outcome["event"] == "nothing_happens"  # alone, there is nobody to give it to
+
+
+def test_the_halves_fuse_only_in_the_hands_of_one_player():
+    state = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK],
+                 engine.new_game(two_players=True))
+    state = as_player(state, [TO_CABIN, CABIN_TO_GALLEY], 1)
+    state["flags"]["partner_room"] = "galley"
+    state, _ = engine.perform(state, act("give", "partner", item="second_key"), 1)
+    _, outcome = engine.perform(state, FUSE, 2)
+    assert outcome["event"] == "missing_item"  # player 2 has only one half
+    state, _ = engine.perform(state, act("give", "partner", item="key"), 1)
+    fused, outcome = engine.perform(state, FUSE, 2)
+    assert outcome["event"] == "fused" and engine.carries(fused, "fused_key", 2)
+    assert fused["flags"]["holder_key"] == fused["flags"]["holder_second_key"] == 1  # forgotten: gone for good
+
+
+def test_a_partner_still_in_the_room_keeps_its_puzzles_going():
+    """Leaving the hold mid-phase starts it over only if nobody stays; entering the cabin where the partner
+    is does not reset the generators they are pulling."""
+    state = two(GET_KEY + [TO_HOLD])
+    state["flags"]["partner_room"] = "hold"
+    state = as_player(state, [step(1), step(2)], 2)
+    left = as_player(state, [HOLD_TO_DECK], 1)
+    assert left["flags"]["hold_step"] == 2  # player 2 is still in the hold
+    both_left = as_player(left, [HOLD_TO_DECK], 2)
+    assert both_left["flags"]["hold_step"] == 0
+    cabin = two([TAKE_WAND, TO_CABIN, ACTIVATE_B])
+    cabin = as_player(cabin, [TO_CABIN], 2)
+    assert cabin["flags"]["generator_b"] != story.FLAGS["generator_b"]  # still as player 1 left it
+
+
+def test_restore_state_checks_the_rooms_and_the_holders():
+    state = as_player(two(), [TAKE_WAND, TO_CABIN], 2)
+    assert reopen(state) == state
+    for flags in ({"partner_room": "bridge"}, {"holder_wand": 3}, {"holder_wand": "2"}):
+        assert engine.restore_state(restorable(flags=flags)) is None, flags
+
+
 ================================================================================
 # FILE: plot_twist/test_save.py
 ================================================================================
@@ -10836,6 +11096,7 @@ def test_the_tiles_start_over_only_when_both_players_are_out_of_the_zone(app, he
     start_two_players(app)
     app["state"] = play(IN_THE_HOLD)
     app["state"]["flags"]["two_players"] = True
+    app["state"]["flags"]["partner_room"] = "hold"  # player 2 is in the hold too
     main.place_at_entry(app)
     walk_onto(app, "tile_1")  # player 1 lights tile 1 (player 2 stands still)
     assert app["state"]["flags"]["hold_step"] == 1
@@ -10884,6 +11145,34 @@ def test_the_lower_player_is_drawn_in_front(app):
         return tuple(screen.get_at((body.centerx - cam_x, body.bottom + 1 - 5 - cam_y)))[:3]
     assert shirt_color("p1") == sprites.PALETTE["r"]  # player 1, red, in front
     assert shirt_color("p2") == sprites.PALETTE["g"]  # player 2, green, in front
+
+
+def test_e_near_the_partner_offers_to_give_and_each_sees_their_own_items(app):
+    start_two_players(app)
+    stand_next_to(app, "wand")
+    press(app, pygame.K_e)  # player 1 picks up the wand
+    read_all(app)
+    assert engine.carries(app["state"], "wand", 1)
+    p2(app)["pos"] = (p1(app)["pos"][0] + main.PLAYER_SIZE + 2, p1(app)["pos"][1])
+    press(app, pygame.K_e)  # next to player 2: the only thing E offers is to give the wand
+    assert dialog_text(app) == story.MESSAGES["given"].format(item=story.ITEMS["wand"]["name"])
+    read_all(app)
+    assert engine.carries(app["state"], "wand", 2)
+    assert engine.restore_state(save.load_game()) == app["state"]
+    assert main.item_lines(app["state"], 1) == [("text", story.MESSAGES["inventory_empty"])]
+    assert main.item_lines(app["state"], 2)[0] == ("name", story.ITEMS["wand"]["name"])
+    press(app, pygame.K_p)  # player 2's inventory
+    assert app["scene"] == "inventory" and app["inventory_player"] == 2
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+
+
+def test_alone_there_is_no_partner_to_give_to(app):
+    start_new_game(app)
+    stand_next_to(app, "wand")
+    press(app, pygame.K_e)
+    read_all(app)
+    assert main.give_actions(app, p1(app)) == []
 
 
 ================================================================================

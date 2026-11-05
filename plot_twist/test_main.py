@@ -1638,6 +1638,7 @@ def test_the_tiles_start_over_only_when_both_players_are_out_of_the_zone(app, he
     start_two_players(app)
     app["state"] = play(IN_THE_HOLD)
     app["state"]["flags"]["two_players"] = True
+    app["state"]["flags"]["partner_room"] = "hold"  # player 2 is in the hold too
     main.place_at_entry(app)
     walk_onto(app, "tile_1")  # player 1 lights tile 1 (player 2 stands still)
     assert app["state"]["flags"]["hold_step"] == 1
@@ -1686,3 +1687,31 @@ def test_the_lower_player_is_drawn_in_front(app):
         return tuple(screen.get_at((body.centerx - cam_x, body.bottom + 1 - 5 - cam_y)))[:3]
     assert shirt_color("p1") == sprites.PALETTE["r"]  # player 1, red, in front
     assert shirt_color("p2") == sprites.PALETTE["g"]  # player 2, green, in front
+
+
+def test_e_near_the_partner_offers_to_give_and_each_sees_their_own_items(app):
+    start_two_players(app)
+    stand_next_to(app, "wand")
+    press(app, pygame.K_e)  # player 1 picks up the wand
+    read_all(app)
+    assert engine.carries(app["state"], "wand", 1)
+    p2(app)["pos"] = (p1(app)["pos"][0] + main.PLAYER_SIZE + 2, p1(app)["pos"][1])
+    press(app, pygame.K_e)  # next to player 2: the only thing E offers is to give the wand
+    assert dialog_text(app) == story.MESSAGES["given"].format(item=story.ITEMS["wand"]["name"])
+    read_all(app)
+    assert engine.carries(app["state"], "wand", 2)
+    assert engine.restore_state(save.load_game()) == app["state"]
+    assert main.item_lines(app["state"], 1) == [("text", story.MESSAGES["inventory_empty"])]
+    assert main.item_lines(app["state"], 2)[0] == ("name", story.ITEMS["wand"]["name"])
+    press(app, pygame.K_p)  # player 2's inventory
+    assert app["scene"] == "inventory" and app["inventory_player"] == 2
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+
+
+def test_alone_there_is_no_partner_to_give_to(app):
+    start_new_game(app)
+    stand_next_to(app, "wand")
+    press(app, pygame.K_e)
+    read_all(app)
+    assert main.give_actions(app, p1(app)) == []

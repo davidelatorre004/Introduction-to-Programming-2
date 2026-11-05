@@ -20,8 +20,10 @@ CHARACTERS = {
 FLAGS = {
     # The character chosen for this game (one of CHARACTERS): player 1's, in a game for two.
     "character": "green",
-    # A game for two players on the same keyboard: player 2 is the other character.
+    # A game for two players: player 2 is the other character.
     "two_players": False,
+    # In a game for two, the room player 2 is in ("room" in the state is player 1's).
+    "partner_room": "deck",
     # The eight generators of the captain's cabin, in a ring: True is on, False is
     # off. The puzzle starts with H, A, C and D off and B, E, F and G on, and goes
     # back to that every time the player walks into the cabin, until the circuit
@@ -311,6 +313,10 @@ ITEMS = {
         "pickup_text": None,
     },
 }
+
+# Who carries each item in a game for two: 1 or 2 ("holder_<item>"). Alone, it stays 1.
+for _item in ITEMS:
+    FLAGS["holder_" + _item] = 1
 
 # Doors, one per direction: each door is in one room and leads to another, from the
 # middle of one wall ("side": N, S, E or W). The way back is on the opposite wall.
@@ -1677,6 +1683,11 @@ MESSAGES = {
     "hint_inventory_2p": "Q, P: inventory",
     # In a game for two, shown when one player is at a door or a portal and the other is not.
     "wait_partner": "Wait for your partner",
+    # Handing an item to the other player, in a game for two.
+    "partner": "Partner",
+    "label_hand": "Give to partner: {item}",
+    "given": "You hand over: {item}.",
+    "no_partner": "Your partner is not here.",
     "choose_hint": "Left/Right: choose · E: confirm · Esc: back",
     "menu_no": "No",
     "pause": "Paused",

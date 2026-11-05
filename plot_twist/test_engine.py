@@ -1646,3 +1646,104 @@ def test_restore_state_of_a_game_for_two():
     assert engine.restore_state(old)["flags"]["two_players"] is False
     for wrong in ("yes", 1, 2):
         assert engine.restore_state(restorable(flags={"two_players": wrong})) is None, wrong
+
+
+# --- Two players: their own rooms and their own items ------------------------------------
+
+
+def two(steps=()):
+    """A game for two after the steps, all played by player 1."""
+    return play(steps, engine.new_game(two_players=True))
+
+
+def as_player(state, steps, player):
+    for step in steps:
+        before = copy.deepcopy(state)
+        new, outcome = engine.perform(state, step, player)
+        assert outcome["ok"], (step, outcome)
+        assert state == before, f"{step} modified the state it received"
+        state = new
+    return state
+
+
+def test_seen_by_swaps_the_rooms_and_back():
+    state = two()
+    state["flags"]["partner_room"] = "cabin"
+    view = engine.seen_by(state, 2)
+    assert view["room"] == "cabin" and view["flags"]["partner_room"] == "deck"
+    assert engine.seen_by(view, 2) == state
+    assert engine.seen_by(state, 1) is state
+
+
+def test_player_two_walks_in_their_own_room():
+    state = two()
+    after = as_player(state, [TO_CABIN], 2)
+    assert after["room"] == "deck" and after["flags"]["partner_room"] == "cabin"
+    assert engine.player_room(after, 2) == "cabin"
+    assert "generator_a" in [thing["id"] for thing in engine.things_here(after, 2)]
+    assert "generator_a" not in [thing["id"] for thing in engine.things_here(after, 1)]
+    _, outcome = engine.perform(after, ACTIVATE_A, 1)  # player 1 is on the deck: no generator there
+    assert outcome["event"] == "not_here"
+
+
+def test_whoever_picks_up_an_item_carries_it():
+    state = as_player(two(), [TAKE_WAND], 2)
+    assert engine.carries(state, "wand", 2) and not engine.carries(state, "wand", 1)
+    assert state["flags"]["holder_wand"] == 2
+    state = as_player(state, [TO_CABIN], 1)
+    state = as_player(state, [TO_CABIN], 2)
+    _, outcome = engine.perform(state, act("use_item", "barrier", item="wand"), 1)
+    assert outcome["event"] == "no_item"  # player 1 does not carry it
+    assert ("use_item", "wand") not in [(a["verb"], a["item"]) for a in engine.actions_for(state, "barrier", 1)]
+    assert ("use_item", "wand") in [(a["verb"], a["item"]) for a in engine.actions_for(state, "barrier", 2)]
+
+
+def test_giving_an_item_to_the_partner():
+    state = as_player(two(), [TAKE_WAND], 1)
+    given, outcome = engine.perform(state, act("give", "partner", item="wand"), 1)
+    assert outcome["event"] == "given" and engine.carries(given, "wand", 2)
+    back, _ = engine.perform(given, act("give", "partner", item="wand"), 2)
+    assert engine.carries(back, "wand", 1)
+    _, outcome = engine.perform(given, act("give", "partner", item="wand"), 1)
+    assert outcome["event"] == "no_item"  # it is not theirs any more
+    apart = as_player(state, [TO_CABIN], 2)
+    after, outcome = engine.perform(apart, act("give", "partner", item="wand"), 1)
+    assert outcome["event"] == "not_here" and after is apart  # not in the same room
+    _, outcome = engine.perform(play([TAKE_WAND]), act("give", "partner", item="wand"))
+    assert outcome["event"] == "nothing_happens"  # alone, there is nobody to give it to
+
+
+def test_the_halves_fuse_only_in_the_hands_of_one_player():
+    state = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK],
+                 engine.new_game(two_players=True))
+    state = as_player(state, [TO_CABIN, CABIN_TO_GALLEY], 1)
+    state["flags"]["partner_room"] = "galley"
+    state, _ = engine.perform(state, act("give", "partner", item="second_key"), 1)
+    _, outcome = engine.perform(state, FUSE, 2)
+    assert outcome["event"] == "missing_item"  # player 2 has only one half
+    state, _ = engine.perform(state, act("give", "partner", item="key"), 1)
+    fused, outcome = engine.perform(state, FUSE, 2)
+    assert outcome["event"] == "fused" and engine.carries(fused, "fused_key", 2)
+    assert fused["flags"]["holder_key"] == fused["flags"]["holder_second_key"] == 1  # forgotten: gone for good
+
+
+def test_a_partner_still_in_the_room_keeps_its_puzzles_going():
+    """Leaving the hold mid-phase starts it over only if nobody stays; entering the cabin where the partner
+    is does not reset the generators they are pulling."""
+    state = two(GET_KEY + [TO_HOLD])
+    state["flags"]["partner_room"] = "hold"
+    state = as_player(state, [step(1), step(2)], 2)
+    left = as_player(state, [HOLD_TO_DECK], 1)
+    assert left["flags"]["hold_step"] == 2  # player 2 is still in the hold
+    both_left = as_player(left, [HOLD_TO_DECK], 2)
+    assert both_left["flags"]["hold_step"] == 0
+    cabin = two([TAKE_WAND, TO_CABIN, ACTIVATE_B])
+    cabin = as_player(cabin, [TO_CABIN], 2)
+    assert cabin["flags"]["generator_b"] != story.FLAGS["generator_b"]  # still as player 1 left it
+
+
+def test_restore_state_checks_the_rooms_and_the_holders():
+    state = as_player(two(), [TAKE_WAND, TO_CABIN], 2)
+    assert reopen(state) == state
+    for flags in ({"partner_room": "bridge"}, {"holder_wand": 3}, {"holder_wand": "2"}):
+        assert engine.restore_state(restorable(flags=flags)) is None, flags

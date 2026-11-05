@@ -2,9 +2,19 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v23](versions/v23.md) - Two players go through together (2026-11-04)
+## [v24](versions/v24.md) - Two players, two inventories (2026-11-05)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- The rules now know two players apart. Each has their own room: player 1's is "room" in the state, player 2's a new flag `partner_room`. `engine.perform(state, action, player)` plays an action as that player sees the game (`seen_by` swaps the two rooms), so every rule works for both.
+- Each has their own items: a flag `holder_<item>` says who carries each one. Whoever picks an item up carries it, and only they can use it; the two halves fuse only in the hands of one player.
+- Next to the partner, E offers "Give to partner: <item>". The inventory screen shows the items of whoever opened it, and the bar shows both players' items.
+- A room the partner is still in keeps its puzzles going: leaving the hold mid-phase does not start the tiles over, and entering the cabin does not reset the generators the partner is pulling.
+- Alone, nothing changes. This is the first of three steps: next, two computers on the same network, then the crab that chases the players.
+
+## [v23](versions/v23.md) - Two players go through together (2026-11-04)
+
+In commit [`f412fa5`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/f412fa5542635f6ba8c7aa05ad996ec286eb3bce/plot_twist).
 
 - In a game for two, a door is taken only when both players touch the same door, and a portal only when both stand in it. A player alone at a door or in a portal sees "Wait for your partner", once for each time they get there, and waits in the opening instead of walking out of the room.
 - The players arrive side by side: player 1 where a player alone appears, player 2 next to them along the wall of the door (or below the ring of the portal), on whichever side is free floor.

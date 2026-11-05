@@ -447,7 +447,7 @@ def reach_rect(thing):
     return thing_rect(thing)
 
 
-def nearest_target(state, position):
+def nearest_target(state, position, player=1):
     """The thing within reach of the player that is closest to them, or None.
 
     Only things E can act on count: not the numbered tiles (the feet act on them),
@@ -458,8 +458,8 @@ def nearest_target(state, position):
     reach = body.inflate(2 * REACH, 2 * REACH)
     nearest = None
     nearest_distance = 0
-    for thing in engine.things_here(state):
-        if thing["kind"] == "tile" or not engine.actions_for(state, thing["id"]):
+    for thing in engine.things_here(state, player):
+        if thing["kind"] == "tile" or not engine.actions_for(state, thing["id"], player):
             continue
         rect = reach_rect(thing["id"])
         if not reach.colliderect(rect):
@@ -471,12 +471,15 @@ def nearest_target(state, position):
     return nearest
 
 
-def target_and_actions(state, position):
-    """What E would act on, and the actions it offers: the nearest thing, or else the room (which offers nothing)."""
-    target = nearest_target(state, position)
+def target_and_actions(state, position, player=1):
+    """What E would act on, and the actions it offers: the nearest thing, or else the room (which offers nothing).
+
+    `player` is who presses E (1 or 2): what is near them, and the items they carry.
+    """
+    target = nearest_target(state, position, player)
     if target is None:
-        target = state["room"]
-    return target, engine.actions_for(state, target)
+        target = engine.player_room(state, player)
+    return target, engine.actions_for(state, target, player)
 
 
 def target_name(target):
@@ -487,12 +490,14 @@ def target_name(target):
         return story.OBJECTS[target]["name"]
     if target in story.DOORS:
         return story.MESSAGES["door"]
+    if target == "partner":
+        return story.MESSAGES["partner"]
     return story.ROOMS[target]["name"]
 
 
-def prompt(state, position):
+def prompt(state, position, player=1):
     """The hint at the top of the screen: what E does here. With several actions, the thing's name."""
-    target, actions = target_and_actions(state, position)
+    target, actions = target_and_actions(state, position, player)
     if not actions:
         return ""
     if len(actions) == 1:
@@ -511,12 +516,18 @@ def inventory_lines(state):
     return lines
 
 
-def item_lines(state):
-    """The items carried, as (style, text) pairs: each name, then its description."""
-    if not state["inventory"]:
+def carried(state, player=1):
+    """The items a player carries, in the order they were found. Alone: the whole inventory."""
+    return [item for item in state["inventory"] if engine.carries(state, item, player)]
+
+
+def item_lines(state, player=1):
+    """The items a player carries, as (style, text) pairs: each name, then its description."""
+    items = carried(state, player)
+    if not items:
         return [("text", story.MESSAGES["inventory_empty"])]
     lines = []
-    for item in state["inventory"]:
+    for item in items:
         lines.append(("name", story.ITEMS[item]["name"]))
         lines.append(("text", story.ITEMS[item]["description"]))
     return lines
@@ -609,6 +620,8 @@ def new_app(fonts):
         "flash_frames": 0,       # frames left of the tiles blinking red after a mistake
         "fx": effects.new_fx(),  # the visual effects: particles, dissolves, the warp (see effects.py)
         "inventory_scroll": 0,   # how many rows the list of items is scrolled down
+        "inventory_player": 1,   # whose items the inventory screen shows: who opened it
+        "actor": 1,              # who pressed E last: the player the chosen action is for
     }
     open_main_menu(app)
     return app
@@ -883,6 +896,8 @@ def go_through(app, door):
     if not outcome["ok"]:
         say(app, outcome["text"])
         return
+    if len(app["players"]) > 1:  # together: player 2 goes through the same door
+        state, _ = engine.perform(state, {"verb": "enter", "target": door}, 2)
     app["state"] = state
     save_progress(app)
     place_after_door(app, came_from)
@@ -895,6 +910,8 @@ def go_through_portal(app, portal):
     state, outcome = engine.perform(app["state"], {"verb": "travel", "target": portal})
     if not outcome["ok"]:
         return
+    if len(app["players"]) > 1:  # together: player 2 steps in the same portal
+        state, _ = engine.perform(state, {"verb": "travel", "target": portal}, 2)
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     app["state"] = state
     save_progress(app)
@@ -926,20 +943,21 @@ def floor_triggers(app, player):
     left = sorted(player["zones"] - zones - others)
     player["on_tile"] = tile
     player["zones"] = zones
+    number = player_number(app, player)
     for puzzle in left:
-        floor_action(app, {"verb": "leave_zone", "target": puzzle})
+        floor_action(app, {"verb": "leave_zone", "target": puzzle}, number)
     if stepped_on is not None:
-        floor_action(app, {"verb": "step_on", "target": stepped_on})
+        floor_action(app, {"verb": "step_on", "target": stepped_on}, number)
 
 
-def floor_action(app, action):
+def floor_action(app, action, player=1):
     """Tell the engine what the player's feet did, then play and show what happens, without stopping them.
 
     Refusals stay silent: walking around is not a request. The other outcomes
     play their sound and show in the banner, except the solved puzzle, which
     opens the text box. A mistake also makes the tiles blink red.
     """
-    state, outcome = engine.perform(app["state"], action)
+    state, outcome = engine.perform(app["state"], action, player)
     if not outcome["ok"]:
         return
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
@@ -955,11 +973,43 @@ def floor_action(app, action):
     save_progress(app)
 
 
+def player_number(app, player):
+    """1 for the first player, 2 for the second."""
+    return app["players"].index(player) + 1
+
+
+def partner_near(app, player):
+    """The other player, if they are within reach of `player`, or None."""
+    reach = player_rect(player["pos"]).inflate(2 * REACH, 2 * REACH)
+    for other in app["players"]:
+        if other is not player and reach.colliderect(player_rect(other["pos"])):
+            return other
+    return None
+
+
+def give_actions(app, player):
+    """Near the partner, E offers to hand them each item the player carries."""
+    if partner_near(app, player) is None:
+        return []
+    number = player_number(app, player)
+    actions = []
+    for item in carried(app["state"], number):
+        label = story.MESSAGES["label_hand"].format(item=story.ITEMS[item]["name"])
+        actions.append({"verb": "give", "target": "partner", "item": item, "label": label, "irreversible": False})
+    return actions
+
+
 def interact(app, player=None):
     """E: act on the thing nearest to the player who pressed it (player 1 if not said).
-    Several possible actions open a small menu."""
+    Several possible actions open a small menu. Near the partner, it also offers to give them items."""
     player = player or app["players"][0]
-    target, actions = target_and_actions(app["state"], player["pos"])
+    app["actor"] = player_number(app, player)
+    target, actions = target_and_actions(app["state"], player["pos"], app["actor"])
+    gifts = give_actions(app, player)
+    if gifts:
+        if not actions:
+            target = "partner"
+        actions = actions + gifts
     if len(actions) == 1:
         choose_action(app, actions[0])
     elif actions:
@@ -985,7 +1035,7 @@ def do_action(app, action):
     if action["verb"] == "enter":
         go_through(app, action["target"])
         return
-    state, outcome = engine.perform(app["state"], action)
+    state, outcome = engine.perform(app["state"], action, app["actor"])
     sounds.play(EVENT_SOUNDS.get(outcome["event"]))
     if outcome["event"] == "toggled":
         show_banner(app, outcome["text"])  # a generator clicks: no text box to close every time
@@ -1063,6 +1113,7 @@ def handle_play_key(app, key):
             return
         if key in keys["inventory"]:
             app["inventory_scroll"] = 0  # the list of items always opens at the top
+            app["inventory_player"] = player_number(app, player)
             set_scene(app, "inventory")
             return
 
@@ -1929,8 +1980,13 @@ def draw_hud(app, screen):
             draw_text(screen, font, hint, COLORS["highlight"], (8, 18))
     x = right + 4
     # 18 pixels for each item; with many items they move closer, so they never reach the hint on the left.
-    gap = min(18, max(10, INVENTORY_ROOM // max(len(state["inventory"]), 1)))
-    for item in reversed(state["inventory"]):
+    groups = [carried(state, number) for number in range(1, len(app["players"]) + 1)]
+    shown = [item for group in reversed(groups) for item in reversed(group)]
+    gap = min(18, max(10, INVENTORY_ROOM // max(len(shown) + len(groups) - 1, 1)))
+    second = set(groups[1]) if len(groups) > 1 else set()
+    for index, item in enumerate(shown):
+        if index > 0 and shown[index - 1] in second and item not in second:
+            x -= gap // 2  # a little space between player 2's items and player 1's
         x -= gap
         picture = sprites.image(item)
         if item == "wand":
@@ -2179,14 +2235,14 @@ def visible_rows(app, column):
 def inventory_scroll_limit(app):
     """How far down the list of items can scroll: until its last row is in view."""
     _, items = inventory_columns()
-    rows = column_rows(app, item_lines(app["state"]), items.width)
+    rows = column_rows(app, item_lines(app["state"], app["inventory_player"]), items.width)
     return max(0, len(rows) - visible_rows(app, items))
 
 
 def scroll_inventory(app, direction):
     """Up or down the list of items, one item at a time: the next item's name goes to the top."""
     _, items = inventory_columns()
-    rows = column_rows(app, item_lines(app["state"]), items.width)
+    rows = column_rows(app, item_lines(app["state"], app["inventory_player"]), items.width)
     starts = [index for index, (style, _) in enumerate(rows) if style == "name"] or [0]
     now = app["inventory_scroll"]
     if direction > 0:
@@ -2222,7 +2278,7 @@ def draw_inventory(app, screen):
     divider = box.left + CLUE_COLUMN
     pygame.draw.line(screen, COLORS["dim_text"], (divider, box.top + 8), (divider, box.bottom - COLUMN_BOTTOM))
     draw_column(app, screen, clues, column_rows(app, clue_lines(app["state"]), clues.width))
-    rows = column_rows(app, item_lines(app["state"]), items.width)
+    rows = column_rows(app, item_lines(app["state"], app["inventory_player"]), items.width)
     app["inventory_scroll"] = min(app["inventory_scroll"], inventory_scroll_limit(app))
     first = app["inventory_scroll"]
     draw_column(app, screen, items, rows, first)
