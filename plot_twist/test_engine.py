@@ -1747,3 +1747,70 @@ def test_restore_state_checks_the_rooms_and_the_holders():
     assert reopen(state) == state
     for flags in ({"partner_room": "bridge"}, {"holder_wand": 3}, {"holder_wand": "2"}):
         assert engine.restore_state(restorable(flags=flags)) is None, flags
+
+
+# --- The crab of a game for two, and the player it knocks out ------------------------------
+
+
+def test_the_crab_wakes_with_the_solved_cabin_and_sleeps_once_the_key_is_fused():
+    assert not engine.crab_awake(two())
+    assert not engine.crab_awake(two([TAKE_WAND, TO_CABIN]))
+    assert engine.crab_awake(two([TAKE_WAND, TO_CABIN] + SOLVE_CABIN))  # the first puzzle is solved
+    halves = two(GET_FUSED_KEY[:-len(FUSE_IN_THE_GALLEY)] + [TO_CABIN, CABIN_TO_GALLEY])
+    assert engine.crab_awake(halves) and not engine.key_fused(halves)
+    fused = play([FUSE], halves)
+    assert engine.key_fused(fused) and not engine.crab_awake(fused)
+    opened = play([GALLEY_TO_CABIN, CABIN_TO_DECK, OPEN_CRAB], fused)
+    assert engine.key_fused(opened) and not engine.crab_awake(opened)
+
+
+def test_alone_the_crab_never_wakes():
+    assert not engine.crab_awake(play(GET_KEY))
+    assert not engine.crab_awake(play(GET_FUSED_KEY))
+
+
+def test_a_knocked_out_player_hands_everything_to_the_other():
+    state = as_player(two([TAKE_WAND]), [TO_CABIN] + SOLVE_CABIN + [TAKE_KEY], 2)  # player 2 has the half key
+    before = copy.deepcopy(state)
+    new, outcome = engine.knock_out(state, 2)
+    assert state == before  # the state received is untouched
+    assert outcome["ok"] and outcome["event"] == "knocked_out"
+    assert engine.is_out(new, 2) and not engine.is_out(new, 1)
+    assert engine.carries(new, "wand", 1) and engine.carries(new, "key", 1)
+    assert engine.restore_state(new) == new  # saved like any other fact of the game
+
+
+def test_only_one_player_can_be_knocked_out_and_never_alone():
+    out = engine.knock_out(two([TAKE_WAND]), 1)[0]
+    again, outcome = engine.knock_out(out, 2)
+    assert not outcome["ok"] and again is out
+    alone = play([TAKE_WAND])
+    same, outcome = engine.knock_out(alone, 1)
+    assert not outcome["ok"] and same is alone
+
+
+def test_a_player_who_is_out_cannot_act_and_cannot_be_given_items():
+    state = engine.knock_out(two([TAKE_WAND]), 2)[0]  # player 1 now carries the wand anyway
+    same, outcome = engine.perform(state, TO_CABIN, 2)
+    assert not outcome["ok"] and outcome["event"] == "out" and same is state
+    same, outcome = engine.perform(state, act("give", "partner", "wand"), 1)
+    assert not outcome["ok"] and outcome["event"] == "partner_out"
+    assert engine.perform(state, TO_CABIN, 1)[1]["ok"]  # the other one plays on
+
+
+def test_a_player_who_is_out_keeps_no_puzzle_going():
+    """The tiles start over when the last player still in the game leaves the hold, wherever the other one was."""
+    state = as_player(two(GET_KEY + [TO_HOLD]), [TO_HOLD], 2)  # both in the hold
+    state = play([step(1)], state)
+    kept = play([HOLD_TO_DECK], state)
+    assert kept["flags"]["hold_step"] == 1  # player 2 is still there: the phase goes on
+    out = engine.knock_out(state, 2)[0]
+    reset = play([HOLD_TO_DECK], out)
+    assert reset["flags"]["hold_step"] == 0
+
+
+def test_the_out_flag_is_checked_on_restore():
+    for good in (0, 1, 2):
+        assert engine.restore_state(restorable(flags={"two_players": True, "out_player": good})) is not None
+    for wrong in (3, True, "1"):
+        assert engine.restore_state(restorable(flags={"two_players": True, "out_player": wrong})) is None, wrong

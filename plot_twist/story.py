@@ -24,6 +24,9 @@ FLAGS = {
     "two_players": False,
     # In a game for two, the room player 2 is in ("room" in the state is player 1's).
     "partner_room": "deck",
+    # In a game for two, the player the crab has knocked out for good (1 or 2), or 0:
+    # they watch until the other finishes, and their items have passed to the other.
+    "out_player": 0,
     # The eight generators of the captain's cabin, in a ring: True is on, False is
     # off. The puzzle starts with H, A, C and D off and B, E, F and G on, and goes
     # back to that every time the player walks into the cabin, until the circuit
@@ -1697,6 +1700,19 @@ MESSAGES = {
     "label_hand": "Give to partner: {item}",
     "given": "You hand over: {item}.",
     "no_partner": "Your partner is not here.",
+    "partner_is_out": "Your partner is out of the game.",
+    "you_are_out": "You are out of the game.",
+    # The crab, in a game for two: awake from the solved cabin until the key is fused.
+    "crab_wakes": "The crab statue comes alive!",
+    "crab_sleeps": "The crab turns back to stone.",
+    "you_are_down": "The crab got you!",
+    "down_hint": "Your partner can help you up",
+    "partner_down": "Your partner is down! Hold E next to them",
+    "back_up": "Back on your feet!",
+    "helped_up": "You helped your partner up!",
+    "partner_eliminated": "Your partner is out. Their items are yours.",
+    "spectator": "You are out: watch your partner",
+    "caught_both": "The crab got you both... it is back on deck",
     "choose_hint": "Left/Right: choose · E: confirm · Esc: back",
     "menu_no": "No",
     "pause": "Paused",

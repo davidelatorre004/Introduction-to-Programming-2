@@ -1574,6 +1574,10 @@ SPRITES["wall_corridor_end"] = SPRITES["wall_hold"]
 _images = {}
 
 
+# The empty pedestal of the crab statue, while the crab is awake: the statue's base only.
+SPRITES["decor_crab_pedestal"] = ["." * 32] * 27 + SPRITES["decor_crab_statue"][27:]
+
+
 def image(name, turns=0, flip=False):
     """The picture called `name` as a Surface, or None if there is no such picture.
 

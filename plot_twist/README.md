@@ -84,6 +84,14 @@ Qualche aiuto:
 - Il gioco si salva solo sul computer che ospita la partita. Per riprenderla, su quel computer scegli **Resume**; poi l'altro rientra con Join game.
 - Se il secondo computer non trova la partita, controlla che i due computer siano sulla stessa rete. Controlla anche che il firewall del primo lasci entrare il gioco (porta 50555).
 
+**Il granchio (solo in due).** Appena risolvete la cabina, la statua del granchio sul ponte prende vita e vi dà la caccia.
+- Insegue il giocatore più vicino ed è più lento di voi. Se nella sua stanza non c'è nessuno, vi segue attraverso le porte aperte.
+- Se vi tocca, finite a terra e non potete muovervi. Il compagno ha un minuto per rialzarvi: deve stare vicino a voi e tenere premuto **E** per 5 secondi (la barra verde mostra quanto manca).
+- Se nessuno vi rialza in tempo, siete fuori fino alla fine della partita, e i vostri oggetti passano al compagno. Da fuori guardate il compagno giocare.
+- Se finite a terra tutti e due insieme, nessuno può aiutarvi: vi rialzate, e il granchio torna davanti alla sua statua.
+- Una strategia: uno tiene occupato il granchio, l'altro risolve gli enigmi.
+- Quando fondete le due metà della chiave, il granchio torna di pietra.
+
 ## 5. Lo scopo (senza spoiler)
 
 - Dal ponte si va in quattro stanze:

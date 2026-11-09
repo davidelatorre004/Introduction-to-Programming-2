@@ -20,6 +20,10 @@ EFFECTS = {
     "fanfare": [(523, 0.08), (659, 0.08), (784, 0.08), (1047, 0.3)],   # the puzzle is solved
     "buzz": [(98, 0.12), (0, 0.04), (98, 0.3)],                        # BZZZ: a mistake, the lights go out
     "clue": [(988, 0.05), (1319, 0.05), (0, 0.02), (1976, 0.22)],      # a new clue: a light, rising chime
+    "crab_wake": [(73, 0.1), (82, 0.1), (98, 0.1), (0, 0.03), (147, 0.35)],  # the statue cracks: the crab is awake
+    "knocked": [(392, 0.06), (262, 0.06), (131, 0.25)],                # the crab knocks a player down
+    "revived": [(523, 0.06), (784, 0.06), (1047, 0.15)],               # back on their feet
+    "knocked_out": [(330, 0.15), (262, 0.15), (196, 0.15), (131, 0.4)],  # a player is out of the game
 }
 
 _loaded = {}  # effect name -> pygame Sound, once load() has run with audio

@@ -2,9 +2,19 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v25](versions/v25.md) - Two computers (2026-11-05)
+## [v26](versions/v26.md) - The crab hunts (2026-11-09)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- In a game for two, the crab statue of the deck comes alive when the cabin is solved, and turns back to stone once the key is fused. Alone, it never moves.
+- It walks toward the nearest player in its room, slower than the players, finding its way around what stands in the room; with nobody in its room, it follows them through the open doors (not through the portals).
+- A player it touches goes down and cannot move. The other one has a minute to help them up, holding E next to them for five seconds: bars show the time left and the help given. If both are down at once, nobody can help: they get up, and the crab goes back to its statue.
+- A player left down for a minute is out until the other finishes: their items pass to the other player, and their screen follows the other one. Who is out is saved (a new flag, out_player); the crab and the players down are not.
+- The host moves the crab and keeps the timers; the computer that joined draws what the host sends, and says when its E is held.
+
+## [v25](versions/v25.md) - Two computers (2026-11-05)
+
+In commit [`7bf0888`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/7bf0888b69a749402ab4d2458a6997c018a27262/plot_twist).
 
 - A game for two is now played on two computers on the same network, each with its own screen. It replaces the two players on one keyboard.
 - New game → "Host game for 2" waits for the other computer and shows this computer's address. On the other one, "Join game" asks for that address (digits and dots) and Enter joins.

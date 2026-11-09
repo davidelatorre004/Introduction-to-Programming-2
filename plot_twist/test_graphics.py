@@ -78,6 +78,8 @@ def test_every_sprite_is_a_proper_picture():
         sharing = [thing for thing, info in story.OBJECTS.items() if info.get("picture") == name]
         if name.startswith("door_") or name == "ship":
             assert size == (2 * main.TILE, main.TILE), name
+        elif name == "decor_crab_pedestal":  # the statue without its crab: drawn in its place
+            assert size == main.thing_rect("deck_statue").size, name
         elif sharing:  # a shared picture is as big as every piece that uses it
             for thing in sharing:
                 assert size == main.thing_rect(thing).size, (name, thing)

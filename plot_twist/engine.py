@@ -163,6 +163,37 @@ def carries(state, item, player=1):
     return state["flags"]["holder_" + item] == player
 
 
+def is_out(state, player):
+    """True if the crab has knocked `player` out of a game for two for good."""
+    return state["flags"]["out_player"] == player
+
+
+def key_fused(state):
+    """True once the two halves of the key have been fused (the key may have opened a door since)."""
+    flags = state["flags"]
+    return has_item(state, "fused_key") or flags["crab_door"] is not None or flags["angel_door"] is not None
+
+
+def crab_awake(state):
+    """True while the crab statue hunts the players: only in a game for two, from the
+    solved cabin until the key is fused, and never after an ending."""
+    flags = state["flags"]
+    return flags["two_players"] and flags["cabin_solved"] and not key_fused(state) and not is_over(state)
+
+
+def knock_out(state, player):
+    """The crab has knocked `player` out for good: they are out until the other finishes,
+    and everything they carry passes to the other player."""
+    if not state["flags"]["two_players"] or state["flags"]["out_player"] != 0:
+        return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
+    new = copy.deepcopy(state)
+    new["flags"]["out_player"] = player
+    for item in new["inventory"]:
+        if new["flags"]["holder_" + item] == player:
+            new["flags"]["holder_" + item] = 3 - player
+    return _accept(new, "knocked_out", story.MESSAGES["partner_eliminated"])
+
+
 def player_room(state, player=1):
     """The room a player is in: "room" for player 1, the flag "partner_room" for player 2."""
     return state["room"] if player == 1 else state["flags"]["partner_room"]
@@ -537,6 +568,8 @@ def give(state, item, player=1):
         return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
     if not carries(state, item, player):
         return _refuse(state, "no_item", story.MESSAGES["no_item"])
+    if is_out(state, 3 - player):
+        return _refuse(state, "partner_out", story.MESSAGES["partner_is_out"])
     if player_room(state, 1) != player_room(state, 2):
         return _refuse(state, "not_here", story.MESSAGES["no_partner"])
     new = copy.deepcopy(state)
@@ -567,6 +600,8 @@ def perform(state, action, player=1):
     "leave_zone" is a floor puzzle. `player` (1 or 2) is who does it: player 2
     acts in their own room, with the items they carry.
     """
+    if is_out(state, player):
+        return _refuse(state, "out", story.MESSAGES["you_are_out"])
     view = seen_by(state, player)
     new, outcome = _perform(view, action, player)
     if new is view:
@@ -663,8 +698,12 @@ def _is_here(state, thing):
 
 
 def _partner_in(state, room):
-    """True if, in a game for two, the other player is in `room` (the state as one player sees it)."""
-    return state["flags"]["two_players"] and state["flags"]["partner_room"] == room
+    """True if, in a game for two, the other player is in `room` (the state as one player sees it).
+
+    A player knocked out of the game is not there any more: only the other one still acts.
+    """
+    flags = state["flags"]
+    return flags["two_players"] and flags["out_player"] == 0 and flags["partner_room"] == room
 
 
 def _forget_holder(state, item):
@@ -1011,6 +1050,8 @@ def _allowed_values(flag):
         values.append(True)
     if flag == "partner_room":
         values += list(story.ROOMS)
+    if flag == "out_player":
+        values += [1, 2]
     if flag.startswith("holder_") and flag[len("holder_"):] in story.ITEMS:
         values.append(2)
     return values
