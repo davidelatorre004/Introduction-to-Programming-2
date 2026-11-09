@@ -194,6 +194,15 @@ def knock_out(state, player):
     return _accept(new, "knocked_out", story.MESSAGES["partner_eliminated"])
 
 
+def crab_catches_everyone(state):
+    """The crab has caught every player still in the game: nobody is left to help. The game ends ("caught")."""
+    if not crab_awake(state):
+        return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
+    new = copy.deepcopy(state)
+    new["ending"] = "caught"
+    return _accept(new, "ending", story.MESSAGES["crab_ending"])
+
+
 def player_room(state, player=1):
     """The room a player is in: "room" for player 1, the flag "partner_room" for player 2."""
     return state["room"] if player == 1 else state["flags"]["partner_room"]

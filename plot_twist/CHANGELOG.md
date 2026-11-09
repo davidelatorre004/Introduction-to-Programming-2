@@ -2,9 +2,17 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v26](versions/v26.md) - The crab hunts (2026-11-09)
+## [v27](versions/v27.md) - The third ending (2026-11-09)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- If the crab catches both players (the second while the first is down, or the last one left in the game), the game is over: the third ending, "Caught by the crab", with a giant crab rising behind the ship. It replaces the rule of the previous version (both down: they get up, and the crab goes back to its statue).
+- The ending is saved like the other two, and the ending screen counts three endings. It can only be reached in a game for two.
+- In a game for two the ending screen offers only "Main menu": a new game for two is hosted again from there.
+
+## [v26](versions/v26.md) - The crab hunts (2026-11-09)
+
+In commit [`fa8535a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/fa8535aea978c6ab7042efe24d696339d3fb5a5d/plot_twist).
 
 - In a game for two, the crab statue of the deck comes alive when the cabin is solved, and turns back to stone once the key is fused. Alone, it never moves.
 - It walks toward the nearest player in its room, slower than the players, finding its way around what stands in the room; with nobody in its room, it follows them through the open doors (not through the portals).

@@ -728,6 +728,9 @@ def test_r4_every_ending_is_reachable_from_a_new_game():
     reached = set()
     for steps in (CRAB_ENDING, ANGEL_ENDING, CLUE_THEN_CRAB):
         reached.add(play(steps)["ending"])
+    caught, outcome = engine.crab_catches_everyone(two(GET_KEY))  # the third one: in a game for two only
+    assert outcome["ok"]
+    reached.add(caught["ending"])
     assert reached == set(story.ENDINGS)
 
 
@@ -1814,3 +1817,21 @@ def test_the_out_flag_is_checked_on_restore():
         assert engine.restore_state(restorable(flags={"two_players": True, "out_player": good})) is not None
     for wrong in (3, True, "1"):
         assert engine.restore_state(restorable(flags={"two_players": True, "out_player": wrong})) is None, wrong
+
+
+def test_the_crab_ends_the_game_once_it_has_caught_everyone():
+    state = two(GET_KEY)
+    before = copy.deepcopy(state)
+    caught, outcome = engine.crab_catches_everyone(state)
+    assert state == before
+    assert outcome == {"ok": True, "event": "ending", "text": story.MESSAGES["crab_ending"]}
+    assert engine.is_over(caught) and caught["ending"] == "caught" and not story.ENDINGS["caught"]["good"]
+    assert engine.restore_state(caught) == caught  # it can be seen again after reopening the game
+    assert not engine.crab_awake(caught)
+    assert not engine.perform(caught, TO_HOLD)[1]["ok"]  # nothing more to do
+
+
+def test_the_crab_cannot_end_a_game_while_it_sleeps():
+    for state in (two([TAKE_WAND]), play(GET_KEY), two(GET_FUSED_KEY)):
+        same, outcome = engine.crab_catches_everyone(state)
+        assert not outcome["ok"] and same is state

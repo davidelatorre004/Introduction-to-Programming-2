@@ -1572,7 +1572,8 @@ FLOOR_PUZZLES = {
     },
 }
 
-# The endings. "good" lets the final screen pick its colors.
+# The endings. "good" lets the final screen pick its colors; "scene" is the
+# picture above the text: the rescue at dawn, the explosion, or the crab.
 ENDINGS = {
     "saved": {
         "title": "Everyone saved",
@@ -1582,6 +1583,7 @@ ENDINGS = {
             "The ship docks: everyone on board is safe.",
         ],
         "good": True,
+        "scene": "rescue",
     },
     "explosion": {
         "title": "The ship explodes",
@@ -1591,6 +1593,18 @@ ENDINGS = {
             "Of the ship, only smoke on the water remains.",
         ],
         "good": False,
+        "scene": "explosion",
+    },
+    # Only in a game for two: the crab statue caught both players.
+    "caught": {
+        "title": "Caught by the crab",
+        "text": [
+            "The crab drags you both below deck, one in each claw.",
+            "Then it climbs back onto its stand and turns to stone.",
+            "The ship sails on into the storm, with nobody at the helm.",
+        ],
+        "good": False,
+        "scene": "crab",
     },
 }
 
@@ -1712,7 +1726,7 @@ MESSAGES = {
     "helped_up": "You helped your partner up!",
     "partner_eliminated": "Your partner is out. Their items are yours.",
     "spectator": "You are out: watch your partner",
-    "caught_both": "The crab got you both... it is back on deck",
+    "crab_ending": "The crab got you both! Nobody is left to help...",
     "choose_hint": "Left/Right: choose · E: confirm · Esc: back",
     "menu_no": "No",
     "pause": "Paused",

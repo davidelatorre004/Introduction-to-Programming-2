@@ -88,7 +88,7 @@ Qualche aiuto:
 - Insegue il giocatore più vicino ed è più lento di voi. Se nella sua stanza non c'è nessuno, vi segue attraverso le porte aperte.
 - Se vi tocca, finite a terra e non potete muovervi. Il compagno ha un minuto per rialzarvi: deve stare vicino a voi e tenere premuto **E** per 5 secondi (la barra verde mostra quanto manca).
 - Se nessuno vi rialza in tempo, siete fuori fino alla fine della partita, e i vostri oggetti passano al compagno. Da fuori guardate il compagno giocare.
-- Se finite a terra tutti e due insieme, nessuno può aiutarvi: vi rialzate, e il granchio torna davanti alla sua statua.
+- Se il granchio vi prende tutti e due, anche quando uno è già fuori, la partita è persa: è il terzo finale, "Caught by the crab".
 - Una strategia: uno tiene occupato il granchio, l'altro risolve gli enigmi.
 - Quando fondete le due metà della chiave, il granchio torna di pietra.
 

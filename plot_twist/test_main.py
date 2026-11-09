@@ -1876,17 +1876,47 @@ def test_the_player_out_watches_the_other_one(app):
     main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
 
 
-def test_with_both_down_the_crab_goes_back_to_its_statue(app, heard):
+def test_when_the_crab_catches_both_players_the_game_is_over(app, heard):
     two_playing(app, FIRST_HALF)
     awake_crab(app)
-    app["downed"] = {2: main.DOWN_FRAMES}
+    app["downed"] = {2: main.DOWN_FRAMES}  # player 2 is already down...
     app["players"][1]["pos"] = free_spot(app, 14, 3)
-    p1(app)["pos"] = app["crab"]["pos"]  # right on the crab
+    p1(app)["pos"] = app["crab"]["pos"]  # ...and the crab catches player 1
     main.update(app, 0, 0)
-    assert app["downed"] == {} and app["revive"] == {}
-    assert app["crab"]["pos"] == main.new_crab()["pos"] and app["crab"]["wait"] == main.CRAB_REST_FRAMES
-    assert app["banner"] == story.MESSAGES["caught_both"]
-    assert not engine.is_out(app["state"], 1) and not engine.is_out(app["state"], 2)
+    assert app["state"]["ending"] == "caught"
+    assert engine.restore_state(save.load_game())["ending"] == "caught"  # saved, like the other endings
+    assert dialog_text(app) == story.MESSAGES["crab_ending"] and "knocked_out" in heard
+    main.update(app, 0, 0)
+    assert app["crab"] is None and app["downed"] == {}  # the game is over: the crab is gone
+    assert app["scene"] == "play"  # the text first...
+    read_all(app)
+    main.update(app, 0, 0)
+    assert app["scene"] == "ending"  # ...then the third ending
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for frames in (0, main.CRAB_RISE_FRAMES // 2, main.CRAB_RISE_FRAMES + 10):
+        app["scene_frames"] = frames
+        main.draw(app, screen)
+    assert main.menu_entries(app) == ["new_game", "main_menu"]
+    assert main.ending_number_label("caught") == story.MESSAGES["ending_number"].format(number=3, total=3)
+
+
+def test_the_last_player_in_the_game_caught_is_the_end_too(app):
+    two_playing(app, FIRST_HALF)
+    app["state"] = engine.knock_out(app["state"], 2)[0]  # player 2 is already out
+    main.reset_crab(app)
+    awake_crab(app)
+    p1(app)["pos"] = app["crab"]["pos"]
+    main.update(app, 0, 0)
+    assert app["state"]["ending"] == "caught"
+
+
+def test_one_player_down_is_not_the_end(app):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    app["players"][1]["pos"] = free_spot(app, 14, 3)
+    p1(app)["pos"] = app["crab"]["pos"]
+    main.update(app, 0, 0)
+    assert list(app["downed"]) == [1] and app["state"]["ending"] is None
 
 
 def test_the_crab_follows_the_players_through_the_doors(app):
@@ -1926,7 +1956,7 @@ def test_the_crab_turns_back_to_stone_once_the_key_is_fused(app, heard):
 def test_the_crab_banners_fit_on_one_line():
     font = pixel_font_for_banners()
     for key in ("crab_wakes", "crab_sleeps", "partner_down", "back_up", "helped_up", "partner_eliminated",
-                "caught_both", "spectator"):
+                "spectator"):
         assert font.size(story.MESSAGES[key])[0] + 20 <= main.WIDTH, key
 
 

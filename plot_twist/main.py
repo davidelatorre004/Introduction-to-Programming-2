@@ -680,6 +680,8 @@ def menu_entries(app):
     if scene == "confirm":
         return ["yes", "no"]
     if scene == "ending":
+        if app["net"] is not None:
+            return ["main_menu"]  # a new game for two starts from the main menu, hosted again
         return ["new_game", "main_menu"]
     if scene == "mode":
         return ["one_player", "two_players"]
@@ -1329,8 +1331,8 @@ def move_player(app, player, dx, dy):
 # the players, and through the open doors toward them when nobody is in its room.
 # A player it touches goes down: the other one has a minute to help them up, by
 # holding E next to them for five seconds; otherwise they are out of the game
-# (engine.knock_out). If both are down at once, nobody can help: they get up, sore,
-# and the crab goes back to its place on the deck.
+# (engine.knock_out). Once it has caught everyone still in the game, nobody is left
+# to help: the game ends, the third ending (engine.crab_catches_everyone).
 #
 # The host moves the crab and keeps the timers; the computer that joined only draws
 # what the host sends. Nothing of this is saved, only who is out of the game.
@@ -1341,7 +1343,6 @@ CRAB_WAKE_FRAMES = 3 * FPS         # still for a moment after waking: time to un
 CRAB_TRANSIT_FRAMES = FPS          # between two rooms, out of sight
 CRAB_ARRIVE_FRAMES = FPS // 2      # still for a moment after coming through a door
 CRAB_CATCH_FRAMES = 2 * FPS        # still for a moment after catching someone
-CRAB_REST_FRAMES = 5 * FPS         # still on the deck after catching both players
 DOWN_FRAMES = 60 * FPS             # how long a player can stay down before they are out
 REVIVE_FRAMES = 5 * FPS            # how long E must be held next to a player down to help them up
 
@@ -1352,7 +1353,7 @@ def new_crab():
     body = pygame.Rect(0, 0, PLAYER_SIZE, PLAYER_SIZE)
     body.midtop = (statue.centerx, statue.bottom + 2)
     return {"room": "deck", "pos": (body.x, body.y), "facing": (0, 1), "moving": False, "walk": 0,
-            "wait": CRAB_WAKE_FRAMES, "away": 0, "rests": 0}
+            "wait": CRAB_WAKE_FRAMES, "away": 0}
 
 
 def is_host(app):
@@ -1510,7 +1511,7 @@ def go_through_crab(crab, door):
 
 
 def catch_players(app):
-    """A player the crab touches goes down; with everybody down, the crab has won this round."""
+    """A player the crab touches goes down; with everybody down, the game is over."""
     crab = app["crab"]
     state = app["state"]
     body = crab_rect(crab)
@@ -1520,12 +1521,10 @@ def catch_players(app):
             app["downed"][number] = DOWN_FRAMES
             crab["wait"] = CRAB_CATCH_FRAMES
     if app["downed"] and not active_players(app):
-        app["downed"] = {}
-        app["revive"] = {}
-        rests = crab["rests"] + 1
-        app["crab"] = new_crab()
-        app["crab"]["wait"] = CRAB_REST_FRAMES
-        app["crab"]["rests"] = rests
+        state, outcome = engine.crab_catches_everyone(app["state"])
+        if outcome["ok"]:
+            app["state"] = state
+            save_progress(app)  # the ending is kept, like the others
 
 
 def is_reviving(app, number):
@@ -1589,7 +1588,7 @@ def update_crab(app):
         crab["moving"] = False
         return
     move_crab(app)
-    if app["crab"] is crab and crab["away"] == 0:
+    if crab["away"] == 0:
         catch_players(app)
 
 
@@ -1600,16 +1599,18 @@ def crab_news(app):
         return
     awake = engine.crab_awake(state)
     me = my_number(app)
-    if awake != app["seen"]["awake"]:
+    caught = state["ending"] == "caught"
+    if caught and not app["seen"]["caught"]:
+        sounds.play("knocked_out")
+        app["banner_frames"] = 0
+        say(app, story.MESSAGES["crab_ending"])  # then the ending, once it is read
+    elif awake != app["seen"]["awake"] and not engine.is_over(state):
         if awake:
             sounds.play("crab_wake")
         show_banner(app, story.MESSAGES["crab_wakes" if awake else "crab_sleeps"])
     downed = set(app["downed"])
     out = state["flags"]["out_player"]
-    rests = app["crab"]["rests"] if app["crab"] is not None else app["seen"]["rests"]
-    if rests > app["seen"]["rests"]:
-        show_banner(app, story.MESSAGES["caught_both"])
-    else:
+    if not caught:
         for number in downed - app["seen"]["downed"]:
             sounds.play("knocked")
             if number != me:
@@ -1624,7 +1625,7 @@ def crab_news(app):
         sounds.play("knocked_out")
         if out != me:
             show_banner(app, story.MESSAGES["partner_eliminated"])
-    app["seen"] = {"awake": awake, "downed": downed, "out": out, "rests": rests}
+    app["seen"] = {"awake": awake, "downed": downed, "out": out, "caught": caught}
 
 
 def reset_crab(app):
@@ -1635,7 +1636,8 @@ def reset_crab(app):
     app["partner_reviving"] = False
     state = app["state"]
     app["seen"] = {"awake": state is not None and engine.crab_awake(state), "downed": set(),
-                   "out": 0 if state is None else state["flags"]["out_player"], "rests": 0}
+                   "out": 0 if state is None else state["flags"]["out_player"],
+                   "caught": state is not None and state["ending"] == "caught"}
 
 
 def crab_info(app):
@@ -3020,6 +3022,31 @@ def draw_explosion(app, scene, time):
         scene.blit(fire, (0, 0))
 
 
+def ending_number_label(ending_id):
+    """ "Ending 2 of 3": which ending this is, in the order of story.ENDINGS."""
+    number = list(story.ENDINGS).index(ending_id) + 1
+    return story.MESSAGES["ending_number"].format(number=number, total=len(story.ENDINGS))
+
+
+CRAB_RISE_FRAMES = 120  # how long the giant crab takes to rise behind the ship
+
+
+def draw_crab_ending(app, scene, time):
+    """The crab's ending: the storm at night, and a giant crab rising behind the ship, claws open."""
+    horizon = ENDING_HORIZON
+    scene.fill(COLORS["night"])
+    crab = sprites.image("crab")
+    if crab is not None:
+        big = pygame.transform.scale(crab, (crab.get_width() * 2, crab.get_height() * 2))
+        risen = min(time, CRAB_RISE_FRAMES) / CRAB_RISE_FRAMES
+        top = horizon + 4 - round(risen * (big.get_height() - 6))
+        scene.blit(big, big.get_rect(midtop=(WIDTH // 2, top)))
+    draw_sea(app, scene, pygame.Rect(0, horizon, WIDTH, ENDING_SCENE_HEIGHT - horizon))
+    ship = sprites.image("ship")
+    if ship is not None:
+        scene.blit(ship, ship.get_rect(midbottom=(WIDTH // 2, horizon + 6 + bob(app))))
+
+
 def draw_ending_screen(app, screen):
     ending_id = app["state"]["ending"]
     ending = story.ENDINGS[ending_id]
@@ -3028,8 +3055,11 @@ def draw_ending_screen(app, screen):
     # How long the ending has been on screen. Behind a question, show how it ends.
     time = app["scene_frames"] if app["scene"] == "ending" else 10 ** 6
     scene = pygame.Surface((WIDTH, ENDING_SCENE_HEIGHT))
-    if ending["good"]:
+    if ending["scene"] == "rescue":
         draw_rescue(app, scene, time)
+        screen.blit(scene, (0, 0))
+    elif ending["scene"] == "crab":
+        draw_crab_ending(app, scene, time)
         screen.blit(scene, (0, 0))
     else:
         draw_explosion(app, scene, time)
@@ -3038,8 +3068,7 @@ def draw_ending_screen(app, screen):
             shake = ((time * 7) % 5 - 2, (time * 3) % 5 - 2)  # the screen trembles
         screen.blit(scene, shake)
     pygame.draw.line(screen, COLORS["text"], (0, ENDING_SCENE_HEIGHT), (WIDTH, ENDING_SCENE_HEIGHT))
-    number = list(story.ENDINGS).index(ending_id) + 1
-    label = story.MESSAGES["ending_number"].format(number=number, total=len(story.ENDINGS))
+    label = ending_number_label(ending_id)
     draw_text(screen, font, label, COLORS["dim_text"], (WIDTH // 2, ENDING_SCENE_HEIGHT + 6), "center")
     title_position = (WIDTH // 2, ENDING_SCENE_HEIGHT + 18)
     draw_text(screen, app["fonts"]["title"], ending["title"], COLORS["highlight"], title_position, "center", True)
