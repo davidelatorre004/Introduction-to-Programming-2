@@ -1,0 +1,15 @@
+[project]
+name = "plot-twist"
+version = "0.1.0"
+description = "Plot Twist — a short 8-bit mystery on a ship lost at sea (Introduction to Programming, Nova SBE 2026/27)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pygame==2.6.1",
+    "pytest==9.1.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["."]
