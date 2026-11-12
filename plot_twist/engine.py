@@ -126,6 +126,8 @@ def restore_state(data):
         return None
 
     for item in inventory:
+        if flags.get("dropped_" + item) is not None:
+            return None  # an item cannot be in hand and on the floor
         gone_if = story.ITEMS[item].get("gone_if")
         if gone_if is not None and flags.get(gone_if, story.FLAGS[gone_if]):
             return None  # an item used up for good cannot be carried
@@ -198,7 +200,7 @@ def is_out(state, player):
 def key_fused(state):
     """True once the two halves of the key have been fused (the key may have opened a door since)."""
     flags = state["flags"]
-    return has_item(state, "fused_key") or flags["crab_door"] is not None or flags["angel_door"] is not None
+    return _made(state, "fused_key") or flags["crab_door"] is not None or flags["angel_door"] is not None
 
 
 def crab_awake(state):
@@ -252,6 +254,62 @@ def use_ability(state, player=1):
     new = copy.deepcopy(state)
     new["flags"]["ability_used_" + str(player)] = True
     return _accept(new, "ability", story.CHARACTERS[character_of(state, player)]["power"]["text"])
+
+
+def item_place(state, item):
+    """Where an item lies when it is on the floor: (room, (column, row)). Where a player dropped it,
+    or else where the story put it."""
+    dropped = state["flags"]["dropped_" + item]
+    if dropped is not None:
+        room, col, row = dropped.split(",")
+        return room, (int(col), int(row))
+    return story.ITEMS[item]["room"], story.ITEMS[item]["pos"]
+
+
+def last_item(state, player=1):
+    """The item `player` got last, picked up or handed over: the one Q drops. None with empty hands."""
+    for item in reversed(state["inventory"]):
+        if carries(state, item, player):
+            return item
+    return None
+
+
+def drop(state, tile, player=1):
+    """`player` drops the item they got last on the floor of their room, on `tile` (column, row).
+
+    Anyone can pick it up again there. An item that opened a door no longer does while it lies on the floor.
+    """
+    if is_over(state):
+        return _refuse(state, "game_over", story.MESSAGES["game_over"])
+    item = last_item(state, player)
+    if item is None or not _is_tile(tile):
+        return _refuse(state, "nothing_to_drop", story.MESSAGES["nothing_to_drop"])
+    new = copy.deepcopy(state)
+    new["inventory"].remove(item)
+    _forget_holder(new, item)
+    new["flags"]["dropped_" + item] = f"{new['room']},{tile[0]},{tile[1]}"
+    return _accept(new, "dropped", story.MESSAGES["dropped"].format(item=story.ITEMS[item]["name"]))
+
+
+def _is_tile(tile):
+    """True for a (column, row) pair of small whole numbers, as it may come from another computer."""
+    return (isinstance(tile, (list, tuple)) and len(tile) == 2
+            and all(type(number) is int and 0 <= number < 100 for number in tile))
+
+
+def _is_drop(value):
+    """True for a valid value of a "dropped_<item>" flag: None, or "room,column,row"."""
+    if value is None:
+        return True
+    if not isinstance(value, str) or value.count(",") != 2:
+        return False
+    room, col, row = value.split(",")
+    return room in story.ROOMS and col.isdigit() and row.isdigit() and int(col) < 100 and int(row) < 100
+
+
+def _made(state, item):
+    """True if an item exists by now: someone carries it, or it was dropped somewhere."""
+    return has_item(state, item) or state["flags"]["dropped_" + item] is not None
 
 
 def player_room(state, player=1):
@@ -311,7 +369,7 @@ def things_here(state, player=1):
     for item in story.ITEMS:
         if _on_floor(state, item):
             status = "on_floor" if _is_free(state, item) else "guarded"
-            things.append({"id": item, "kind": "item", "status": status})
+            things.append({"id": item, "kind": "item", "status": status, "pos": item_place(state, item)[1]})
     for thing, info in story.OBJECTS.items():
         if info["room"] == room and _is_standing(state, thing):
             things.append({"id": thing, "kind": info["kind"], "status": _object_status(state, thing)})
@@ -404,13 +462,33 @@ def pick_up(state, item, player=1):
     if not _is_free(state, item):
         return _refuse(state, "guarded", story.MESSAGES["guarded"])
     new = copy.deepcopy(state)
+    info = story.ITEMS[item]
+    new["flags"]["dropped_" + item] = None  # in hand again
+    flag = info.get("sets_flag")
+    if flag is not None:
+        new["flags"][flag] = True  # the green tincture: the other three appear around the ship
+    if info.get("consumed"):
+        return _use_up(new, item, player)
     new["inventory"].append(item)
     if new["flags"]["two_players"]:
         new["flags"]["holder_" + item] = player
-    flag = story.ITEMS[item].get("sets_flag")
-    if flag is not None:
-        new["flags"][flag] = True  # the green tincture: the other three appear around the ship
-    return _accept(new, "picked_up", story.ITEMS[item]["pickup_text"])
+    return _accept(new, "picked_up", info["pickup_text"])
+
+
+def _use_up(new, item, player):
+    """An item that is used the moment it is picked up, and never carried: the heart of the mine.
+
+    In a game for two it brings back the other player, if the crab had knocked them out for
+    good: they are in the game again, next to the one who picked it up. (A player who is only
+    down gets up too, but who is down is main.py's to know.) With nobody to help, it is wasted.
+    Changes the state given, a copy.
+    """
+    info = story.ITEMS[item]
+    if new["flags"]["two_players"] and new["flags"]["out_player"] == 3 - player:
+        new["flags"]["out_player"] = 0
+        new["flags"]["partner_room"] = new["room"]  # the state as `player` sees it: the other one comes here
+        return _accept(new, "revived", info["revive_text"])
+    return _accept(new, "used_up", info["pickup_text"])
 
 
 def enter(state, door):
@@ -634,6 +712,8 @@ def give(state, item, player=1):
         return _refuse(state, "not_here", story.MESSAGES["no_partner"])
     new = copy.deepcopy(state)
     new["flags"]["holder_" + item] = 3 - player
+    new["inventory"].remove(item)
+    new["inventory"].append(item)  # the last one the other player got: the one their Q drops
     return _accept(new, "given", story.MESSAGES["given"].format(item=story.ITEMS[item]["name"]))
 
 
@@ -682,6 +762,8 @@ def _perform(state, action, player):
         return give(state, action["item"], player)
     if verb == "ability":
         return use_ability(state, player)
+    if verb == "drop":
+        return drop(state, action.get("at"), player)
     if verb == "examine":
         return examine(state, action["target"])
     if verb == "activate":
@@ -774,9 +856,9 @@ def _forget_holder(state, item):
 
 
 def _has_or_fused(state, item):
-    """True if the player carries the item, or the whole it was fused into."""
+    """True if the player carries the item, or the whole it was fused into exists (carried or dropped)."""
     whole = story.ITEMS[item]["part_of"]
-    return has_item(state, item) or (whole is not None and has_item(state, whole))
+    return has_item(state, item) or (whole is not None and _made(state, whole))
 
 
 def _on_floor(state, item):
@@ -785,12 +867,14 @@ def _on_floor(state, item):
     A part fused into a whole is gone for good, even though it is no longer in the inventory.
     """
     info = story.ITEMS[item]
+    if info.get("gone_if") is not None and state["flags"][info["gone_if"]]:
+        return False  # used up for good, like the remedy once drunk
+    if state["flags"]["dropped_" + item] is not None:
+        return item_place(state, item)[0] == state["room"]  # where a player dropped it
     if info["room"] != state["room"]:
         return False
     if info["appears_if"] is not None and not state["flags"][info["appears_if"]]:
         return False
-    if info.get("gone_if") is not None and state["flags"][info["gone_if"]]:
-        return False  # used up for good, like the remedy once drunk
     return not _has_or_fused(state, item)
 
 
@@ -810,6 +894,8 @@ def _is_solved(state, puzzle):
 def _is_free(state, item):
     """True if nothing keeps the player from picking up the item (its "free_if" flag, if any, is true)."""
     flag = story.ITEMS[item]["free_if"]
+    if state["flags"]["dropped_" + item] is not None:
+        return True  # dropped by a player: out of whatever guarded it
     return flag is None or bool(state["flags"][flag])
 
 
@@ -1125,6 +1211,8 @@ def _allowed_values(flag):
 
 def _is_allowed(flag, value):
     """True if the flag can hold this value. The types must match too, because in Python 1 == True."""
+    if flag.startswith("dropped_") and flag[len("dropped_"):] in story.ITEMS:
+        return _is_drop(value)
     for allowed in _allowed_values(flag):
         if value == allowed and type(value) is type(allowed):
             return True

@@ -446,6 +446,19 @@ def zones_around(state, position):
 # --- What the player can act on with E -----------------------------------------------
 
 
+def place_rect(thing):
+    """Where a thing of engine.things_here() is: an item where it lies now (a player may have
+    dropped it somewhere else), anything else where the story put it."""
+    if "pos" in thing:
+        return tile_rect(*thing["pos"])
+    return thing_rect(thing["id"])
+
+
+def item_rect(state, item):
+    """The tile an item lies on when it is on the floor."""
+    return tile_rect(*engine.item_place(state, item)[1])
+
+
 def reach_rect(thing):
     """Where a thing is, to tell whether the player can reach it: its tile, or the opening of a door."""
     if thing in story.DOORS:
@@ -467,7 +480,7 @@ def nearest_target(state, position, player=1):
     for thing in engine.things_here(state, player):
         if thing["kind"] == "tile" or not engine.actions_for(state, thing["id"], player):
             continue
-        rect = reach_rect(thing["id"])
+        rect = place_rect(thing) if thing["kind"] == "item" else reach_rect(thing["id"])
         if not reach.colliderect(rect):
             continue
         distance = (rect.centerx - body.centerx) ** 2 + (rect.centery - body.centery) ** 2
@@ -1162,6 +1175,26 @@ def finish_action(app, action, before, state, outcome):
         show_outcome(app, action, before, state, outcome)
         app["state"] = state
         save_progress(app)
+        if is_host(app):
+            heart_helps(app, outcome, my_number(app))
+
+
+def drop_item(app):
+    """Q: the player on this computer drops the item they got last, on the floor where they stand."""
+    if not can_move(app):
+        return
+    tile = tile_of(local_player(app)["pos"])
+    request(app, {"verb": "drop", "target": None, "item": None, "at": list(tile)}, finish_drop)
+
+
+def finish_drop(app, action, before, state, outcome):
+    """With empty hands nothing happens, silently."""
+    if not outcome["ok"]:
+        return
+    app["state"] = state
+    save_progress(app)
+    sounds.play("drop")
+    show_banner(app, outcome["text"])
 
 
 def handle_key(app, key):
@@ -1251,6 +1284,8 @@ def handle_play_key(app, key):
             interact(app, player)
     elif key == pygame.K_SPACE:
         use_ability(app)
+    elif key == pygame.K_q:
+        drop_item(app)
     elif key in keys["inventory"]:
         app["inventory_scroll"] = 0  # the list of items always opens at the top
         app["inventory_player"] = my_number(app)
@@ -1707,6 +1742,8 @@ def crab_news(app):
             if awake:
                 sounds.play("revived")
                 show_banner(app, story.MESSAGES["back_up" if number == me else "helped_up"])
+    if app["seen"]["out"] == me and out == 0:
+        come_back(app)
     if out != app["seen"]["out"] and out != 0:
         sounds.play("knocked_out")
         if out != me:
@@ -1862,6 +1899,28 @@ def finish_ability(app, action, before, state, outcome):
         apply_ability(app, number)
     if character == "flash":
         dash(app)
+
+
+def heart_helps(app, outcome, number):
+    """The host's part of the heart of the mine: when player `number` picks it up, the other one,
+    if they are down, is on their feet at once. (If they were out of the game, the engine has
+    brought them back: see engine.pick_up.)"""
+    if outcome["event"] in ("used_up", "revived"):
+        app["downed"].pop(3 - number, None)
+        app["revive"].pop(3 - number, None)
+
+
+def come_back(app):
+    """The player on this computer was out of the game and the heart brought them back: they
+    appear next to the one who picked it up."""
+    player = local_player(app)
+    partner = app["players"][1 - app["me"]]
+    player["pos"] = beside(view(app), partner["pos"])
+    player["touching"] = None
+    settle_on_floor(app, player)
+    app["fade"] = FADE_FRAMES
+    sounds.play("revived")
+    show_banner(app, story.MESSAGES["back_in_game"])
 
 
 def apply_ability(app, number):
@@ -2117,6 +2176,7 @@ def handle_message(app, message):
             save_progress(app)
             if message["action"].get("verb") == "ability":
                 apply_ability(app, 2)
+            heart_helps(app, outcome, 2)
         send(app, {"t": "done", "id": message.get("id"), "state": app["state"], "outcome": outcome})
         connection["sent_state"] = app["state"]
     elif kind == "done" and connection["role"] == "client":
@@ -2195,7 +2255,7 @@ def show_new_clue(app, action):
     target = action.get("target")
     if not effects.FX["clues"] or target not in story.OBJECTS and target not in story.ITEMS:
         return
-    rect = thing_rect(target)
+    rect = item_rect(view(app), target) if target in story.ITEMS else thing_rect(target)
     app["fx"]["clue"] = {"rect": rect, "age": 0}
     effects.spawn(app["fx"], rect.centerx, rect.centery, effects.CLUE_SPARKS, effects.CLUE, speed=1.6, life=40,
                   up=0.4)
@@ -2607,7 +2667,7 @@ def thing_picture(thing):
 
 def draw_thing(screen, thing, lift=0):
     """A thing of the room: its sprite, or colored rectangles if it has none. `lift` raises it a little."""
-    rect = thing_rect(thing["id"]).move(0, -lift)
+    rect = place_rect(thing).move(0, -lift)
     picture = thing_picture(thing)
     if picture is not None:
         screen.blit(picture, rect)
@@ -2765,8 +2825,9 @@ def draw_floor_puzzles(app, screen, things):
 
 def on_an_altar(state, item):
     """True if an item lies on the tile of an altar (or of the anvil) of its room."""
+    room, pos = engine.item_place(state, item)
     for thing, info in story.OBJECTS.items():
-        if info["kind"] in HOLDERS and info["room"] == state["room"] and info["pos"] == story.ITEMS[item]["pos"]:
+        if info["kind"] in HOLDERS and info["room"] == room and info["pos"] == pos:
             return True
     return False
 

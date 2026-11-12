@@ -2,9 +2,17 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v29](versions/v29.md) - Abilities (2026-11-12)
+## [v30](versions/v30.md) - Dropping items, and the heart (2026-11-12)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- Q drops the item the player got last (picked up, or handed over by the partner) on the floor where they stand, as many times as there are items. Anyone can pick it up again with E. It works alone too.
+- A dropped item remembers its room and tile (a new flag for each item, dropped_<item>). While a key lies on the floor it opens nothing: drop the first half and the hold is barred again until someone picks it up.
+- The heart of the mine is no longer carried: picking it up uses it at once, and it is gone for good. In a game for two it helps the other player up at once if they are down, and brings them back into the game if they were out, right next to the one who took it. Their items stay with whoever has them, and an ability already used does not come back. With everyone on their feet, or alone, it is wasted.
+
+## [v29](versions/v29.md) - Abilities (2026-11-12)
+
+In commit [`733c53a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/733c53a700d06e20872f9427537169ac4ebd8c2d/plot_twist).
 
 - In a game for two each character has an ability. Space uses it, once in the whole game (it is saved); the corner of the screen says so while it is there. Alone, Space does nothing.
 - Wizard: a spell stuns the crab for 5 seconds, wherever it is: it stands still and harmless, with stars above its head.

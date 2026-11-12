@@ -39,6 +39,8 @@ FLAGS = {
     "character": "wizard",
     # In a game for two, the character player 2 chose: never the same as player 1's.
     "partner_character": "nurse",
+    # The heart of the mine has been picked up: it is used up, whether it helped anyone or not.
+    "heart_used": False,
     # In a game for two, each player's ability (Space) works once: True once it is used.
     "ability_used_1": False,
     "ability_used_2": False,
@@ -324,7 +326,13 @@ ITEMS = {
         "appears_if": None,
         "part_of": None,
         "free_if": None,
-        "pickup_text": "You pick up a heart of red crystal. It is warm, and it beats.",
+        # It is never carried: picking it up uses it at once, and it is gone for good.
+        "consumed": True,
+        "sets_flag": "heart_used",
+        "gone_if": "heart_used",
+        "pickup_text": "You pick up the heart of red crystal. It beats once in your hand, and crumbles to dust.",
+        # In a game for two: what it says when it brings the other player back into the game.
+        "revive_text": "The heart beats once in your hand, and crumbles to dust. Your partner is back, right next to you!",
     },
     # The two halves fused at the anvil: the key of the final doors.
     "fused_key": {
@@ -342,6 +350,9 @@ ITEMS = {
 # Who carries each item in a game for two: 1 or 2 ("holder_<item>"). Alone, it stays 1.
 for _item in ITEMS:
     FLAGS["holder_" + _item] = 1
+    # Where an item lies after a player dropped it: "room,column,row", or None while
+    # it is where the story put it (or in someone's hands).
+    FLAGS["dropped_" + _item] = None
 
 # Doors, one per direction: each door is in one room and leads to another, from the
 # middle of one wall ("side": N, S, E or W). The way back is on the opposite wall.
@@ -1743,6 +1754,11 @@ MESSAGES = {
     "partner": "Partner",
     "label_hand": "Give to partner: {item}",
     "given": "You hand over: {item}.",
+    # Q drops the item picked up last, on the floor where the player stands.
+    "dropped": "You drop: {item}",
+    "nothing_to_drop": "You have nothing to drop.",
+    "heart_helps": "The heart helps your partner up!",
+    "back_in_game": "You are back in the game!",
     "no_partner": "Your partner is not here.",
     "partner_is_out": "Your partner is out of the game.",
     "you_are_out": "You are out of the game.",
@@ -1763,7 +1779,7 @@ MESSAGES = {
     "hint_inventory": "I: inventory",
     # The controls, at the bottom of the title screen: one line each.
     "controls_1": "Arrows or WASD: move · E: interact",
-    "controls_2": "I: inventory · Esc: menu",
+    "controls_2": "I: inventory · Q: drop · Esc: menu",
     "ending_number": "Ending {number} of {total}",
     # What E does here, shown in the bar at the top.
     "prompt": "E: {action}",
@@ -1915,6 +1931,8 @@ def restore_state(data):
         return None
 
     for item in inventory:
+        if flags.get("dropped_" + item) is not None:
+            return None  # an item cannot be in hand and on the floor
         gone_if = story.ITEMS[item].get("gone_if")
         if gone_if is not None and flags.get(gone_if, story.FLAGS[gone_if]):
             return None  # an item used up for good cannot be carried
@@ -1987,7 +2005,7 @@ def is_out(state, player):
 def key_fused(state):
     """True once the two halves of the key have been fused (the key may have opened a door since)."""
     flags = state["flags"]
-    return has_item(state, "fused_key") or flags["crab_door"] is not None or flags["angel_door"] is not None
+    return _made(state, "fused_key") or flags["crab_door"] is not None or flags["angel_door"] is not None
 
 
 def crab_awake(state):
@@ -2041,6 +2059,62 @@ def use_ability(state, player=1):
     new = copy.deepcopy(state)
     new["flags"]["ability_used_" + str(player)] = True
     return _accept(new, "ability", story.CHARACTERS[character_of(state, player)]["power"]["text"])
+
+
+def item_place(state, item):
+    """Where an item lies when it is on the floor: (room, (column, row)). Where a player dropped it,
+    or else where the story put it."""
+    dropped = state["flags"]["dropped_" + item]
+    if dropped is not None:
+        room, col, row = dropped.split(",")
+        return room, (int(col), int(row))
+    return story.ITEMS[item]["room"], story.ITEMS[item]["pos"]
+
+
+def last_item(state, player=1):
+    """The item `player` got last, picked up or handed over: the one Q drops. None with empty hands."""
+    for item in reversed(state["inventory"]):
+        if carries(state, item, player):
+            return item
+    return None
+
+
+def drop(state, tile, player=1):
+    """`player` drops the item they got last on the floor of their room, on `tile` (column, row).
+
+    Anyone can pick it up again there. An item that opened a door no longer does while it lies on the floor.
+    """
+    if is_over(state):
+        return _refuse(state, "game_over", story.MESSAGES["game_over"])
+    item = last_item(state, player)
+    if item is None or not _is_tile(tile):
+        return _refuse(state, "nothing_to_drop", story.MESSAGES["nothing_to_drop"])
+    new = copy.deepcopy(state)
+    new["inventory"].remove(item)
+    _forget_holder(new, item)
+    new["flags"]["dropped_" + item] = f"{new['room']},{tile[0]},{tile[1]}"
+    return _accept(new, "dropped", story.MESSAGES["dropped"].format(item=story.ITEMS[item]["name"]))
+
+
+def _is_tile(tile):
+    """True for a (column, row) pair of small whole numbers, as it may come from another computer."""
+    return (isinstance(tile, (list, tuple)) and len(tile) == 2
+            and all(type(number) is int and 0 <= number < 100 for number in tile))
+
+
+def _is_drop(value):
+    """True for a valid value of a "dropped_<item>" flag: None, or "room,column,row"."""
+    if value is None:
+        return True
+    if not isinstance(value, str) or value.count(",") != 2:
+        return False
+    room, col, row = value.split(",")
+    return room in story.ROOMS and col.isdigit() and row.isdigit() and int(col) < 100 and int(row) < 100
+
+
+def _made(state, item):
+    """True if an item exists by now: someone carries it, or it was dropped somewhere."""
+    return has_item(state, item) or state["flags"]["dropped_" + item] is not None
 
 
 def player_room(state, player=1):
@@ -2100,7 +2174,7 @@ def things_here(state, player=1):
     for item in story.ITEMS:
         if _on_floor(state, item):
             status = "on_floor" if _is_free(state, item) else "guarded"
-            things.append({"id": item, "kind": "item", "status": status})
+            things.append({"id": item, "kind": "item", "status": status, "pos": item_place(state, item)[1]})
     for thing, info in story.OBJECTS.items():
         if info["room"] == room and _is_standing(state, thing):
             things.append({"id": thing, "kind": info["kind"], "status": _object_status(state, thing)})
@@ -2193,13 +2267,33 @@ def pick_up(state, item, player=1):
     if not _is_free(state, item):
         return _refuse(state, "guarded", story.MESSAGES["guarded"])
     new = copy.deepcopy(state)
+    info = story.ITEMS[item]
+    new["flags"]["dropped_" + item] = None  # in hand again
+    flag = info.get("sets_flag")
+    if flag is not None:
+        new["flags"][flag] = True  # the green tincture: the other three appear around the ship
+    if info.get("consumed"):
+        return _use_up(new, item, player)
     new["inventory"].append(item)
     if new["flags"]["two_players"]:
         new["flags"]["holder_" + item] = player
-    flag = story.ITEMS[item].get("sets_flag")
-    if flag is not None:
-        new["flags"][flag] = True  # the green tincture: the other three appear around the ship
-    return _accept(new, "picked_up", story.ITEMS[item]["pickup_text"])
+    return _accept(new, "picked_up", info["pickup_text"])
+
+
+def _use_up(new, item, player):
+    """An item that is used the moment it is picked up, and never carried: the heart of the mine.
+
+    In a game for two it brings back the other player, if the crab had knocked them out for
+    good: they are in the game again, next to the one who picked it up. (A player who is only
+    down gets up too, but who is down is main.py's to know.) With nobody to help, it is wasted.
+    Changes the state given, a copy.
+    """
+    info = story.ITEMS[item]
+    if new["flags"]["two_players"] and new["flags"]["out_player"] == 3 - player:
+        new["flags"]["out_player"] = 0
+        new["flags"]["partner_room"] = new["room"]  # the state as `player` sees it: the other one comes here
+        return _accept(new, "revived", info["revive_text"])
+    return _accept(new, "used_up", info["pickup_text"])
 
 
 def enter(state, door):
@@ -2423,6 +2517,8 @@ def give(state, item, player=1):
         return _refuse(state, "not_here", story.MESSAGES["no_partner"])
     new = copy.deepcopy(state)
     new["flags"]["holder_" + item] = 3 - player
+    new["inventory"].remove(item)
+    new["inventory"].append(item)  # the last one the other player got: the one their Q drops
     return _accept(new, "given", story.MESSAGES["given"].format(item=story.ITEMS[item]["name"]))
 
 
@@ -2471,6 +2567,8 @@ def _perform(state, action, player):
         return give(state, action["item"], player)
     if verb == "ability":
         return use_ability(state, player)
+    if verb == "drop":
+        return drop(state, action.get("at"), player)
     if verb == "examine":
         return examine(state, action["target"])
     if verb == "activate":
@@ -2563,9 +2661,9 @@ def _forget_holder(state, item):
 
 
 def _has_or_fused(state, item):
-    """True if the player carries the item, or the whole it was fused into."""
+    """True if the player carries the item, or the whole it was fused into exists (carried or dropped)."""
     whole = story.ITEMS[item]["part_of"]
-    return has_item(state, item) or (whole is not None and has_item(state, whole))
+    return has_item(state, item) or (whole is not None and _made(state, whole))
 
 
 def _on_floor(state, item):
@@ -2574,12 +2672,14 @@ def _on_floor(state, item):
     A part fused into a whole is gone for good, even though it is no longer in the inventory.
     """
     info = story.ITEMS[item]
+    if info.get("gone_if") is not None and state["flags"][info["gone_if"]]:
+        return False  # used up for good, like the remedy once drunk
+    if state["flags"]["dropped_" + item] is not None:
+        return item_place(state, item)[0] == state["room"]  # where a player dropped it
     if info["room"] != state["room"]:
         return False
     if info["appears_if"] is not None and not state["flags"][info["appears_if"]]:
         return False
-    if info.get("gone_if") is not None and state["flags"][info["gone_if"]]:
-        return False  # used up for good, like the remedy once drunk
     return not _has_or_fused(state, item)
 
 
@@ -2599,6 +2699,8 @@ def _is_solved(state, puzzle):
 def _is_free(state, item):
     """True if nothing keeps the player from picking up the item (its "free_if" flag, if any, is true)."""
     flag = story.ITEMS[item]["free_if"]
+    if state["flags"]["dropped_" + item] is not None:
+        return True  # dropped by a player: out of whatever guarded it
     return flag is None or bool(state["flags"][flag])
 
 
@@ -2914,6 +3016,8 @@ def _allowed_values(flag):
 
 def _is_allowed(flag, value):
     """True if the flag can hold this value. The types must match too, because in Python 1 == True."""
+    if flag.startswith("dropped_") and flag[len("dropped_"):] in story.ITEMS:
+        return _is_drop(value)
     for allowed in _allowed_values(flag):
         if value == allowed and type(value) is type(allowed):
             return True
@@ -3430,6 +3534,19 @@ def zones_around(state, position):
 # --- What the player can act on with E -----------------------------------------------
 
 
+def place_rect(thing):
+    """Where a thing of engine.things_here() is: an item where it lies now (a player may have
+    dropped it somewhere else), anything else where the story put it."""
+    if "pos" in thing:
+        return tile_rect(*thing["pos"])
+    return thing_rect(thing["id"])
+
+
+def item_rect(state, item):
+    """The tile an item lies on when it is on the floor."""
+    return tile_rect(*engine.item_place(state, item)[1])
+
+
 def reach_rect(thing):
     """Where a thing is, to tell whether the player can reach it: its tile, or the opening of a door."""
     if thing in story.DOORS:
@@ -3451,7 +3568,7 @@ def nearest_target(state, position, player=1):
     for thing in engine.things_here(state, player):
         if thing["kind"] == "tile" or not engine.actions_for(state, thing["id"], player):
             continue
-        rect = reach_rect(thing["id"])
+        rect = place_rect(thing) if thing["kind"] == "item" else reach_rect(thing["id"])
         if not reach.colliderect(rect):
             continue
         distance = (rect.centerx - body.centerx) ** 2 + (rect.centery - body.centery) ** 2
@@ -4146,6 +4263,26 @@ def finish_action(app, action, before, state, outcome):
         show_outcome(app, action, before, state, outcome)
         app["state"] = state
         save_progress(app)
+        if is_host(app):
+            heart_helps(app, outcome, my_number(app))
+
+
+def drop_item(app):
+    """Q: the player on this computer drops the item they got last, on the floor where they stand."""
+    if not can_move(app):
+        return
+    tile = tile_of(local_player(app)["pos"])
+    request(app, {"verb": "drop", "target": None, "item": None, "at": list(tile)}, finish_drop)
+
+
+def finish_drop(app, action, before, state, outcome):
+    """With empty hands nothing happens, silently."""
+    if not outcome["ok"]:
+        return
+    app["state"] = state
+    save_progress(app)
+    sounds.play("drop")
+    show_banner(app, outcome["text"])
 
 
 def handle_key(app, key):
@@ -4235,6 +4372,8 @@ def handle_play_key(app, key):
             interact(app, player)
     elif key == pygame.K_SPACE:
         use_ability(app)
+    elif key == pygame.K_q:
+        drop_item(app)
     elif key in keys["inventory"]:
         app["inventory_scroll"] = 0  # the list of items always opens at the top
         app["inventory_player"] = my_number(app)
@@ -4691,6 +4830,8 @@ def crab_news(app):
             if awake:
                 sounds.play("revived")
                 show_banner(app, story.MESSAGES["back_up" if number == me else "helped_up"])
+    if app["seen"]["out"] == me and out == 0:
+        come_back(app)
     if out != app["seen"]["out"] and out != 0:
         sounds.play("knocked_out")
         if out != me:
@@ -4846,6 +4987,28 @@ def finish_ability(app, action, before, state, outcome):
         apply_ability(app, number)
     if character == "flash":
         dash(app)
+
+
+def heart_helps(app, outcome, number):
+    """The host's part of the heart of the mine: when player `number` picks it up, the other one,
+    if they are down, is on their feet at once. (If they were out of the game, the engine has
+    brought them back: see engine.pick_up.)"""
+    if outcome["event"] in ("used_up", "revived"):
+        app["downed"].pop(3 - number, None)
+        app["revive"].pop(3 - number, None)
+
+
+def come_back(app):
+    """The player on this computer was out of the game and the heart brought them back: they
+    appear next to the one who picked it up."""
+    player = local_player(app)
+    partner = app["players"][1 - app["me"]]
+    player["pos"] = beside(view(app), partner["pos"])
+    player["touching"] = None
+    settle_on_floor(app, player)
+    app["fade"] = FADE_FRAMES
+    sounds.play("revived")
+    show_banner(app, story.MESSAGES["back_in_game"])
 
 
 def apply_ability(app, number):
@@ -5101,6 +5264,7 @@ def handle_message(app, message):
             save_progress(app)
             if message["action"].get("verb") == "ability":
                 apply_ability(app, 2)
+            heart_helps(app, outcome, 2)
         send(app, {"t": "done", "id": message.get("id"), "state": app["state"], "outcome": outcome})
         connection["sent_state"] = app["state"]
     elif kind == "done" and connection["role"] == "client":
@@ -5179,7 +5343,7 @@ def show_new_clue(app, action):
     target = action.get("target")
     if not effects.FX["clues"] or target not in story.OBJECTS and target not in story.ITEMS:
         return
-    rect = thing_rect(target)
+    rect = item_rect(view(app), target) if target in story.ITEMS else thing_rect(target)
     app["fx"]["clue"] = {"rect": rect, "age": 0}
     effects.spawn(app["fx"], rect.centerx, rect.centery, effects.CLUE_SPARKS, effects.CLUE, speed=1.6, life=40,
                   up=0.4)
@@ -5591,7 +5755,7 @@ def thing_picture(thing):
 
 def draw_thing(screen, thing, lift=0):
     """A thing of the room: its sprite, or colored rectangles if it has none. `lift` raises it a little."""
-    rect = thing_rect(thing["id"]).move(0, -lift)
+    rect = place_rect(thing).move(0, -lift)
     picture = thing_picture(thing)
     if picture is not None:
         screen.blit(picture, rect)
@@ -5749,8 +5913,9 @@ def draw_floor_puzzles(app, screen, things):
 
 def on_an_altar(state, item):
     """True if an item lies on the tile of an altar (or of the anvil) of its room."""
+    room, pos = engine.item_place(state, item)
     for thing, info in story.OBJECTS.items():
-        if info["kind"] in HOLDERS and info["room"] == state["room"] and info["pos"] == story.ITEMS[item]["pos"]:
+        if info["kind"] in HOLDERS and info["room"] == room and info["pos"] == pos:
             return True
     return False
 
@@ -8897,6 +9062,7 @@ EFFECTS = {
     "knocked": [(392, 0.06), (262, 0.06), (131, 0.25)],                # the crab knocks a player down
     "revived": [(523, 0.06), (784, 0.06), (1047, 0.15)],               # back on their feet
     "ability": [(659, 0.04), (988, 0.04), (1319, 0.04), (1976, 0.12)],  # a character's ability: a quick rising run
+    "drop": [(330, 0.04), (196, 0.07)],                                # an item dropped on the floor
     "knocked_out": [(330, 0.15), (262, 0.15), (196, 0.15), (131, 0.4)],  # a player is out of the game
 }
 
@@ -10529,7 +10695,10 @@ def test_heart_waits_in_the_mine():
     state["room"] = "mine"
     assert "heart" in [thing["id"] for thing in engine.things_here(state)]
     after, outcome = engine.pick_up(state, "heart")
-    assert outcome["event"] == "picked_up" and after["inventory"] == ["heart"]
+    assert outcome["ok"] and outcome["event"] == "used_up" and outcome["text"] == story.ITEMS["heart"]["pickup_text"]
+    assert after["inventory"] == [] and after["flags"]["heart_used"] is True  # used at once, never carried
+    assert "heart" not in [thing["id"] for thing in engine.things_here(after)]  # and gone for good
+    assert reopen(after) == after
 
 
 def test_doctor_drinks_the_remedy_vanishes_and_the_anvil_appears_in_the_galley():
@@ -10888,6 +11057,144 @@ def test_every_character_says_what_its_ability_does():
         assert info["ability"], character
         if info["power"] is not None:
             assert info["power"]["label"] and info["power"]["text"], character
+
+
+# --- The heart of the mine, in a game for two --------------------------------------------------
+
+
+def in_the_mine(state, player):
+    """Move a player to the mine (only a portal leads there: the tests put them in it)."""
+    state = copy.deepcopy(state)
+    if player == 1:
+        state["room"] = "mine"
+    else:
+        state["flags"]["partner_room"] = "mine"
+    return state
+
+
+def test_the_heart_brings_back_a_player_who_was_out_next_to_the_one_who_took_it():
+    state = engine.knock_out(two(GET_KEY), 2)[0]
+    state = in_the_mine(state, 1)
+    before = copy.deepcopy(state)
+    after, outcome = engine.perform(state, act("pick_up", "heart"), 1)
+    assert state == before
+    assert outcome["ok"] and outcome["event"] == "revived" and outcome["text"] == story.ITEMS["heart"]["revive_text"]
+    assert not engine.is_out(after, 2) and engine.player_room(after, 2) == "mine"
+    assert engine.carries(after, "key", 1) and not engine.carries(after, "key", 2)  # the items stay where they went
+    assert engine.perform(after, TAKE_WAND, 2)[1]["event"] != "out"  # they can act again
+    assert reopen(after) == after
+
+
+def test_the_heart_works_for_player_two_as_well():
+    state = in_the_mine(engine.knock_out(two(GET_KEY), 1)[0], 2)
+    after, outcome = engine.perform(state, act("pick_up", "heart"), 2)
+    assert outcome["event"] == "revived" and not engine.is_out(after, 1) and engine.player_room(after, 1) == "mine"
+
+
+def test_the_heart_is_wasted_when_nobody_is_out():
+    state = in_the_mine(two(GET_KEY), 1)
+    after, outcome = engine.perform(state, act("pick_up", "heart"), 1)
+    assert outcome["event"] == "used_up" and after["flags"]["heart_used"] is True
+    assert "heart" not in after["inventory"]
+    again, outcome = engine.perform(after, act("pick_up", "heart"), 1)
+    assert not outcome["ok"]  # one heart in a game
+    out = engine.knock_out(after, 2)[0]
+    assert not engine.perform(out, act("pick_up", "heart"), 1)[1]["ok"]  # too late
+
+
+def test_an_ability_already_used_does_not_come_back_with_the_heart():
+    state = engine.perform(two_as("wizard", "flash", GET_KEY), ABILITY, 2)[0]
+    state = in_the_mine(engine.knock_out(state, 2)[0], 1)
+    after = engine.perform(state, act("pick_up", "heart"), 1)[0]
+    assert not engine.is_out(after, 2) and not engine.can_use_ability(after, 2)
+
+
+# --- Dropping items ------------------------------------------------------------------------
+
+
+def drop_at(col, row):
+    return {"verb": "drop", "target": None, "item": None, "at": [col, row]}
+
+
+def test_drop_puts_the_last_item_on_the_floor_where_the_player_stands():
+    state = play([TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY])
+    before = copy.deepcopy(state)
+    after, outcome = engine.perform(state, drop_at(5, 6))
+    assert state == before
+    assert outcome == {"ok": True, "event": "dropped",
+                       "text": story.MESSAGES["dropped"].format(item=story.ITEMS["key"]["name"])}
+    assert after["inventory"] == ["wand"] and engine.item_place(after, "key") == ("cabin", (5, 6))
+    lying = [thing for thing in engine.things_here(after) if thing["id"] == "key"]
+    assert lying == [{"id": "key", "kind": "item", "status": "on_floor", "pos": (5, 6)}]
+    assert reopen(after) == after
+    back, outcome = engine.perform(after, TAKE_KEY)
+    assert outcome["ok"] and back["inventory"] == ["wand", "key"] and back["flags"]["dropped_key"] is None
+    assert engine.item_place(back, "key") == ("cabin", story.ITEMS["key"]["pos"])
+
+
+def test_drop_goes_on_until_the_hands_are_empty():
+    state = play([TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK])
+    state = play([drop_at(3, 3), drop_at(4, 3)], state)  # the key, then the wand
+    assert state["inventory"] == []
+    assert engine.item_place(state, "key") == ("deck", (3, 3)) and engine.item_place(state, "wand") == ("deck", (4, 3))
+    same, outcome = engine.perform(state, drop_at(5, 3))
+    assert not outcome["ok"] and outcome["event"] == "nothing_to_drop" and same is state
+
+
+def test_a_dropped_item_is_only_in_the_room_where_it_was_dropped():
+    state = play([TAKE_WAND, TO_CABIN, drop_at(4, 4), CABIN_TO_DECK])
+    assert "wand" not in [thing["id"] for thing in engine.things_here(state)]  # not back where the story put it
+    assert not engine.perform(state, TAKE_WAND)[1]["ok"]
+    assert "wand" in [thing["id"] for thing in engine.things_here(play([TO_CABIN], state))]
+
+
+def test_a_key_on_the_floor_opens_nothing_until_it_is_picked_up_again():
+    state = play(GET_KEY)
+    assert engine.door_status(state, "deck_to_hold") == "open"
+    dropped = play([drop_at(3, 3)], state)
+    assert engine.door_status(dropped, "deck_to_hold") == "barred"
+    assert "key" not in [thing["id"] for thing in engine.things_here(play([TO_CABIN], dropped))]  # not on its altar again
+    assert engine.door_status(play([TAKE_KEY], dropped), "deck_to_hold") == "open"
+
+
+def test_the_fused_key_on_the_floor_is_still_fused():
+    state = two(GET_FUSED_KEY)
+    dropped = play([drop_at(3, 3)], state)
+    assert engine.key_fused(dropped) and not engine.crab_awake(dropped)  # the crab does not wake again
+    for room, part in (("cabin", "key"), ("hold", "second_key")):
+        there = copy.deepcopy(dropped)
+        there["room"] = room
+        assert part not in [thing["id"] for thing in engine.things_here(there)]  # the halves are gone for good
+
+
+def test_in_a_game_for_two_q_drops_the_last_item_that_player_got():
+    state = two([TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY])
+    state = as_player(state, [TO_CABIN], 2)
+    assert engine.last_item(state, 1) == "key" and engine.last_item(state, 2) is None
+    state = play([act("give", "partner", "wand")], state)  # player 2 gets the wand: their last one
+    assert engine.last_item(state, 2) == "wand" and engine.last_item(state, 1) == "key"
+    assert state["inventory"] == ["key", "wand"]
+    dropped, outcome = engine.perform(state, drop_at(6, 6), 2)
+    assert outcome["ok"] and dropped["inventory"] == ["key"]
+    taken = play([TAKE_WAND], dropped)  # anyone can pick it up: now it is player 1's
+    assert engine.carries(taken, "wand", 1)
+
+
+def test_dropping_needs_a_tile_and_a_game_still_on():
+    state = play([TAKE_WAND])
+    for wrong in (None, [1], [1, 2, 3], ["1", 2], [1.5, 2], [-1, 2], [1, 100], [True, 2]):
+        same, outcome = engine.perform(state, {"verb": "drop", "target": None, "item": None, "at": wrong})
+        assert not outcome["ok"] and same is state, wrong
+    over = play(CRAB_ENDING)
+    assert not engine.perform(over, drop_at(3, 3))[1]["ok"]
+
+
+def test_the_place_of_a_dropped_item_is_checked_on_restore():
+    assert engine.restore_state(restorable(flags={"dropped_wand": "hold,3,4"})) is not None
+    for wrong in ("attic,3,4", "hold,3", "hold,a,4", "hold,3,400", 5, ["hold", 3, 4]):
+        assert engine.restore_state(restorable(flags={"dropped_wand": wrong})) is None, wrong
+    both = restorable(inventory=["wand"], flags={"dropped_wand": "hold,3,4"})
+    assert engine.restore_state(both) is None  # in hand and on the floor
 
 
 ================================================================================
@@ -13286,6 +13593,88 @@ def test_abilities_reach_the_host_from_the_other_computer(two_computers):
     press(host, pygame.K_SPACE)
     pump(host, guest, lambda: guest["crab"]["stun"] > 0)
     main.draw(guest, pygame.Surface((main.WIDTH, main.HEIGHT)))
+
+
+# --- Dropping items (Q) and the heart of the mine ----------------------------------------------
+
+
+def test_q_drops_the_last_item_where_the_player_stands_and_e_picks_it_up_again(app, heard):
+    start_new_game(app)
+    stand_next_to(app, "wand")
+    press(app, pygame.K_e)
+    read_all(app)
+    p1(app)["pos"] = free_spot(app, 11, 4)
+    press(app, pygame.K_q)
+    assert app["state"]["inventory"] == [] and "drop" in heard
+    assert engine.item_place(app["state"], "wand") == ("deck", main.tile_of(p1(app)["pos"]))
+    assert app["banner"] == story.MESSAGES["dropped"].format(item=story.ITEMS["wand"]["name"])
+    assert engine.restore_state(save.load_game()) == app["state"]
+    lying = [thing for thing in engine.things_here(app["state"]) if thing["id"] == "wand"][0]
+    assert main.place_rect(lying) == main.tile_rect(*main.tile_of(p1(app)["pos"]))
+    assert main.place_rect(lying) != main.thing_rect("wand")  # not where the story put it
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+    assert main.prompt(app["state"], p1(app)["pos"]) != ""  # E picks it up, right there
+    press(app, pygame.K_e)
+    assert app["state"]["inventory"] == ["wand"]
+    read_all(app)
+    p1(app)["pos"] = main.spawn_at_entry("deck")
+    press(app, pygame.K_q, pygame.K_q)  # the second time the hands are empty: nothing, silently
+    assert app["state"]["inventory"] == [] and app["dialog"] == [] and heard.count("drop") == 2
+
+
+def test_the_title_says_what_q_does(app):
+    assert "Q" in story.MESSAGES["controls_2"]
+    font = app["fonts"]["text"]
+    assert font.size(story.MESSAGES["controls_2"])[0] <= main.WIDTH - 16
+
+
+def in_the_mine_together(app):
+    """Both players in the mine, the crab awake somewhere else."""
+    two_playing(app, FIRST_HALF)
+    app["state"]["room"] = "mine"
+    app["state"]["flags"]["partner_room"] = "mine"
+    main.place_at_entry(app)
+    main.reset_crab(app)
+    awake_crab(app, wait=10 ** 6)
+
+
+def test_the_heart_helps_a_player_down_up_at_once(app, heard):
+    in_the_mine_together(app)
+    app["downed"] = {2: main.DOWN_FRAMES}
+    main.update(app, 0, 0)  # the game has seen them down
+    stand_next_to(app, "heart")
+    press(app, pygame.K_e)
+    assert app["downed"] == {} and app["state"]["flags"]["heart_used"] is True
+    assert "heart" not in app["state"]["inventory"]
+    read_all(app)
+    main.update(app, 0, 0)
+    assert "revived" in heard
+
+
+def test_the_heart_is_wasted_when_everyone_is_on_their_feet(app):
+    in_the_mine_together(app)
+    stand_next_to(app, "heart")
+    press(app, pygame.K_e)
+    assert dialog_text(app) == " ".join(main.wrap(story.ITEMS["heart"]["pickup_text"], main.DIALOG_TEXT_WIDTH,
+                                                    main.text_width(app["fonts"]["text"])))
+    assert app["state"]["flags"]["heart_used"] is True and app["state"]["flags"]["out_player"] == 0
+
+
+def test_the_heart_brings_the_player_out_back_next_to_the_one_who_took_it(two_computers, heard):
+    host, guest = two_computers
+    state = engine.knock_out(play_two(FIRST_HALF), 2)[0]  # the guest is out, and watches
+    state["room"] = "mine"
+    host["state"], guest["state"] = state, engine.restore_state(state)
+    for app in (host, guest):
+        main.place_at_entry(app)
+        main.reset_crab(app)
+    stand_next_to(host, "heart")
+    press(host, pygame.K_e)
+    pump(host, guest, lambda: not engine.is_out(guest["state"], 2) and guest["banner"] == story.MESSAGES["back_in_game"])
+    assert engine.player_room(guest["state"], 2) == "mine" and main.can_move(guest)
+    assert distance(mine(guest)["pos"], mine(host)["pos"]) <= main.PLAYER_SIZE + 4  # right next to the host
+    assert main.is_free_floor(main.view(guest), mine(guest)["pos"])
+    assert main.view_position(guest) == mine(guest)["pos"]  # their own screen again
 
 
 ================================================================================

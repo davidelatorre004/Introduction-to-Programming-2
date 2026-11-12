@@ -35,6 +35,8 @@ FLAGS = {
     "character": "wizard",
     # In a game for two, the character player 2 chose: never the same as player 1's.
     "partner_character": "nurse",
+    # The heart of the mine has been picked up: it is used up, whether it helped anyone or not.
+    "heart_used": False,
     # In a game for two, each player's ability (Space) works once: True once it is used.
     "ability_used_1": False,
     "ability_used_2": False,
@@ -320,7 +322,13 @@ ITEMS = {
         "appears_if": None,
         "part_of": None,
         "free_if": None,
-        "pickup_text": "You pick up a heart of red crystal. It is warm, and it beats.",
+        # It is never carried: picking it up uses it at once, and it is gone for good.
+        "consumed": True,
+        "sets_flag": "heart_used",
+        "gone_if": "heart_used",
+        "pickup_text": "You pick up the heart of red crystal. It beats once in your hand, and crumbles to dust.",
+        # In a game for two: what it says when it brings the other player back into the game.
+        "revive_text": "The heart beats once in your hand, and crumbles to dust. Your partner is back, right next to you!",
     },
     # The two halves fused at the anvil: the key of the final doors.
     "fused_key": {
@@ -338,6 +346,9 @@ ITEMS = {
 # Who carries each item in a game for two: 1 or 2 ("holder_<item>"). Alone, it stays 1.
 for _item in ITEMS:
     FLAGS["holder_" + _item] = 1
+    # Where an item lies after a player dropped it: "room,column,row", or None while
+    # it is where the story put it (or in someone's hands).
+    FLAGS["dropped_" + _item] = None
 
 # Doors, one per direction: each door is in one room and leads to another, from the
 # middle of one wall ("side": N, S, E or W). The way back is on the opposite wall.
@@ -1739,6 +1750,11 @@ MESSAGES = {
     "partner": "Partner",
     "label_hand": "Give to partner: {item}",
     "given": "You hand over: {item}.",
+    # Q drops the item picked up last, on the floor where the player stands.
+    "dropped": "You drop: {item}",
+    "nothing_to_drop": "You have nothing to drop.",
+    "heart_helps": "The heart helps your partner up!",
+    "back_in_game": "You are back in the game!",
     "no_partner": "Your partner is not here.",
     "partner_is_out": "Your partner is out of the game.",
     "you_are_out": "You are out of the game.",
@@ -1759,7 +1775,7 @@ MESSAGES = {
     "hint_inventory": "I: inventory",
     # The controls, at the bottom of the title screen: one line each.
     "controls_1": "Arrows or WASD: move · E: interact",
-    "controls_2": "I: inventory · Esc: menu",
+    "controls_2": "I: inventory · Q: drop · Esc: menu",
     "ending_number": "Ending {number} of {total}",
     # What E does here, shown in the bar at the top.
     "prompt": "E: {action}",

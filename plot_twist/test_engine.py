@@ -1558,7 +1558,10 @@ def test_heart_waits_in_the_mine():
     state["room"] = "mine"
     assert "heart" in [thing["id"] for thing in engine.things_here(state)]
     after, outcome = engine.pick_up(state, "heart")
-    assert outcome["event"] == "picked_up" and after["inventory"] == ["heart"]
+    assert outcome["ok"] and outcome["event"] == "used_up" and outcome["text"] == story.ITEMS["heart"]["pickup_text"]
+    assert after["inventory"] == [] and after["flags"]["heart_used"] is True  # used at once, never carried
+    assert "heart" not in [thing["id"] for thing in engine.things_here(after)]  # and gone for good
+    assert reopen(after) == after
 
 
 def test_doctor_drinks_the_remedy_vanishes_and_the_anvil_appears_in_the_galley():
@@ -1917,3 +1920,141 @@ def test_every_character_says_what_its_ability_does():
         assert info["ability"], character
         if info["power"] is not None:
             assert info["power"]["label"] and info["power"]["text"], character
+
+
+# --- The heart of the mine, in a game for two --------------------------------------------------
+
+
+def in_the_mine(state, player):
+    """Move a player to the mine (only a portal leads there: the tests put them in it)."""
+    state = copy.deepcopy(state)
+    if player == 1:
+        state["room"] = "mine"
+    else:
+        state["flags"]["partner_room"] = "mine"
+    return state
+
+
+def test_the_heart_brings_back_a_player_who_was_out_next_to_the_one_who_took_it():
+    state = engine.knock_out(two(GET_KEY), 2)[0]
+    state = in_the_mine(state, 1)
+    before = copy.deepcopy(state)
+    after, outcome = engine.perform(state, act("pick_up", "heart"), 1)
+    assert state == before
+    assert outcome["ok"] and outcome["event"] == "revived" and outcome["text"] == story.ITEMS["heart"]["revive_text"]
+    assert not engine.is_out(after, 2) and engine.player_room(after, 2) == "mine"
+    assert engine.carries(after, "key", 1) and not engine.carries(after, "key", 2)  # the items stay where they went
+    assert engine.perform(after, TAKE_WAND, 2)[1]["event"] != "out"  # they can act again
+    assert reopen(after) == after
+
+
+def test_the_heart_works_for_player_two_as_well():
+    state = in_the_mine(engine.knock_out(two(GET_KEY), 1)[0], 2)
+    after, outcome = engine.perform(state, act("pick_up", "heart"), 2)
+    assert outcome["event"] == "revived" and not engine.is_out(after, 1) and engine.player_room(after, 1) == "mine"
+
+
+def test_the_heart_is_wasted_when_nobody_is_out():
+    state = in_the_mine(two(GET_KEY), 1)
+    after, outcome = engine.perform(state, act("pick_up", "heart"), 1)
+    assert outcome["event"] == "used_up" and after["flags"]["heart_used"] is True
+    assert "heart" not in after["inventory"]
+    again, outcome = engine.perform(after, act("pick_up", "heart"), 1)
+    assert not outcome["ok"]  # one heart in a game
+    out = engine.knock_out(after, 2)[0]
+    assert not engine.perform(out, act("pick_up", "heart"), 1)[1]["ok"]  # too late
+
+
+def test_an_ability_already_used_does_not_come_back_with_the_heart():
+    state = engine.perform(two_as("wizard", "flash", GET_KEY), ABILITY, 2)[0]
+    state = in_the_mine(engine.knock_out(state, 2)[0], 1)
+    after = engine.perform(state, act("pick_up", "heart"), 1)[0]
+    assert not engine.is_out(after, 2) and not engine.can_use_ability(after, 2)
+
+
+# --- Dropping items ------------------------------------------------------------------------
+
+
+def drop_at(col, row):
+    return {"verb": "drop", "target": None, "item": None, "at": [col, row]}
+
+
+def test_drop_puts_the_last_item_on_the_floor_where_the_player_stands():
+    state = play([TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY])
+    before = copy.deepcopy(state)
+    after, outcome = engine.perform(state, drop_at(5, 6))
+    assert state == before
+    assert outcome == {"ok": True, "event": "dropped",
+                       "text": story.MESSAGES["dropped"].format(item=story.ITEMS["key"]["name"])}
+    assert after["inventory"] == ["wand"] and engine.item_place(after, "key") == ("cabin", (5, 6))
+    lying = [thing for thing in engine.things_here(after) if thing["id"] == "key"]
+    assert lying == [{"id": "key", "kind": "item", "status": "on_floor", "pos": (5, 6)}]
+    assert reopen(after) == after
+    back, outcome = engine.perform(after, TAKE_KEY)
+    assert outcome["ok"] and back["inventory"] == ["wand", "key"] and back["flags"]["dropped_key"] is None
+    assert engine.item_place(back, "key") == ("cabin", story.ITEMS["key"]["pos"])
+
+
+def test_drop_goes_on_until_the_hands_are_empty():
+    state = play([TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK])
+    state = play([drop_at(3, 3), drop_at(4, 3)], state)  # the key, then the wand
+    assert state["inventory"] == []
+    assert engine.item_place(state, "key") == ("deck", (3, 3)) and engine.item_place(state, "wand") == ("deck", (4, 3))
+    same, outcome = engine.perform(state, drop_at(5, 3))
+    assert not outcome["ok"] and outcome["event"] == "nothing_to_drop" and same is state
+
+
+def test_a_dropped_item_is_only_in_the_room_where_it_was_dropped():
+    state = play([TAKE_WAND, TO_CABIN, drop_at(4, 4), CABIN_TO_DECK])
+    assert "wand" not in [thing["id"] for thing in engine.things_here(state)]  # not back where the story put it
+    assert not engine.perform(state, TAKE_WAND)[1]["ok"]
+    assert "wand" in [thing["id"] for thing in engine.things_here(play([TO_CABIN], state))]
+
+
+def test_a_key_on_the_floor_opens_nothing_until_it_is_picked_up_again():
+    state = play(GET_KEY)
+    assert engine.door_status(state, "deck_to_hold") == "open"
+    dropped = play([drop_at(3, 3)], state)
+    assert engine.door_status(dropped, "deck_to_hold") == "barred"
+    assert "key" not in [thing["id"] for thing in engine.things_here(play([TO_CABIN], dropped))]  # not on its altar again
+    assert engine.door_status(play([TAKE_KEY], dropped), "deck_to_hold") == "open"
+
+
+def test_the_fused_key_on_the_floor_is_still_fused():
+    state = two(GET_FUSED_KEY)
+    dropped = play([drop_at(3, 3)], state)
+    assert engine.key_fused(dropped) and not engine.crab_awake(dropped)  # the crab does not wake again
+    for room, part in (("cabin", "key"), ("hold", "second_key")):
+        there = copy.deepcopy(dropped)
+        there["room"] = room
+        assert part not in [thing["id"] for thing in engine.things_here(there)]  # the halves are gone for good
+
+
+def test_in_a_game_for_two_q_drops_the_last_item_that_player_got():
+    state = two([TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY])
+    state = as_player(state, [TO_CABIN], 2)
+    assert engine.last_item(state, 1) == "key" and engine.last_item(state, 2) is None
+    state = play([act("give", "partner", "wand")], state)  # player 2 gets the wand: their last one
+    assert engine.last_item(state, 2) == "wand" and engine.last_item(state, 1) == "key"
+    assert state["inventory"] == ["key", "wand"]
+    dropped, outcome = engine.perform(state, drop_at(6, 6), 2)
+    assert outcome["ok"] and dropped["inventory"] == ["key"]
+    taken = play([TAKE_WAND], dropped)  # anyone can pick it up: now it is player 1's
+    assert engine.carries(taken, "wand", 1)
+
+
+def test_dropping_needs_a_tile_and_a_game_still_on():
+    state = play([TAKE_WAND])
+    for wrong in (None, [1], [1, 2, 3], ["1", 2], [1.5, 2], [-1, 2], [1, 100], [True, 2]):
+        same, outcome = engine.perform(state, {"verb": "drop", "target": None, "item": None, "at": wrong})
+        assert not outcome["ok"] and same is state, wrong
+    over = play(CRAB_ENDING)
+    assert not engine.perform(over, drop_at(3, 3))[1]["ok"]
+
+
+def test_the_place_of_a_dropped_item_is_checked_on_restore():
+    assert engine.restore_state(restorable(flags={"dropped_wand": "hold,3,4"})) is not None
+    for wrong in ("attic,3,4", "hold,3", "hold,a,4", "hold,3,400", 5, ["hold", 3, 4]):
+        assert engine.restore_state(restorable(flags={"dropped_wand": wrong})) is None, wrong
+    both = restorable(inventory=["wand"], flags={"dropped_wand": "hold,3,4"})
+    assert engine.restore_state(both) is None  # in hand and on the floor

@@ -2288,3 +2288,85 @@ def test_abilities_reach_the_host_from_the_other_computer(two_computers):
     press(host, pygame.K_SPACE)
     pump(host, guest, lambda: guest["crab"]["stun"] > 0)
     main.draw(guest, pygame.Surface((main.WIDTH, main.HEIGHT)))
+
+
+# --- Dropping items (Q) and the heart of the mine ----------------------------------------------
+
+
+def test_q_drops_the_last_item_where_the_player_stands_and_e_picks_it_up_again(app, heard):
+    start_new_game(app)
+    stand_next_to(app, "wand")
+    press(app, pygame.K_e)
+    read_all(app)
+    p1(app)["pos"] = free_spot(app, 11, 4)
+    press(app, pygame.K_q)
+    assert app["state"]["inventory"] == [] and "drop" in heard
+    assert engine.item_place(app["state"], "wand") == ("deck", main.tile_of(p1(app)["pos"]))
+    assert app["banner"] == story.MESSAGES["dropped"].format(item=story.ITEMS["wand"]["name"])
+    assert engine.restore_state(save.load_game()) == app["state"]
+    lying = [thing for thing in engine.things_here(app["state"]) if thing["id"] == "wand"][0]
+    assert main.place_rect(lying) == main.tile_rect(*main.tile_of(p1(app)["pos"]))
+    assert main.place_rect(lying) != main.thing_rect("wand")  # not where the story put it
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+    assert main.prompt(app["state"], p1(app)["pos"]) != ""  # E picks it up, right there
+    press(app, pygame.K_e)
+    assert app["state"]["inventory"] == ["wand"]
+    read_all(app)
+    p1(app)["pos"] = main.spawn_at_entry("deck")
+    press(app, pygame.K_q, pygame.K_q)  # the second time the hands are empty: nothing, silently
+    assert app["state"]["inventory"] == [] and app["dialog"] == [] and heard.count("drop") == 2
+
+
+def test_the_title_says_what_q_does(app):
+    assert "Q" in story.MESSAGES["controls_2"]
+    font = app["fonts"]["text"]
+    assert font.size(story.MESSAGES["controls_2"])[0] <= main.WIDTH - 16
+
+
+def in_the_mine_together(app):
+    """Both players in the mine, the crab awake somewhere else."""
+    two_playing(app, FIRST_HALF)
+    app["state"]["room"] = "mine"
+    app["state"]["flags"]["partner_room"] = "mine"
+    main.place_at_entry(app)
+    main.reset_crab(app)
+    awake_crab(app, wait=10 ** 6)
+
+
+def test_the_heart_helps_a_player_down_up_at_once(app, heard):
+    in_the_mine_together(app)
+    app["downed"] = {2: main.DOWN_FRAMES}
+    main.update(app, 0, 0)  # the game has seen them down
+    stand_next_to(app, "heart")
+    press(app, pygame.K_e)
+    assert app["downed"] == {} and app["state"]["flags"]["heart_used"] is True
+    assert "heart" not in app["state"]["inventory"]
+    read_all(app)
+    main.update(app, 0, 0)
+    assert "revived" in heard
+
+
+def test_the_heart_is_wasted_when_everyone_is_on_their_feet(app):
+    in_the_mine_together(app)
+    stand_next_to(app, "heart")
+    press(app, pygame.K_e)
+    assert dialog_text(app) == " ".join(main.wrap(story.ITEMS["heart"]["pickup_text"], main.DIALOG_TEXT_WIDTH,
+                                                    main.text_width(app["fonts"]["text"])))
+    assert app["state"]["flags"]["heart_used"] is True and app["state"]["flags"]["out_player"] == 0
+
+
+def test_the_heart_brings_the_player_out_back_next_to_the_one_who_took_it(two_computers, heard):
+    host, guest = two_computers
+    state = engine.knock_out(play_two(FIRST_HALF), 2)[0]  # the guest is out, and watches
+    state["room"] = "mine"
+    host["state"], guest["state"] = state, engine.restore_state(state)
+    for app in (host, guest):
+        main.place_at_entry(app)
+        main.reset_crab(app)
+    stand_next_to(host, "heart")
+    press(host, pygame.K_e)
+    pump(host, guest, lambda: not engine.is_out(guest["state"], 2) and guest["banner"] == story.MESSAGES["back_in_game"])
+    assert engine.player_room(guest["state"], 2) == "mine" and main.can_move(guest)
+    assert distance(mine(guest)["pos"], mine(host)["pos"]) <= main.PLAYER_SIZE + 4  # right next to the host
+    assert main.is_free_floor(main.view(guest), mine(guest)["pos"])
+    assert main.view_position(guest) == mine(guest)["pos"]  # their own screen again

@@ -24,6 +24,7 @@ EFFECTS = {
     "knocked": [(392, 0.06), (262, 0.06), (131, 0.25)],                # the crab knocks a player down
     "revived": [(523, 0.06), (784, 0.06), (1047, 0.15)],               # back on their feet
     "ability": [(659, 0.04), (988, 0.04), (1319, 0.04), (1976, 0.12)],  # a character's ability: a quick rising run
+    "drop": [(330, 0.04), (196, 0.07)],                                # an item dropped on the floor
     "knocked_out": [(330, 0.15), (262, 0.15), (196, 0.15), (131, 0.4)],  # a player is out of the game
 }
 

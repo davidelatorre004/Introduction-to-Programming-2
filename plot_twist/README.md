@@ -61,6 +61,7 @@ La prima volta uv installa pygame: ci vuole qualche secondo. Poi si apre la fine
 | Frecce o WASD | Muoverti |
 | E | Interagire con ciò che hai vicino. Nei riquadri di testo, andare avanti |
 | I | Aprire e chiudere l'inventario |
+| Q | Lasciare a terra l'ultimo oggetto che hai preso, dove ti trovi. Chiunque può riprenderlo con E |
 | Spazio | Usare l'abilità del personaggio (solo nelle partite a due, una volta per partita) |
 | Esc | Il menu di pausa: Continue, Restart, Main menu, Quit |
 | Su, giù e Invio (o E) | Scegliere nei menu |
@@ -169,6 +170,6 @@ uv run pytest
 
 Per l'altro finale apri anche la porta a sinistra, quella con l'ala (la chiave fusa apre tutte e due), e dai la bacchetta all'angelo: **Ending 2 of 2 — The ship explodes**.
 
-Facoltativo: dal corridoio, alla fine, entra nel portale e arrivi nella miniera. Lì c'è un cuore di cristallo da raccogliere (servirà più avanti). Il portale in fondo alla miniera ti porta dritto in timoneria; quello della timoneria non riporta indietro.
+Facoltativo: dal corridoio, alla fine, entra nel portale e arrivi nella miniera. Lì c'è un cuore di cristallo. Si usa nel momento in cui lo raccogli e poi sparisce: in due, rialza subito il compagno a terra o riporta in gioco quello eliminato (ricompare accanto a te). Se nessuno ne ha bisogno, o se giochi da solo, è sprecato: ce n'è uno solo per partita. Il portale in fondo alla miniera ti porta dritto in timoneria; quello della timoneria non riporta indietro.
 
 </details>
