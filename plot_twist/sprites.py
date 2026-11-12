@@ -11,8 +11,9 @@ Names follow what main.py looks for:
   number on them), on the metal "zone" of their floor puzzle;
 - doors as "door_open", "door_barred", "door_locked" and "door_sealed", drawn for
   the north wall (main.py turns them for the other walls);
-- the player as "player_<down/up/right>_<0, 1 or 2>": 0 standing, 1 and 2 walking
-  (left is right mirrored);
+- the four characters as "<wizard/nurse/ghost/flash>_<down/up/right>_<0, 1 or 2>":
+  0 standing, 1 and 2 walking (left is right mirrored); they all come from the same
+  figure, dressed in different ways (see the end of this file);
 - the room tiles as "floor_<room>" and "wall_<room>", with "_0" to "_3" for the
   pictures of a moving tile (the stormy sea around the deck); "sea_calm_0" and
   "sea_calm_1" are the calm sea of the good ending.
@@ -117,15 +118,6 @@ LEGS_SIDE = [
 ]
 
 SPRITES = {
-    "player_down_0": PLAYER_DOWN + LEGS_FRONT[0],
-    "player_down_1": PLAYER_DOWN + LEGS_FRONT[1],
-    "player_down_2": PLAYER_DOWN + LEGS_FRONT[2],
-    "player_up_0": PLAYER_UP + LEGS_FRONT[0],
-    "player_up_1": PLAYER_UP + LEGS_FRONT[1],
-    "player_up_2": PLAYER_UP + LEGS_FRONT[2],
-    "player_right_0": PLAYER_RIGHT + LEGS_SIDE[0],
-    "player_right_1": PLAYER_RIGHT + LEGS_SIDE[1],
-    "player_right_2": PLAYER_RIGHT + LEGS_SIDE[2],
     "wand": [
         "................",
         "................",
@@ -1554,9 +1546,58 @@ SPRITES = {
     ],
 }
 
-# The second character: the same pictures as the player, with a red shirt instead of a green one.
-for _name in [name for name in SPRITES if name.startswith("player_")]:
-    SPRITES["player_red_" + _name[len("player_"):]] = [row.translate(str.maketrans("gG", "rR")) for row in SPRITES[_name]]
+# The four characters. Each is the figure above (PLAYER_DOWN, PLAYER_UP, PLAYER_RIGHT and
+# the legs) in other colors, with some rows drawn again: a hat, a cap, a ghost's hem.
+# "colors" says which letter of the figure becomes which; "rows" gives, for a direction,
+# the rows that replace the figure's (by their number from the top); "legs" replaces
+# the three pictures of the legs, seen from the front and from the side.
+WIZARD_HAT = {0: ".......kk.......", 1: "......kPPk......", 2: ".....kPPyPk.....", 3: "....kPPPPPPk....",
+              4: "..kkkPPPPPPkkk.."}
+GHOST_HEM_FRONT = [
+    ["...kwwwwwwwwk...", "...kwkkwwkkwk...", "....k..kk..k...."],
+    ["...kwwwwwwwwk...", "...kkwwkkwwkk...", "......kk..kk...."],
+    ["...kwwwwwwwwk...", "...kwwkkwwkkk...", "....kk..kk......"],
+]
+GHOST_HEM_SIDE = [
+    ["....kwwwwwk.....", "....kwkwkwk.....", ".....k.k.k......"],
+    ["....kwwwwwk.....", "....kkwkwkk.....", "......k.k......."],
+    ["....kwwwwwk.....", "....kwkwkwk.....", ".....k.k.k......"],
+]
+CHARACTER_LOOKS = {
+    # A pointed hat with a star, and a long purple robe.
+    "wizard": {"colors": "gGj", "become": "pPP",
+               "rows": {"down": WIZARD_HAT, "up": WIZARD_HAT, "right": WIZARD_HAT}},
+    # A white uniform, and a white cap with a red cross.
+    "nurse": {"colors": "gGj", "become": "wlw",
+              "rows": {"down": {2: "....kkwwwwkk....", 3: "...khwwrrwwhk..."},
+                       "up": {2: "....kkwwwwkk....", 3: "...khwwwwwwhk..."},
+                       "right": {2: "....kwwwwwkk....", 3: "...khwwwwrwhk..."}}},
+    # All white and pale blue, with a wavy hem instead of legs.
+    "ghost": {"colors": "hzZgGj", "become": "wwfwwf",
+              "rows": {"down": {6: "...kwwkwwkwwk...", 7: "...kwwkwwkwwk...", 8: "....kwwwwwwk...."},
+                       "right": {5: "...kwwwwwwkwk...", 6: "...kwwwwwwkwk...", 8: "....kkwwwwwk...."}},
+              "legs": {"front": GHOST_HEM_FRONT, "side": GHOST_HEM_SIDE}},
+    # A red suit and cowl, with a yellow bolt on the chest.
+    "flash": {"colors": "hgGj", "become": "rryR", "rows": {}},
+}
+
+
+def _dress(rows, look, direction):
+    """The rows of the figure, in the colors of a character and with its own rows drawn again."""
+    table = str.maketrans(look["colors"], look["become"])
+    again = look["rows"].get(direction, {})
+    return [again.get(number, row.translate(table)) for number, row in enumerate(rows)]
+
+
+for _character, _look in CHARACTER_LOOKS.items():
+    _legs = _look.get("legs", {})
+    for _direction, _body, _steps in (("down", PLAYER_DOWN, _legs.get("front", LEGS_FRONT)),
+                                      ("up", PLAYER_UP, _legs.get("front", LEGS_FRONT)),
+                                      ("right", PLAYER_RIGHT, _legs.get("side", LEGS_SIDE))):
+        for _step in range(3):
+            _picture = _dress(_body, _look, _direction)
+            _hem = _steps[_step] if "legs" in _look else _dress(_steps[_step], dict(_look, rows={}), _direction)
+            SPRITES[f"{_character}_{_direction}_{_step}"] = _picture + _hem
 
 # Some rooms reuse the wood of the cabin and the planks of the hold.
 SPRITES["floor_galley"] = SPRITES["floor_cabin"]

@@ -111,9 +111,10 @@ def test_everything_on_screen_has_a_picture():
     assert sprites.image("zone") is not None
     for status in ("open", "barred", "locked", "sealed"):
         assert sprites.image("door_" + status) is not None, status
-    for direction in ("down", "up", "right"):
-        for step in range(3):
-            assert sprites.image(f"player_{direction}_{step}") is not None, (direction, step)
+    for character in story.CHARACTERS.values():
+        for direction in ("down", "up", "right"):
+            for step in range(3):
+                assert sprites.image(f"{character['sprite']}_{direction}_{step}") is not None, (character, direction, step)
     assert sprites.image("ship") is not None
 
 
@@ -128,8 +129,8 @@ def test_a_missing_picture_gives_none():
 
 
 def test_flipped_pictures_are_mirrored_pixel_by_pixel():
-    picture = sprites.image("player_right_1")
-    mirrored = sprites.image("player_right_1", flip=True)
+    picture = sprites.image("wizard_right_1")
+    mirrored = sprites.image("wizard_right_1", flip=True)
     width, height = picture.get_size()
     for x in range(width):
         for y in range(height):
@@ -223,16 +224,16 @@ def test_the_player_walks_in_two_steps_and_stands_still(app):
     for _ in range(4 * main.WALK_STEP_FRAMES):
         main.update(app, 1, 0)
         steps.add(main.player_picture(app, p1(app)))
-    assert steps == {sprites.image("player_right_1"), sprites.image("player_right_2")}
+    assert steps == {sprites.image("wizard_right_1"), sprites.image("wizard_right_2")}
     main.update(app, 0, 0)
     assert not p1(app)["moving"]
-    assert main.player_picture(app, p1(app)) is sprites.image("player_right_0")
+    assert main.player_picture(app, p1(app)) is sprites.image("wizard_right_0")
 
 
 def test_facing_left_mirrors_the_right_pictures(app):
     main.update(app, -1, 0)
     main.update(app, 0, 0)
-    assert main.player_picture(app, p1(app)) is sprites.image("player_right_0", flip=True)
+    assert main.player_picture(app, p1(app)) is sprites.image("wizard_right_0", flip=True)
 
 
 def test_a_room_comes_out_of_the_dark_after_a_door(app):

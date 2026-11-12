@@ -635,6 +635,7 @@ def new_app(fonts):
         "join_text": "",         # the address typed on the "Join game" screen
         "join_error": "",        # why the last try to join failed
         "notice": "",            # a line on the title screen: why the last game for two ended
+        "taken": None,           # on the computer that joined, choosing a character: the one player 1 took
         "crab": None,            # the crab of a game for two while it is awake (see new_crab), or None
         "downed": {},            # the players the crab has knocked down: number -> frames left before they are out
         "revive": {},            # the help given to each of them: number -> frames E has been held so far
@@ -660,6 +661,7 @@ def open_main_menu(app):
     """
     end_network(app)
     app["me"] = 0
+    app["taken"] = None
     app["players"] = [new_player()]
     app["state"] = None
     app["existing"] = engine.restore_state(save.load_game())
@@ -736,7 +738,10 @@ def go_back(app):
     elif scene == "ending":
         open_main_menu(app)
     elif scene == "character":
-        set_scene(app, app["character_back"])
+        if app["taken"] is not None:
+            open_main_menu(app)  # the player who joined gives up: the host goes back to waiting
+        else:
+            set_scene(app, app["character_back"])
     elif scene == "mode":
         set_scene(app, app["mode_back"])
     elif scene == "lobby" or scene == "join":
@@ -780,8 +785,27 @@ def choose_character(app, back):
 
 
 def character_entries():
-    """The characters the player can choose from, in order."""
+    """The characters on the choice screen, in order."""
     return list(story.CHARACTERS)
+
+
+def move_character_choice(app, step):
+    """Highlight the next character to the left (-1) or right (1), going round, and skipping the one taken."""
+    entries = character_entries()
+    index = app["menu_index"]
+    for _ in entries:
+        index = (index + step) % len(entries)
+        if entries[index] != app["taken"]:
+            break
+    app["menu_index"] = index
+
+
+def pick_partner_character(app, taken):
+    """On the computer that joined: the host says which character is taken; this player chooses another."""
+    app["taken"] = taken
+    set_scene(app, "character")
+    if character_entries()[0] == taken:
+        move_character_choice(app, 1)
 
 
 def start_with_character(app, character):
@@ -1179,9 +1203,14 @@ def handle_character_key(app, key):
     """Keys on the choice of the character: left and right to move, E or Enter to choose, Esc to go back."""
     entries = character_entries()
     if key in LEFT_KEYS:
-        app["menu_index"] = (app["menu_index"] - 1) % len(entries)
+        move_character_choice(app, -1)
     elif key in RIGHT_KEYS:
-        app["menu_index"] = (app["menu_index"] + 1) % len(entries)
+        move_character_choice(app, 1)
+    elif key in confirm_keys(app) and app["taken"] is not None:
+        send(app, {"t": "picked", "character": entries[app["menu_index"]]})  # the host starts the game
+        app["taken"] = None
+        app["join_error"] = story.MESSAGES["joining"]
+        set_scene(app, "join")
     elif key in confirm_keys(app):
         start_with_character(app, entries[app["menu_index"]])
     elif key == pygame.K_ESCAPE:
@@ -1822,14 +1851,19 @@ def pump_network(app):
         connection["host"] = None
         connection["conn"] = conn
         state, opening_text = app["lobby"]
-        app["lobby"] = None
-        send(app, {"t": "start", "state": state, "text": opening_text})
-        connection["sent_state"] = state
-        begin_game(app, state, opening_text)
+        if opening_text is None:
+            start_for_two(app)  # a game resumed: the characters are the ones of the first time
+        else:
+            send(app, {"t": "pick", "taken": state["flags"]["character"]})  # first the other player chooses
     for message in connection["conn"].poll():
         handle_message(app, message)
         if app["net"] is None:
             return  # the message ended the game for two
+    if connection["conn"].closed and app["lobby"] is not None:
+        state, opening_text = app["lobby"]  # the other player left before the game started: wait again
+        end_network(app)
+        open_lobby(app, state, opening_text)
+        return
     if connection["conn"].closed:
         app["notice"] = story.MESSAGES["partner_left"]
         open_main_menu(app)
@@ -1848,10 +1882,32 @@ def pump_network(app):
         send(app, message)
 
 
+def start_for_two(app):
+    """The host: both players are ready. Send the game to the other computer and start playing."""
+    connection = app["net"]
+    state, opening_text = app["lobby"]
+    app["lobby"] = None
+    send(app, {"t": "start", "state": state, "text": opening_text})
+    connection["sent_state"] = state
+    begin_game(app, state, opening_text)
+
+
 def handle_message(app, message):
     """One message from the other computer."""
     kind = message.get("t")
     connection = app["net"]
+    if kind == "pick" and connection["role"] == "client" and message.get("taken") in story.CHARACTERS:
+        pick_partner_character(app, message["taken"])
+        return
+    if kind == "picked" and connection["role"] == "host" and app["lobby"] is not None:
+        state, opening_text = app["lobby"]
+        chosen, outcome = engine.choose_partner_character(state, message.get("character"))
+        if outcome["ok"]:
+            app["lobby"] = (chosen, opening_text)
+            start_for_two(app)
+        else:
+            send(app, {"t": "pick", "taken": state["flags"]["character"]})  # not that one: choose again
+        return
     if kind == "start" and connection["role"] == "client":
         state = engine.restore_state(message.get("state"))
         if state is None:
@@ -3099,6 +3155,8 @@ def draw_lobby(app, screen):
               (WIDTH // 2, 96), "center", True)
     dots = "." * ((app["frame"] // 20) % 4)  # something moves: the game is waiting, not stuck
     draw_text(screen, font, dots, COLORS["text"], (WIDTH // 2, 112), "center", True)
+    if app["net"] is not None and app["net"]["conn"] is not None:  # joined, and choosing a character
+        draw_text(screen, font, story.MESSAGES["lobby_choosing"], COLORS["text"], (WIDTH // 2, 128), "center", True)
     draw_lines_at_bottom(app, screen, story.MESSAGES["lobby_hint"])
 
 
@@ -3120,22 +3178,29 @@ def draw_join_screen(app, screen):
     draw_lines_at_bottom(app, screen, story.MESSAGES["join_hint"])
 
 
-CHARACTER_ZOOM = 3   # the characters are shown three times bigger on the choice screen
-CHARACTER_GAP = 72   # pixels between the middles of two characters
+CHARACTER_ZOOM = 2   # the characters are shown twice as big on the choice screen
+CHARACTER_GAP = 56   # pixels between the middles of two characters
 
 
 def draw_character_choice(app, screen):
     """The choice of the character, over the calm sea of the title: the characters side by side,
-    the highlighted one in a frame that blinks."""
+    the highlighted one in a frame that blinks, with its name and its ability below.
+
+    On the computer that joined a game for two, the character player 1 took is dark and cannot be chosen.
+    """
     draw_sea(app, screen, screen.get_rect(), calm=True)
     font = app["fonts"]["text"]
-    title = story.MESSAGES["choose_character_p1" if app["two_players"] else "choose_character"]
-    draw_text(screen, app["fonts"]["title"], title, COLORS["text"], (WIDTH // 2, 36), "center", True)
+    title = "choose_character"
+    if app["taken"] is not None:
+        title = "choose_character_p2"
+    elif app["two_players"]:
+        title = "choose_character_p1"
+    draw_text(screen, app["fonts"]["title"], story.MESSAGES[title], COLORS["text"], (WIDTH // 2, 30), "center", True)
     entries = character_entries()
     first = WIDTH // 2 - (len(entries) - 1) * CHARACTER_GAP // 2
     for index, character in enumerate(entries):
         picture = sprites.image(story.CHARACTERS[character]["sprite"] + "_down_0")
-        center = (first + index * CHARACTER_GAP, 118)
+        center = (first + index * CHARACTER_GAP, 88)
         frame = pygame.Rect(0, 0, 16 * CHARACTER_ZOOM + 12, 16 * CHARACTER_ZOOM + 12)
         frame.center = center
         pygame.draw.rect(screen, COLORS["box"], frame)
@@ -3145,10 +3210,25 @@ def draw_character_choice(app, screen):
         if picture is not None:
             big = pygame.transform.scale(picture, (picture.get_width() * CHARACTER_ZOOM, picture.get_height() * CHARACTER_ZOOM))
             screen.blit(big, big.get_rect(center=center))
-    lines = wrap(story.MESSAGES["choose_hint"], WIDTH - 16, text_width(font))
-    for index, line in enumerate(lines):
-        y = HEIGHT - 6 - (len(lines) - index) * font.get_linesize()
-        draw_text(screen, font, line, COLORS["foam"], (WIDTH // 2, y), "center", True)
+        if character == app["taken"]:
+            shade(screen, frame.inflate(-2, -2), 170)  # taken by player 1
+    for index, line in enumerate(character_lines(app, entries[app["menu_index"]])):
+        color = COLORS["highlight"] if index == 0 else COLORS["text"]
+        draw_text(screen, font, line, color, (WIDTH // 2, 116 + index * font.get_linesize()), "center", True)
+    draw_lines_at_bottom(app, screen, story.MESSAGES["choose_hint"])
+
+
+def character_lines(app, character):
+    """What the choice screen says about a character: its name, then its ability, wrapped.
+
+    Alone, a last line says that abilities are for a game for two: the character is only a look.
+    """
+    info = story.CHARACTERS[character]
+    font = app["fonts"]["text"]
+    lines = [info["name"]] + wrap(info["ability"], WIDTH - 24, text_width(font))
+    if not app["two_players"] and app["taken"] is None:
+        lines += wrap(story.MESSAGES["abilities_for_two"], WIDTH - 24, text_width(font))
+    return lines
 
 
 def draw_mode_choice(app, screen):

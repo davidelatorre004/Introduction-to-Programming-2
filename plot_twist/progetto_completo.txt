@@ -15,15 +15,23 @@ START_ROOM = "deck"
 # the choice shows them. They look the same, except for the colour of the shirt:
 # "sprite" is the start of the names of their pictures in sprites.py.
 CHARACTERS = {
-    "green": {"sprite": "player"},
-    "red": {"sprite": "player_red"},
+    "wizard": {"sprite": "wizard", "name": "Wizard",
+               "ability": "Spell: the crab stands stunned for 5 seconds."},
+    "nurse": {"sprite": "nurse", "name": "Nurse",
+              "ability": "Always: helps a player up in 1 second."},
+    "ghost": {"sprite": "ghost", "name": "Ghost",
+              "ability": "Vanish: the crab cannot see you for 5 seconds."},
+    "flash": {"sprite": "flash", "name": "Flash",
+              "ability": "Dash: a lightning sprint of 5 tiles, through doors too."},
 }
 
 # What the game remembers about the player's progress and choices, with the
 # value each flag has at the start of a new game.
 FLAGS = {
     # The character chosen for this game (one of CHARACTERS): player 1's, in a game for two.
-    "character": "green",
+    "character": "wizard",
+    # In a game for two, the character player 2 chose: never the same as player 1's.
+    "partner_character": "nurse",
     # A game for two players: player 2 is the other character.
     "two_players": False,
     # In a game for two, the room player 2 is in ("room" in the state is player 1's).
@@ -1701,6 +1709,10 @@ MESSAGES = {
     "menu_two_players": "Host game for 2",
     "choose_character": "Choose your character",
     "choose_character_p1": "Player 1: choose",
+    "choose_character_p2": "Player 2: choose",
+    "character_taken": "Taken by player 1",
+    "abilities_for_two": "Abilities only work in a game for two.",
+    "lobby_choosing": "Player 2 is choosing a character",
     # A game for two, on two computers on the same network: one hosts, the other joins.
     "menu_join_game": "Join game",
     "lobby_title": "Waiting for player 2",
@@ -1805,7 +1817,8 @@ def new_game(character=None, two_players=False):
     """Return the state of a brand-new game: on the deck, empty-handed, nothing decided.
 
     `character` is one of story.CHARACTERS; without it, the first one. With
-    `two_players`, it is a game for two on the same keyboard.
+    `two_players`, it is a game for two: player 2 starts as the first character
+    player 1 did not take, until they choose their own (choose_partner_character).
     """
     state = {
         "room": story.START_ROOM,
@@ -1819,7 +1832,17 @@ def new_game(character=None, two_players=False):
             raise ValueError(f"Unknown character: {character!r}")
         state["flags"]["character"] = character
     state["flags"]["two_players"] = bool(two_players)
+    if state["flags"]["partner_character"] == state["flags"]["character"]:
+        state["flags"]["partner_character"] = _another_character(state["flags"]["character"])
     return state
+
+
+def _another_character(character):
+    """The first character of story.CHARACTERS that is not `character`."""
+    for other in story.CHARACTERS:
+        if other != character:
+            return other
+    raise ValueError("There is only one character")
 
 
 def start_new_game(existing, confirmed=False, character=None, two_players=False):
@@ -1889,6 +1912,10 @@ def restore_state(data):
     state["inventory"] = list(inventory)
     state["flags"].update(flags)
     state["ending"] = ending
+    if state["flags"]["partner_character"] == state["flags"]["character"]:
+        if state["flags"]["two_players"]:
+            return None  # the two players never play the same character
+        state["flags"]["partner_character"] = _another_character(state["flags"]["character"])
     if not _floor_puzzles_consistent(state["flags"]):
         return None
     if not _potion_puzzles_consistent(state["flags"]):
@@ -1905,11 +1932,23 @@ def is_over(state):
 
 
 def partner_character(state):
-    """Player 2's character: the first one of story.CHARACTERS that player 1 did not choose."""
-    for character in story.CHARACTERS:
-        if character != state["flags"]["character"]:
-            return character
-    raise ValueError("There is only one character")
+    """Player 2's character, in a game for two."""
+    return state["flags"]["partner_character"]
+
+
+def character_of(state, player=1):
+    """The character `player` (1 or 2) plays."""
+    return state["flags"]["character"] if player == 1 else state["flags"]["partner_character"]
+
+
+def choose_partner_character(state, character):
+    """Player 2 chooses their character, before a game for two starts: any but player 1's."""
+    if not state["flags"]["two_players"] or character not in story.CHARACTERS \
+            or character == state["flags"]["character"]:
+        return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
+    new = copy.deepcopy(state)
+    new["flags"]["partner_character"] = character
+    return _accept(new, "character_chosen", story.CHARACTERS[character]["name"])
 
 
 def has_item(state, item):
@@ -2816,6 +2855,8 @@ def _allowed_values(flag):
     for info in story.ITEMS.values():
         if info.get("sets_flag") == flag:
             values.append(True)
+    if flag == "partner_character":
+        values += list(story.CHARACTERS)
     if flag == "character":
         values += list(story.CHARACTERS)
     if flag == "two_players":
@@ -3536,6 +3577,7 @@ def new_app(fonts):
         "join_text": "",         # the address typed on the "Join game" screen
         "join_error": "",        # why the last try to join failed
         "notice": "",            # a line on the title screen: why the last game for two ended
+        "taken": None,           # on the computer that joined, choosing a character: the one player 1 took
         "crab": None,            # the crab of a game for two while it is awake (see new_crab), or None
         "downed": {},            # the players the crab has knocked down: number -> frames left before they are out
         "revive": {},            # the help given to each of them: number -> frames E has been held so far
@@ -3561,6 +3603,7 @@ def open_main_menu(app):
     """
     end_network(app)
     app["me"] = 0
+    app["taken"] = None
     app["players"] = [new_player()]
     app["state"] = None
     app["existing"] = engine.restore_state(save.load_game())
@@ -3637,7 +3680,10 @@ def go_back(app):
     elif scene == "ending":
         open_main_menu(app)
     elif scene == "character":
-        set_scene(app, app["character_back"])
+        if app["taken"] is not None:
+            open_main_menu(app)  # the player who joined gives up: the host goes back to waiting
+        else:
+            set_scene(app, app["character_back"])
     elif scene == "mode":
         set_scene(app, app["mode_back"])
     elif scene == "lobby" or scene == "join":
@@ -3681,8 +3727,27 @@ def choose_character(app, back):
 
 
 def character_entries():
-    """The characters the player can choose from, in order."""
+    """The characters on the choice screen, in order."""
     return list(story.CHARACTERS)
+
+
+def move_character_choice(app, step):
+    """Highlight the next character to the left (-1) or right (1), going round, and skipping the one taken."""
+    entries = character_entries()
+    index = app["menu_index"]
+    for _ in entries:
+        index = (index + step) % len(entries)
+        if entries[index] != app["taken"]:
+            break
+    app["menu_index"] = index
+
+
+def pick_partner_character(app, taken):
+    """On the computer that joined: the host says which character is taken; this player chooses another."""
+    app["taken"] = taken
+    set_scene(app, "character")
+    if character_entries()[0] == taken:
+        move_character_choice(app, 1)
 
 
 def start_with_character(app, character):
@@ -4080,9 +4145,14 @@ def handle_character_key(app, key):
     """Keys on the choice of the character: left and right to move, E or Enter to choose, Esc to go back."""
     entries = character_entries()
     if key in LEFT_KEYS:
-        app["menu_index"] = (app["menu_index"] - 1) % len(entries)
+        move_character_choice(app, -1)
     elif key in RIGHT_KEYS:
-        app["menu_index"] = (app["menu_index"] + 1) % len(entries)
+        move_character_choice(app, 1)
+    elif key in confirm_keys(app) and app["taken"] is not None:
+        send(app, {"t": "picked", "character": entries[app["menu_index"]]})  # the host starts the game
+        app["taken"] = None
+        app["join_error"] = story.MESSAGES["joining"]
+        set_scene(app, "join")
     elif key in confirm_keys(app):
         start_with_character(app, entries[app["menu_index"]])
     elif key == pygame.K_ESCAPE:
@@ -4723,14 +4793,19 @@ def pump_network(app):
         connection["host"] = None
         connection["conn"] = conn
         state, opening_text = app["lobby"]
-        app["lobby"] = None
-        send(app, {"t": "start", "state": state, "text": opening_text})
-        connection["sent_state"] = state
-        begin_game(app, state, opening_text)
+        if opening_text is None:
+            start_for_two(app)  # a game resumed: the characters are the ones of the first time
+        else:
+            send(app, {"t": "pick", "taken": state["flags"]["character"]})  # first the other player chooses
     for message in connection["conn"].poll():
         handle_message(app, message)
         if app["net"] is None:
             return  # the message ended the game for two
+    if connection["conn"].closed and app["lobby"] is not None:
+        state, opening_text = app["lobby"]  # the other player left before the game started: wait again
+        end_network(app)
+        open_lobby(app, state, opening_text)
+        return
     if connection["conn"].closed:
         app["notice"] = story.MESSAGES["partner_left"]
         open_main_menu(app)
@@ -4749,10 +4824,32 @@ def pump_network(app):
         send(app, message)
 
 
+def start_for_two(app):
+    """The host: both players are ready. Send the game to the other computer and start playing."""
+    connection = app["net"]
+    state, opening_text = app["lobby"]
+    app["lobby"] = None
+    send(app, {"t": "start", "state": state, "text": opening_text})
+    connection["sent_state"] = state
+    begin_game(app, state, opening_text)
+
+
 def handle_message(app, message):
     """One message from the other computer."""
     kind = message.get("t")
     connection = app["net"]
+    if kind == "pick" and connection["role"] == "client" and message.get("taken") in story.CHARACTERS:
+        pick_partner_character(app, message["taken"])
+        return
+    if kind == "picked" and connection["role"] == "host" and app["lobby"] is not None:
+        state, opening_text = app["lobby"]
+        chosen, outcome = engine.choose_partner_character(state, message.get("character"))
+        if outcome["ok"]:
+            app["lobby"] = (chosen, opening_text)
+            start_for_two(app)
+        else:
+            send(app, {"t": "pick", "taken": state["flags"]["character"]})  # not that one: choose again
+        return
     if kind == "start" and connection["role"] == "client":
         state = engine.restore_state(message.get("state"))
         if state is None:
@@ -6000,6 +6097,8 @@ def draw_lobby(app, screen):
               (WIDTH // 2, 96), "center", True)
     dots = "." * ((app["frame"] // 20) % 4)  # something moves: the game is waiting, not stuck
     draw_text(screen, font, dots, COLORS["text"], (WIDTH // 2, 112), "center", True)
+    if app["net"] is not None and app["net"]["conn"] is not None:  # joined, and choosing a character
+        draw_text(screen, font, story.MESSAGES["lobby_choosing"], COLORS["text"], (WIDTH // 2, 128), "center", True)
     draw_lines_at_bottom(app, screen, story.MESSAGES["lobby_hint"])
 
 
@@ -6021,22 +6120,29 @@ def draw_join_screen(app, screen):
     draw_lines_at_bottom(app, screen, story.MESSAGES["join_hint"])
 
 
-CHARACTER_ZOOM = 3   # the characters are shown three times bigger on the choice screen
-CHARACTER_GAP = 72   # pixels between the middles of two characters
+CHARACTER_ZOOM = 2   # the characters are shown twice as big on the choice screen
+CHARACTER_GAP = 56   # pixels between the middles of two characters
 
 
 def draw_character_choice(app, screen):
     """The choice of the character, over the calm sea of the title: the characters side by side,
-    the highlighted one in a frame that blinks."""
+    the highlighted one in a frame that blinks, with its name and its ability below.
+
+    On the computer that joined a game for two, the character player 1 took is dark and cannot be chosen.
+    """
     draw_sea(app, screen, screen.get_rect(), calm=True)
     font = app["fonts"]["text"]
-    title = story.MESSAGES["choose_character_p1" if app["two_players"] else "choose_character"]
-    draw_text(screen, app["fonts"]["title"], title, COLORS["text"], (WIDTH // 2, 36), "center", True)
+    title = "choose_character"
+    if app["taken"] is not None:
+        title = "choose_character_p2"
+    elif app["two_players"]:
+        title = "choose_character_p1"
+    draw_text(screen, app["fonts"]["title"], story.MESSAGES[title], COLORS["text"], (WIDTH // 2, 30), "center", True)
     entries = character_entries()
     first = WIDTH // 2 - (len(entries) - 1) * CHARACTER_GAP // 2
     for index, character in enumerate(entries):
         picture = sprites.image(story.CHARACTERS[character]["sprite"] + "_down_0")
-        center = (first + index * CHARACTER_GAP, 118)
+        center = (first + index * CHARACTER_GAP, 88)
         frame = pygame.Rect(0, 0, 16 * CHARACTER_ZOOM + 12, 16 * CHARACTER_ZOOM + 12)
         frame.center = center
         pygame.draw.rect(screen, COLORS["box"], frame)
@@ -6046,10 +6152,25 @@ def draw_character_choice(app, screen):
         if picture is not None:
             big = pygame.transform.scale(picture, (picture.get_width() * CHARACTER_ZOOM, picture.get_height() * CHARACTER_ZOOM))
             screen.blit(big, big.get_rect(center=center))
-    lines = wrap(story.MESSAGES["choose_hint"], WIDTH - 16, text_width(font))
-    for index, line in enumerate(lines):
-        y = HEIGHT - 6 - (len(lines) - index) * font.get_linesize()
-        draw_text(screen, font, line, COLORS["foam"], (WIDTH // 2, y), "center", True)
+        if character == app["taken"]:
+            shade(screen, frame.inflate(-2, -2), 170)  # taken by player 1
+    for index, line in enumerate(character_lines(app, entries[app["menu_index"]])):
+        color = COLORS["highlight"] if index == 0 else COLORS["text"]
+        draw_text(screen, font, line, color, (WIDTH // 2, 116 + index * font.get_linesize()), "center", True)
+    draw_lines_at_bottom(app, screen, story.MESSAGES["choose_hint"])
+
+
+def character_lines(app, character):
+    """What the choice screen says about a character: its name, then its ability, wrapped.
+
+    Alone, a last line says that abilities are for a game for two: the character is only a look.
+    """
+    info = story.CHARACTERS[character]
+    font = app["fonts"]["text"]
+    lines = [info["name"]] + wrap(info["ability"], WIDTH - 24, text_width(font))
+    if not app["two_players"] and app["taken"] is None:
+        lines += wrap(story.MESSAGES["abilities_for_two"], WIDTH - 24, text_width(font))
+    return lines
 
 
 def draw_mode_choice(app, screen):
@@ -6700,8 +6821,9 @@ Names follow what main.py looks for:
   number on them), on the metal "zone" of their floor puzzle;
 - doors as "door_open", "door_barred", "door_locked" and "door_sealed", drawn for
   the north wall (main.py turns them for the other walls);
-- the player as "player_<down/up/right>_<0, 1 or 2>": 0 standing, 1 and 2 walking
-  (left is right mirrored);
+- the four characters as "<wizard/nurse/ghost/flash>_<down/up/right>_<0, 1 or 2>":
+  0 standing, 1 and 2 walking (left is right mirrored); they all come from the same
+  figure, dressed in different ways (see the end of this file);
 - the room tiles as "floor_<room>" and "wall_<room>", with "_0" to "_3" for the
   pictures of a moving tile (the stormy sea around the deck); "sea_calm_0" and
   "sea_calm_1" are the calm sea of the good ending.
@@ -6806,15 +6928,6 @@ LEGS_SIDE = [
 ]
 
 SPRITES = {
-    "player_down_0": PLAYER_DOWN + LEGS_FRONT[0],
-    "player_down_1": PLAYER_DOWN + LEGS_FRONT[1],
-    "player_down_2": PLAYER_DOWN + LEGS_FRONT[2],
-    "player_up_0": PLAYER_UP + LEGS_FRONT[0],
-    "player_up_1": PLAYER_UP + LEGS_FRONT[1],
-    "player_up_2": PLAYER_UP + LEGS_FRONT[2],
-    "player_right_0": PLAYER_RIGHT + LEGS_SIDE[0],
-    "player_right_1": PLAYER_RIGHT + LEGS_SIDE[1],
-    "player_right_2": PLAYER_RIGHT + LEGS_SIDE[2],
     "wand": [
         "................",
         "................",
@@ -8243,9 +8356,58 @@ SPRITES = {
     ],
 }
 
-# The second character: the same pictures as the player, with a red shirt instead of a green one.
-for _name in [name for name in SPRITES if name.startswith("player_")]:
-    SPRITES["player_red_" + _name[len("player_"):]] = [row.translate(str.maketrans("gG", "rR")) for row in SPRITES[_name]]
+# The four characters. Each is the figure above (PLAYER_DOWN, PLAYER_UP, PLAYER_RIGHT and
+# the legs) in other colors, with some rows drawn again: a hat, a cap, a ghost's hem.
+# "colors" says which letter of the figure becomes which; "rows" gives, for a direction,
+# the rows that replace the figure's (by their number from the top); "legs" replaces
+# the three pictures of the legs, seen from the front and from the side.
+WIZARD_HAT = {0: ".......kk.......", 1: "......kPPk......", 2: ".....kPPyPk.....", 3: "....kPPPPPPk....",
+              4: "..kkkPPPPPPkkk.."}
+GHOST_HEM_FRONT = [
+    ["...kwwwwwwwwk...", "...kwkkwwkkwk...", "....k..kk..k...."],
+    ["...kwwwwwwwwk...", "...kkwwkkwwkk...", "......kk..kk...."],
+    ["...kwwwwwwwwk...", "...kwwkkwwkkk...", "....kk..kk......"],
+]
+GHOST_HEM_SIDE = [
+    ["....kwwwwwk.....", "....kwkwkwk.....", ".....k.k.k......"],
+    ["....kwwwwwk.....", "....kkwkwkk.....", "......k.k......."],
+    ["....kwwwwwk.....", "....kwkwkwk.....", ".....k.k.k......"],
+]
+CHARACTER_LOOKS = {
+    # A pointed hat with a star, and a long purple robe.
+    "wizard": {"colors": "gGj", "become": "pPP",
+               "rows": {"down": WIZARD_HAT, "up": WIZARD_HAT, "right": WIZARD_HAT}},
+    # A white uniform, and a white cap with a red cross.
+    "nurse": {"colors": "gGj", "become": "wlw",
+              "rows": {"down": {2: "....kkwwwwkk....", 3: "...khwwrrwwhk..."},
+                       "up": {2: "....kkwwwwkk....", 3: "...khwwwwwwhk..."},
+                       "right": {2: "....kwwwwwkk....", 3: "...khwwwwrwhk..."}}},
+    # All white and pale blue, with a wavy hem instead of legs.
+    "ghost": {"colors": "hzZgGj", "become": "wwfwwf",
+              "rows": {"down": {6: "...kwwkwwkwwk...", 7: "...kwwkwwkwwk...", 8: "....kwwwwwwk...."},
+                       "right": {5: "...kwwwwwwkwk...", 6: "...kwwwwwwkwk...", 8: "....kkwwwwwk...."}},
+              "legs": {"front": GHOST_HEM_FRONT, "side": GHOST_HEM_SIDE}},
+    # A red suit and cowl, with a yellow bolt on the chest.
+    "flash": {"colors": "hgGj", "become": "rryR", "rows": {}},
+}
+
+
+def _dress(rows, look, direction):
+    """The rows of the figure, in the colors of a character and with its own rows drawn again."""
+    table = str.maketrans(look["colors"], look["become"])
+    again = look["rows"].get(direction, {})
+    return [again.get(number, row.translate(table)) for number, row in enumerate(rows)]
+
+
+for _character, _look in CHARACTER_LOOKS.items():
+    _legs = _look.get("legs", {})
+    for _direction, _body, _steps in (("down", PLAYER_DOWN, _legs.get("front", LEGS_FRONT)),
+                                      ("up", PLAYER_UP, _legs.get("front", LEGS_FRONT)),
+                                      ("right", PLAYER_RIGHT, _legs.get("side", LEGS_SIDE))):
+        for _step in range(3):
+            _picture = _dress(_body, _look, _direction)
+            _hem = _steps[_step] if "legs" in _look else _dress(_steps[_step], dict(_look, rows={}), _direction)
+            SPRITES[f"{_character}_{_direction}_{_step}"] = _picture + _hem
 
 # Some rooms reuse the wood of the cabin and the planks of the hold.
 SPRITES["floor_galley"] = SPRITES["floor_cabin"]
@@ -10191,13 +10353,16 @@ def test_entering_a_room_marks_it_on_the_map():
 
 
 def test_a_new_game_remembers_the_character_chosen():
-    assert engine.new_game()["flags"]["character"] == "green"
-    state, outcome = engine.start_new_game(None, character="red")
-    assert outcome["ok"] and state["flags"]["character"] == "red"
-    assert reopen(state)["flags"]["character"] == "red"
+    assert list(story.CHARACTERS) == ["wizard", "nurse", "ghost", "flash"]
+    assert engine.new_game()["flags"]["character"] == "wizard"
+    for character in story.CHARACTERS:
+        state, outcome = engine.start_new_game(None, character=character)
+        assert outcome["ok"] and state["flags"]["character"] == character
+        assert reopen(state)["flags"]["character"] == character
     with pytest.raises(ValueError):
         engine.new_game("blue")
     assert engine.restore_state(restorable(flags={"character": "blue"})) is None
+    assert engine.restore_state(restorable(flags={"character": "green"})) is None  # a character of older versions
 
 
 # --- Two players ----------------------------------------------------------------------
@@ -10208,19 +10373,42 @@ def test_partner_character_is_the_other_one():
         state = engine.new_game(character, two_players=True)
         partner = engine.partner_character(state)
         assert partner in story.CHARACTERS and partner != character
-    assert engine.partner_character(engine.new_game("green")) == "red"
-    assert engine.partner_character(engine.new_game("red")) == "green"
+        assert engine.character_of(state, 1) == character and engine.character_of(state, 2) == partner
+    assert engine.partner_character(engine.new_game("wizard", two_players=True)) == "nurse"
+    assert engine.partner_character(engine.new_game("nurse", two_players=True)) == "wizard"
+
+
+def test_player_two_chooses_any_character_but_player_ones():
+    state = engine.new_game("ghost", two_players=True)
+    before = copy.deepcopy(state)
+    for character in ("wizard", "nurse", "flash"):
+        chosen, outcome = engine.choose_partner_character(state, character)
+        assert outcome["ok"] and engine.partner_character(chosen) == character
+        assert reopen(chosen) == chosen  # saved with the game
+    assert state == before
+    for wrong in ("ghost", "blue", None):
+        same, outcome = engine.choose_partner_character(state, wrong)
+        assert not outcome["ok"] and same is state
+    alone = engine.new_game("ghost")
+    assert not engine.choose_partner_character(alone, "wizard")[1]["ok"]
+
+
+def test_two_players_with_the_same_character_is_not_a_valid_save():
+    same = restorable(flags={"two_players": True, "character": "flash", "partner_character": "flash"})
+    assert engine.restore_state(same) is None
+    alone = restorable(flags={"character": "nurse"})  # alone, the partner's character does not matter
+    assert engine.restore_state(alone)["flags"]["character"] == "nurse"
 
 
 def test_a_new_game_remembers_the_mode():
     assert engine.new_game()["flags"]["two_players"] is False
-    state, outcome = engine.start_new_game(None, character="red", two_players=True)
-    assert outcome["ok"] and state["flags"]["two_players"] is True and state["flags"]["character"] == "red"
+    state, outcome = engine.start_new_game(None, character="flash", two_players=True)
+    assert outcome["ok"] and state["flags"]["two_players"] is True and state["flags"]["character"] == "flash"
 
 
 def test_restore_state_of_a_game_for_two():
     """A game for two goes through the save file unchanged; a save made before the mode existed is for one."""
-    state = play(GET_KEY, engine.new_game("red", two_players=True))
+    state = play(GET_KEY, engine.new_game("flash", two_players=True))
     assert reopen(state) == state
     assert reopen(state)["flags"]["two_players"] is True
     old = restorable(flags={"cabin_solved": True})
@@ -11812,28 +12000,36 @@ def test_the_sea_is_a_storm_except_in_the_good_ending(app):
 # --- The choice of the character ---------------------------------------------------
 
 
-def test_new_game_lets_the_player_choose_the_red_character(app):
-    """Right, then Enter: the game starts with the red character, saved, and Resume keeps it."""
+def test_new_game_lets_the_player_choose_among_four_characters(app):
+    """Right, then Enter: the game starts with the second character, saved, and Resume keeps it."""
     press(app, pygame.K_RETURN, pygame.K_RETURN)  # "New game", "1 player"
-    assert app["scene"] == "character" and main.character_entries()[app["menu_index"]] == "green"
+    assert app["scene"] == "character" and main.character_entries() == ["wizard", "nurse", "ghost", "flash"]
+    assert main.character_entries()[app["menu_index"]] == "wizard"
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for _ in range(4):
+        lines = main.character_lines(app, main.character_entries()[app["menu_index"]])
+        assert lines[-1] == story.MESSAGES["abilities_for_two"]  # alone, the character is only a look
+        assert 116 + len(lines) * app["fonts"]["text"].get_linesize() < main.HEIGHT - 30  # above the hint
+        main.draw(app, screen)
+        press(app, pygame.K_RIGHT)
     press(app, pygame.K_RIGHT)
-    assert main.character_entries()[app["menu_index"]] == "red"
+    assert main.character_entries()[app["menu_index"]] == "nurse"
     press(app, pygame.K_RETURN)
     assert app["scene"] == "play"
-    assert app["state"]["flags"]["character"] == "red"
-    assert main.player_picture(app, p1(app)) is sprites.image("player_red_down_0")
-    assert engine.restore_state(save.load_game())["flags"]["character"] == "red"
+    assert app["state"]["flags"]["character"] == "nurse"
+    assert main.player_picture(app, p1(app)) is sprites.image("nurse_down_0")
+    assert engine.restore_state(save.load_game())["flags"]["character"] == "nurse"
     again = relaunch()
     press(again, pygame.K_DOWN, pygame.K_RETURN)  # "Resume"
-    assert main.player_picture(again, p1(again)) is sprites.image("player_red_down_0")
+    assert main.player_picture(again, p1(again)) is sprites.image("nurse_down_0")
 
 
 def test_the_choice_wraps_around_and_esc_goes_back(app):
     press(app, pygame.K_RETURN, pygame.K_RETURN)  # "New game", "1 player"
     press(app, pygame.K_LEFT)  # from the first, left goes round to the last
-    assert main.character_entries()[app["menu_index"]] == "red"
+    assert main.character_entries()[app["menu_index"]] == "flash"
     press(app, pygame.K_d)  # WASD works too
-    assert main.character_entries()[app["menu_index"]] == "green"
+    assert main.character_entries()[app["menu_index"]] == "wizard"
     press(app, pygame.K_ESCAPE)
     assert app["scene"] == "mode"  # one step back: the choice of the mode
     press(app, pygame.K_ESCAPE)
@@ -11854,18 +12050,18 @@ def test_restarting_from_the_pause_menu_also_asks_for_a_character(app):
     assert app["scene"] == "pause" and app["state"] == before
     press(app, pygame.K_DOWN, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN, pygame.K_RETURN, pygame.K_RIGHT,
           pygame.K_RETURN)
-    assert app["scene"] == "play" and app["state"]["flags"]["character"] == "red"
+    assert app["scene"] == "play" and app["state"]["flags"]["character"] == "nurse"
 
 
-def test_the_two_characters_differ_only_in_the_shirt():
-    """Every picture of the red character is the green one with red where the shirt is green."""
-    for name, rows in sprites.SPRITES.items():
-        if name.startswith("player_") and not name.startswith("player_red_"):
-            red = sprites.SPRITES["player_red_" + name[len("player_"):]]
-            for row, red_row in zip(rows, red):
-                for letter, red_letter in zip(row, red_row):
-                    expected = {"g": "r", "G": "R"}.get(letter, letter)
-                    assert red_letter == expected, name
+def test_the_four_characters_look_different_in_every_picture():
+    """Each character has its own pictures: no two share one, standing or walking, in any direction."""
+    for direction in ("down", "up", "right"):
+        for step in range(3):
+            pictures = [tuple(sprites.SPRITES[f"{info['sprite']}_{direction}_{step}"])
+                        for info in story.CHARACTERS.values()]
+            assert len(set(pictures)) == len(story.CHARACTERS), (direction, step)
+    for info in story.CHARACTERS.values():
+        assert info["name"] and info["ability"]
 
 
 def test_the_choice_screen_can_be_drawn(app):
@@ -12012,6 +12208,8 @@ def two_computers(app, monkeypatch):
     press(guest, pygame.K_DOWN, pygame.K_RETURN)  # "Join game"
     assert guest["scene"] == "join"
     main.join(guest, "127.0.0.1")
+    pump(app, guest, lambda: guest["scene"] == "character")  # the host is the wizard: the guest chooses
+    press(guest, pygame.K_RETURN)  # the first one free: the nurse
     pump(app, guest, lambda: app["scene"] == "play" and guest["scene"] == "play")
     read_all(app)
     read_all(guest)
@@ -12075,14 +12273,71 @@ def test_a_computer_that_cannot_host_says_so(app, monkeypatch):
     assert app["notice"] == ""  # gone at the first key
 
 
+def joining(app, monkeypatch, host_keys=()):
+    """`app` hosts a new game for two (its character chosen with `host_keys`); a second app joins it
+    and is shown the choice of the character. Returns that second app."""
+    monkeypatch.setattr(main, "NET_PORT", 0)
+    press(app, pygame.K_RETURN, pygame.K_DOWN, pygame.K_RETURN, *host_keys, pygame.K_RETURN)
+    monkeypatch.setattr(main, "NET_PORT", app["net"]["host"].port)
+    guest = relaunch()
+    main.join(guest, "127.0.0.1")
+    pump(app, guest, lambda: guest["scene"] == "character")
+    return guest
+
+
+def test_the_player_who_joins_chooses_any_character_but_the_hosts(app, monkeypatch):
+    guest = joining(app, monkeypatch, host_keys=(pygame.K_RIGHT,))  # the host is the nurse
+    assert guest["taken"] == "nurse" and app["scene"] == "lobby"
+    assert main.character_entries()[guest["menu_index"]] == "wizard"
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(guest, screen)  # "Player 2: choose", the nurse dark
+    main.draw(app, screen)    # "Player 2 is choosing a character"
+    press(guest, pygame.K_RIGHT)  # over the nurse, to the ghost
+    assert main.character_entries()[guest["menu_index"]] == "ghost"
+    press(guest, pygame.K_LEFT, pygame.K_LEFT)  # back over her, and round to the last
+    assert main.character_entries()[guest["menu_index"]] == "flash"
+    press(guest, pygame.K_RETURN)
+    pump(app, guest, lambda: app["scene"] == "play" and guest["scene"] == "play")
+    for one in (app, guest):
+        assert one["state"]["flags"]["character"] == "nurse" and one["state"]["flags"]["partner_character"] == "flash"
+    assert main.player_picture(guest, mine(guest)) is sprites.image("flash_down_0")
+    main.end_network(app)
+    main.end_network(guest)
+
+
+def test_the_host_refuses_its_own_character_and_asks_again(app, monkeypatch):
+    guest = joining(app, monkeypatch)
+    main.send(guest, {"t": "picked", "character": "wizard"})  # the host's own: not through the menu
+    guest["taken"] = None
+    main.set_scene(guest, "join")
+    pump(app, guest, lambda: guest["scene"] == "character")
+    assert guest["taken"] == "wizard" and app["scene"] == "lobby"
+    main.end_network(app)
+    main.end_network(guest)
+
+
+def test_if_the_player_who_joined_gives_up_the_host_waits_again(app, monkeypatch):
+    guest = joining(app, monkeypatch)
+    press(guest, pygame.K_ESCAPE)
+    assert guest["scene"] == "menu" and guest["net"] is None
+    pump(app, guest, lambda: app["net"] is not None and app["net"]["conn"] is None and app["scene"] == "lobby")
+    other = relaunch()  # someone else can join now
+    main.join(other, "127.0.0.1")
+    pump(app, other, lambda: other["scene"] == "character")
+    main.end_network(app)
+    main.end_network(other)
+
+
 def test_two_computers_play_the_same_game_each_as_their_player(two_computers):
     host, guest = two_computers
     assert host["state"] == guest["state"] and host["state"]["flags"]["two_players"]
     assert main.my_number(host) == 1 and main.my_number(guest) == 2
     assert len(host["players"]) == len(guest["players"]) == 2
     assert engine.restore_state(save.load_game()) == host["state"]  # only the host keeps the game
-    assert main.player_picture(guest, mine(guest)) is sprites.image("player_red_down_0")  # the partner: red
-    assert main.player_picture(guest, guest["players"][0]) is sprites.image("player_down_0")
+    assert main.player_picture(guest, mine(guest)) is sprites.image("nurse_down_0")  # the one the guest chose
+    assert main.player_picture(guest, guest["players"][0]) is sprites.image("wizard_down_0")
+    assert main.player_picture(host, host["players"][1]) is sprites.image("nurse_down_0")
+    assert engine.restore_state(save.load_game())["flags"]["partner_character"] == "nurse"
 
 
 def test_each_computer_moves_only_its_own_player_and_sees_the_other(two_computers):
@@ -12167,7 +12422,7 @@ def test_the_tiles_start_over_only_when_both_players_are_out_of_the_zone(two_com
 
 def test_the_lower_player_is_drawn_in_front(two_computers):
     """Two players on the same spot, one a little lower: the lower one covers the other."""
-    host, _ = two_computers  # the host is green, the guest red
+    host, _ = two_computers  # the host is the wizard (purple), the guest the nurse (white)
     host["fade"] = 0
     x, y = main.tile_rect(4, 8).topleft
     screen = pygame.Surface((main.WIDTH, main.HEIGHT))
@@ -12181,8 +12436,8 @@ def test_the_lower_player_is_drawn_in_front(two_computers):
         cam_x, cam_y = main.camera("deck", main.view_position(host))
         body = main.player_rect((first if lower == "p1" else second)["pos"])
         return tuple(screen.get_at((body.centerx - cam_x, body.bottom + 1 - 5 - cam_y)))[:3]
-    assert shirt_color("p1") == sprites.PALETTE["g"]  # the host, green, in front
-    assert shirt_color("p2") == sprites.PALETTE["r"]  # the guest, red, in front
+    assert shirt_color("p1") == sprites.PALETTE["p"]  # the host, in purple, in front
+    assert shirt_color("p2") == sprites.PALETTE["w"]  # the guest, in white, in front
 
 
 def test_in_a_game_for_two_the_pause_menu_does_not_stop_the_game(two_computers):
@@ -12220,6 +12475,7 @@ def test_a_game_for_two_is_resumed_by_hosting_it_again(two_computers, monkeypatc
     main.join(other, "127.0.0.1")
     pump(again, other, lambda: again["scene"] == "play" and other["scene"] == "play")
     assert other["state"] == again["state"] and other["dialog"] == []  # the room's name, no opening scene
+    assert other["state"]["flags"]["partner_character"] == "nurse"  # the characters of the first time: no choice
     main.end_network(again)
     main.end_network(other)
 
@@ -12908,9 +13164,10 @@ def test_everything_on_screen_has_a_picture():
     assert sprites.image("zone") is not None
     for status in ("open", "barred", "locked", "sealed"):
         assert sprites.image("door_" + status) is not None, status
-    for direction in ("down", "up", "right"):
-        for step in range(3):
-            assert sprites.image(f"player_{direction}_{step}") is not None, (direction, step)
+    for character in story.CHARACTERS.values():
+        for direction in ("down", "up", "right"):
+            for step in range(3):
+                assert sprites.image(f"{character['sprite']}_{direction}_{step}") is not None, (character, direction, step)
     assert sprites.image("ship") is not None
 
 
@@ -12925,8 +13182,8 @@ def test_a_missing_picture_gives_none():
 
 
 def test_flipped_pictures_are_mirrored_pixel_by_pixel():
-    picture = sprites.image("player_right_1")
-    mirrored = sprites.image("player_right_1", flip=True)
+    picture = sprites.image("wizard_right_1")
+    mirrored = sprites.image("wizard_right_1", flip=True)
     width, height = picture.get_size()
     for x in range(width):
         for y in range(height):
@@ -13020,16 +13277,16 @@ def test_the_player_walks_in_two_steps_and_stands_still(app):
     for _ in range(4 * main.WALK_STEP_FRAMES):
         main.update(app, 1, 0)
         steps.add(main.player_picture(app, p1(app)))
-    assert steps == {sprites.image("player_right_1"), sprites.image("player_right_2")}
+    assert steps == {sprites.image("wizard_right_1"), sprites.image("wizard_right_2")}
     main.update(app, 0, 0)
     assert not p1(app)["moving"]
-    assert main.player_picture(app, p1(app)) is sprites.image("player_right_0")
+    assert main.player_picture(app, p1(app)) is sprites.image("wizard_right_0")
 
 
 def test_facing_left_mirrors_the_right_pictures(app):
     main.update(app, -1, 0)
     main.update(app, 0, 0)
-    assert main.player_picture(app, p1(app)) is sprites.image("player_right_0", flip=True)
+    assert main.player_picture(app, p1(app)) is sprites.image("wizard_right_0", flip=True)
 
 
 def test_a_room_comes_out_of_the_dark_after_a_door(app):

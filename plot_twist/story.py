@@ -11,15 +11,23 @@ START_ROOM = "deck"
 # the choice shows them. They look the same, except for the colour of the shirt:
 # "sprite" is the start of the names of their pictures in sprites.py.
 CHARACTERS = {
-    "green": {"sprite": "player"},
-    "red": {"sprite": "player_red"},
+    "wizard": {"sprite": "wizard", "name": "Wizard",
+               "ability": "Spell: the crab stands stunned for 5 seconds."},
+    "nurse": {"sprite": "nurse", "name": "Nurse",
+              "ability": "Always: helps a player up in 1 second."},
+    "ghost": {"sprite": "ghost", "name": "Ghost",
+              "ability": "Vanish: the crab cannot see you for 5 seconds."},
+    "flash": {"sprite": "flash", "name": "Flash",
+              "ability": "Dash: a lightning sprint of 5 tiles, through doors too."},
 }
 
 # What the game remembers about the player's progress and choices, with the
 # value each flag has at the start of a new game.
 FLAGS = {
     # The character chosen for this game (one of CHARACTERS): player 1's, in a game for two.
-    "character": "green",
+    "character": "wizard",
+    # In a game for two, the character player 2 chose: never the same as player 1's.
+    "partner_character": "nurse",
     # A game for two players: player 2 is the other character.
     "two_players": False,
     # In a game for two, the room player 2 is in ("room" in the state is player 1's).
@@ -1697,6 +1705,10 @@ MESSAGES = {
     "menu_two_players": "Host game for 2",
     "choose_character": "Choose your character",
     "choose_character_p1": "Player 1: choose",
+    "choose_character_p2": "Player 2: choose",
+    "character_taken": "Taken by player 1",
+    "abilities_for_two": "Abilities only work in a game for two.",
+    "lobby_choosing": "Player 2 is choosing a character",
     # A game for two, on two computers on the same network: one hosts, the other joins.
     "menu_join_game": "Join game",
     "lobby_title": "Waiting for player 2",

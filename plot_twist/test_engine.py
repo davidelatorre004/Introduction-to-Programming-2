@@ -1613,13 +1613,16 @@ def test_entering_a_room_marks_it_on_the_map():
 
 
 def test_a_new_game_remembers_the_character_chosen():
-    assert engine.new_game()["flags"]["character"] == "green"
-    state, outcome = engine.start_new_game(None, character="red")
-    assert outcome["ok"] and state["flags"]["character"] == "red"
-    assert reopen(state)["flags"]["character"] == "red"
+    assert list(story.CHARACTERS) == ["wizard", "nurse", "ghost", "flash"]
+    assert engine.new_game()["flags"]["character"] == "wizard"
+    for character in story.CHARACTERS:
+        state, outcome = engine.start_new_game(None, character=character)
+        assert outcome["ok"] and state["flags"]["character"] == character
+        assert reopen(state)["flags"]["character"] == character
     with pytest.raises(ValueError):
         engine.new_game("blue")
     assert engine.restore_state(restorable(flags={"character": "blue"})) is None
+    assert engine.restore_state(restorable(flags={"character": "green"})) is None  # a character of older versions
 
 
 # --- Two players ----------------------------------------------------------------------
@@ -1630,19 +1633,42 @@ def test_partner_character_is_the_other_one():
         state = engine.new_game(character, two_players=True)
         partner = engine.partner_character(state)
         assert partner in story.CHARACTERS and partner != character
-    assert engine.partner_character(engine.new_game("green")) == "red"
-    assert engine.partner_character(engine.new_game("red")) == "green"
+        assert engine.character_of(state, 1) == character and engine.character_of(state, 2) == partner
+    assert engine.partner_character(engine.new_game("wizard", two_players=True)) == "nurse"
+    assert engine.partner_character(engine.new_game("nurse", two_players=True)) == "wizard"
+
+
+def test_player_two_chooses_any_character_but_player_ones():
+    state = engine.new_game("ghost", two_players=True)
+    before = copy.deepcopy(state)
+    for character in ("wizard", "nurse", "flash"):
+        chosen, outcome = engine.choose_partner_character(state, character)
+        assert outcome["ok"] and engine.partner_character(chosen) == character
+        assert reopen(chosen) == chosen  # saved with the game
+    assert state == before
+    for wrong in ("ghost", "blue", None):
+        same, outcome = engine.choose_partner_character(state, wrong)
+        assert not outcome["ok"] and same is state
+    alone = engine.new_game("ghost")
+    assert not engine.choose_partner_character(alone, "wizard")[1]["ok"]
+
+
+def test_two_players_with_the_same_character_is_not_a_valid_save():
+    same = restorable(flags={"two_players": True, "character": "flash", "partner_character": "flash"})
+    assert engine.restore_state(same) is None
+    alone = restorable(flags={"character": "nurse"})  # alone, the partner's character does not matter
+    assert engine.restore_state(alone)["flags"]["character"] == "nurse"
 
 
 def test_a_new_game_remembers_the_mode():
     assert engine.new_game()["flags"]["two_players"] is False
-    state, outcome = engine.start_new_game(None, character="red", two_players=True)
-    assert outcome["ok"] and state["flags"]["two_players"] is True and state["flags"]["character"] == "red"
+    state, outcome = engine.start_new_game(None, character="flash", two_players=True)
+    assert outcome["ok"] and state["flags"]["two_players"] is True and state["flags"]["character"] == "flash"
 
 
 def test_restore_state_of_a_game_for_two():
     """A game for two goes through the save file unchanged; a save made before the mode existed is for one."""
-    state = play(GET_KEY, engine.new_game("red", two_players=True))
+    state = play(GET_KEY, engine.new_game("flash", two_players=True))
     assert reopen(state) == state
     assert reopen(state)["flags"]["two_players"] is True
     old = restorable(flags={"cabin_solved": True})

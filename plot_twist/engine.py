@@ -42,7 +42,8 @@ def new_game(character=None, two_players=False):
     """Return the state of a brand-new game: on the deck, empty-handed, nothing decided.
 
     `character` is one of story.CHARACTERS; without it, the first one. With
-    `two_players`, it is a game for two on the same keyboard.
+    `two_players`, it is a game for two: player 2 starts as the first character
+    player 1 did not take, until they choose their own (choose_partner_character).
     """
     state = {
         "room": story.START_ROOM,
@@ -56,7 +57,17 @@ def new_game(character=None, two_players=False):
             raise ValueError(f"Unknown character: {character!r}")
         state["flags"]["character"] = character
     state["flags"]["two_players"] = bool(two_players)
+    if state["flags"]["partner_character"] == state["flags"]["character"]:
+        state["flags"]["partner_character"] = _another_character(state["flags"]["character"])
     return state
+
+
+def _another_character(character):
+    """The first character of story.CHARACTERS that is not `character`."""
+    for other in story.CHARACTERS:
+        if other != character:
+            return other
+    raise ValueError("There is only one character")
 
 
 def start_new_game(existing, confirmed=False, character=None, two_players=False):
@@ -126,6 +137,10 @@ def restore_state(data):
     state["inventory"] = list(inventory)
     state["flags"].update(flags)
     state["ending"] = ending
+    if state["flags"]["partner_character"] == state["flags"]["character"]:
+        if state["flags"]["two_players"]:
+            return None  # the two players never play the same character
+        state["flags"]["partner_character"] = _another_character(state["flags"]["character"])
     if not _floor_puzzles_consistent(state["flags"]):
         return None
     if not _potion_puzzles_consistent(state["flags"]):
@@ -142,11 +157,23 @@ def is_over(state):
 
 
 def partner_character(state):
-    """Player 2's character: the first one of story.CHARACTERS that player 1 did not choose."""
-    for character in story.CHARACTERS:
-        if character != state["flags"]["character"]:
-            return character
-    raise ValueError("There is only one character")
+    """Player 2's character, in a game for two."""
+    return state["flags"]["partner_character"]
+
+
+def character_of(state, player=1):
+    """The character `player` (1 or 2) plays."""
+    return state["flags"]["character"] if player == 1 else state["flags"]["partner_character"]
+
+
+def choose_partner_character(state, character):
+    """Player 2 chooses their character, before a game for two starts: any but player 1's."""
+    if not state["flags"]["two_players"] or character not in story.CHARACTERS \
+            or character == state["flags"]["character"]:
+        return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
+    new = copy.deepcopy(state)
+    new["flags"]["partner_character"] = character
+    return _accept(new, "character_chosen", story.CHARACTERS[character]["name"])
 
 
 def has_item(state, item):
@@ -1053,6 +1080,8 @@ def _allowed_values(flag):
     for info in story.ITEMS.values():
         if info.get("sets_flag") == flag:
             values.append(True)
+    if flag == "partner_character":
+        values += list(story.CHARACTERS)
     if flag == "character":
         values += list(story.CHARACTERS)
     if flag == "two_players":

@@ -2,9 +2,18 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v27](versions/v27.md) - The third ending (2026-11-09)
+## [v28](versions/v28.md) - Four characters (2026-11-12)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- Four characters replace the green and the red one: the Wizard, the Nurse, the Ghost and Flash, each with its own pictures. The choice screen shows all four, with the name and the ability of the one highlighted.
+- In a game for two each player chooses on their own screen: the host before hosting, the player who joins right after joining, any character but the host's (shown dark). The host waits meanwhile; if the other player gives up, it goes back to waiting.
+- Player 2's character is saved with the game (a new flag, partner_character): a game for two that is resumed keeps both characters, with no new choice.
+- The abilities come in the next version: for now a character is only a look. Games saved with the old characters cannot be resumed.
+
+## [v27](versions/v27.md) - The third ending (2026-11-09)
+
+In commit [`bcb170d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/bcb170d196cc593eb61a9f40a18ffdb3f7bf90d1/plot_twist).
 
 - If the crab catches both players (the second while the first is down, or the last one left in the game), the game is over: the third ending, "Caught by the crab", with a giant crab rising behind the ship. It replaces the rule of the previous version (both down: they get up, and the crab goes back to its statue).
 - The ending is saved like the other two, and the ending screen counts three endings. It can only be reached in a game for two.
