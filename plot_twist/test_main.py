@@ -2489,3 +2489,30 @@ def test_the_crab_vanishes_in_a_puff_of_dust(app):
     main.update(app, 0, 0)
     dust = [one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS]
     assert len(dust) >= 20 and all(abs(one["x"] - where[0]) < 12 and abs(one["y"] - where[1]) < 12 for one in dust)
+
+
+# --- The whole screen (F11) -----------------------------------------------------------------
+
+
+def test_the_picture_fills_the_screen_in_whole_multiples_and_stays_in_the_middle():
+    assert main.picture_area((main.WIDTH * main.SCALE, main.HEIGHT * main.SCALE)).topleft == (0, 0)  # the window
+    for size in ((1920, 1080), (1366, 768), (2560, 1440), (1280, 800), (3840, 2160)):
+        area = main.picture_area(size)
+        zoom = area.width // main.WIDTH
+        assert area.size == (main.WIDTH * zoom, main.HEIGHT * zoom)  # never stretched: every pixel a square
+        assert pygame.Rect((0, 0), size).contains(area) and area.center == (size[0] // 2, size[1] // 2)
+        assert (main.WIDTH * (zoom + 1) > size[0]) or (main.HEIGHT * (zoom + 1) > size[1])  # as big as fits
+    assert main.picture_area((100, 100)).size == (main.WIDTH, main.HEIGHT)  # never smaller than the game
+
+
+def test_showing_the_game_on_a_bigger_screen_leaves_black_around_it():
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    screen.fill((200, 10, 10))
+    window = pygame.Surface((1366, 768))
+    window.fill((0, 0, 255))
+    pygame.display.set_mode((1, 1))
+    main.show(screen, window)
+    area = main.picture_area(window.get_size())
+    assert tuple(window.get_at(area.center))[:3] == (200, 10, 10)
+    assert tuple(window.get_at((2, 2)))[:3] == main.COLORS["black"]
+    assert main.FULLSCREEN_KEY == pygame.K_F11 and "F11" in story.MESSAGES["window_title"]

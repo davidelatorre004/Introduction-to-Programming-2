@@ -2,9 +2,15 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v31](versions/v31.md) - Lightning, the anvil, the broken statue (2026-11-12)
+## [v32](versions/v32.md) - Full screen (2026-11-12)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- F11 switches between the window and the whole screen. On the whole screen the game is as big as fits in whole multiples of its size, so every pixel stays a sharp square, in the middle, with black around it. The title of the window says so.
+
+## [v31](versions/v31.md) - Lightning, the anvil, the broken statue (2026-11-12)
+
+In commit [`ffff2db`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/ffff2db9eec2636112a823ab8162719556140f90/plot_twist).
 
 - A new game opens with a bolt of lightning: once the opening text is read, it tears the screen from top to bottom for a second, with a flash and thunder, and then the game is on. Not when a game is resumed.
 - The anvil now appears in the middle of the empty room east of the captain's cabin, not in the galley. Until the key is fused, red sparks fly around it and a red glow beats on it.

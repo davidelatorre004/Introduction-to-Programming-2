@@ -1717,6 +1717,7 @@ MESSAGES = {
     "label_activate": "Activate: {name}",
     # The window title and the menus.
     "title": "Plot Twist",
+    "window_title": "Plot Twist · F11: full screen",
     "subtitle": "A mystery in the middle of the sea",
     "menu_new_game": "New game",
     "menu_resume": "Resume",
@@ -6719,11 +6720,43 @@ def draw(app, screen):
 # --- The main loop -------------------------------------------------------------------
 
 
+FULLSCREEN_KEY = pygame.K_F11
+
+
+def picture_area(window_size):
+    """Where the game is drawn in a window of this size: as big as fits, in whole multiples of the
+    small screen (so every pixel stays a sharp square), in the middle, with black around it."""
+    width, height = window_size
+    zoom = max(1, min(width // WIDTH, height // HEIGHT))
+    area = pygame.Rect(0, 0, WIDTH * zoom, HEIGHT * zoom)
+    area.center = (width // 2, height // 2)
+    return area
+
+
+def open_window(fullscreen):
+    """The window of the game, or the whole screen."""
+    if fullscreen:
+        return pygame.display.set_mode((0, 0), pygame.FULLSCREEN)  # the size of the desktop
+    return pygame.display.set_mode((WIDTH * SCALE, HEIGHT * SCALE))
+
+
+def show(screen, window):
+    """Put the small screen on the window, enlarged with plain scaling: sharp pixels."""
+    area = picture_area(window.get_size())
+    if area.size == window.get_size():
+        pygame.transform.scale(screen, area.size, window)
+    else:
+        window.fill(COLORS["black"])
+        window.blit(pygame.transform.scale(screen, area.size), area)
+    pygame.display.flip()
+
+
 def main():
     pygame.init()
     sounds.load()  # silent if the computer has no audio
-    window = pygame.display.set_mode((WIDTH * SCALE, HEIGHT * SCALE))
-    pygame.display.set_caption(story.MESSAGES["title"])
+    fullscreen = False
+    window = open_window(fullscreen)
+    pygame.display.set_caption(story.MESSAGES["window_title"])
     screen = pygame.Surface((WIDTH, HEIGHT))
     clock = pygame.time.Clock()
     app = new_app(load_fonts())
@@ -6731,14 +6764,16 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 app["running"] = False
+            elif event.type == pygame.KEYDOWN and event.key == FULLSCREEN_KEY:
+                fullscreen = not fullscreen  # F11: the whole screen, and back to the window
+                window = open_window(fullscreen)
             elif event.type == pygame.KEYDOWN:
                 handle_key(app, event.key)
         pressed = pygame.key.get_pressed()
         dx, dy = held_direction(pressed, controls(app)[0])
         update(app, dx, dy, is_held(pressed, controls(app)[0]["act"]))
         draw(app, screen)
-        pygame.transform.scale(screen, window.get_size(), window)  # plain scaling: sharp pixels
-        pygame.display.flip()
+        show(screen, window)
         clock.tick(FPS)
     end_network(app)  # the other computer learns at once that this one has gone
     pygame.quit()
@@ -13949,6 +13984,33 @@ def test_the_crab_vanishes_in_a_puff_of_dust(app):
     main.update(app, 0, 0)
     dust = [one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS]
     assert len(dust) >= 20 and all(abs(one["x"] - where[0]) < 12 and abs(one["y"] - where[1]) < 12 for one in dust)
+
+
+# --- The whole screen (F11) -----------------------------------------------------------------
+
+
+def test_the_picture_fills_the_screen_in_whole_multiples_and_stays_in_the_middle():
+    assert main.picture_area((main.WIDTH * main.SCALE, main.HEIGHT * main.SCALE)).topleft == (0, 0)  # the window
+    for size in ((1920, 1080), (1366, 768), (2560, 1440), (1280, 800), (3840, 2160)):
+        area = main.picture_area(size)
+        zoom = area.width // main.WIDTH
+        assert area.size == (main.WIDTH * zoom, main.HEIGHT * zoom)  # never stretched: every pixel a square
+        assert pygame.Rect((0, 0), size).contains(area) and area.center == (size[0] // 2, size[1] // 2)
+        assert (main.WIDTH * (zoom + 1) > size[0]) or (main.HEIGHT * (zoom + 1) > size[1])  # as big as fits
+    assert main.picture_area((100, 100)).size == (main.WIDTH, main.HEIGHT)  # never smaller than the game
+
+
+def test_showing_the_game_on_a_bigger_screen_leaves_black_around_it():
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    screen.fill((200, 10, 10))
+    window = pygame.Surface((1366, 768))
+    window.fill((0, 0, 255))
+    pygame.display.set_mode((1, 1))
+    main.show(screen, window)
+    area = main.picture_area(window.get_size())
+    assert tuple(window.get_at(area.center))[:3] == (200, 10, 10)
+    assert tuple(window.get_at((2, 2)))[:3] == main.COLORS["black"]
+    assert main.FULLSCREEN_KEY == pygame.K_F11 and "F11" in story.MESSAGES["window_title"]
 
 
 ================================================================================

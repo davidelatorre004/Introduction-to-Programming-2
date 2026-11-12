@@ -3624,11 +3624,43 @@ def draw(app, screen):
 # --- The main loop -------------------------------------------------------------------
 
 
+FULLSCREEN_KEY = pygame.K_F11
+
+
+def picture_area(window_size):
+    """Where the game is drawn in a window of this size: as big as fits, in whole multiples of the
+    small screen (so every pixel stays a sharp square), in the middle, with black around it."""
+    width, height = window_size
+    zoom = max(1, min(width // WIDTH, height // HEIGHT))
+    area = pygame.Rect(0, 0, WIDTH * zoom, HEIGHT * zoom)
+    area.center = (width // 2, height // 2)
+    return area
+
+
+def open_window(fullscreen):
+    """The window of the game, or the whole screen."""
+    if fullscreen:
+        return pygame.display.set_mode((0, 0), pygame.FULLSCREEN)  # the size of the desktop
+    return pygame.display.set_mode((WIDTH * SCALE, HEIGHT * SCALE))
+
+
+def show(screen, window):
+    """Put the small screen on the window, enlarged with plain scaling: sharp pixels."""
+    area = picture_area(window.get_size())
+    if area.size == window.get_size():
+        pygame.transform.scale(screen, area.size, window)
+    else:
+        window.fill(COLORS["black"])
+        window.blit(pygame.transform.scale(screen, area.size), area)
+    pygame.display.flip()
+
+
 def main():
     pygame.init()
     sounds.load()  # silent if the computer has no audio
-    window = pygame.display.set_mode((WIDTH * SCALE, HEIGHT * SCALE))
-    pygame.display.set_caption(story.MESSAGES["title"])
+    fullscreen = False
+    window = open_window(fullscreen)
+    pygame.display.set_caption(story.MESSAGES["window_title"])
     screen = pygame.Surface((WIDTH, HEIGHT))
     clock = pygame.time.Clock()
     app = new_app(load_fonts())
@@ -3636,14 +3668,16 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 app["running"] = False
+            elif event.type == pygame.KEYDOWN and event.key == FULLSCREEN_KEY:
+                fullscreen = not fullscreen  # F11: the whole screen, and back to the window
+                window = open_window(fullscreen)
             elif event.type == pygame.KEYDOWN:
                 handle_key(app, event.key)
         pressed = pygame.key.get_pressed()
         dx, dy = held_direction(pressed, controls(app)[0])
         update(app, dx, dy, is_held(pressed, controls(app)[0]["act"]))
         draw(app, screen)
-        pygame.transform.scale(screen, window.get_size(), window)  # plain scaling: sharp pixels
-        pygame.display.flip()
+        show(screen, window)
         clock.tick(FPS)
     end_network(app)  # the other computer learns at once that this one has gone
     pygame.quit()

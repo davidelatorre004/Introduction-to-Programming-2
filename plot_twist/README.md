@@ -63,6 +63,7 @@ La prima volta uv installa pygame: ci vuole qualche secondo. Poi si apre la fine
 | I | Aprire e chiudere l'inventario |
 | Q | Lasciare a terra l'ultimo oggetto che hai preso, dove ti trovi. Chiunque può riprenderlo con E |
 | Spazio | Usare l'abilità del personaggio (solo nelle partite a due, una volta per partita) |
+| F11 | Schermo intero, e di nuovo F11 per tornare alla finestra |
 | Esc | Il menu di pausa: Continue, Restart, Main menu, Quit |
 | Su, giù e Invio (o E) | Scegliere nei menu |
 

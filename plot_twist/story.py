@@ -1713,6 +1713,7 @@ MESSAGES = {
     "label_activate": "Activate: {name}",
     # The window title and the menus.
     "title": "Plot Twist",
+    "window_title": "Plot Twist · F11: full screen",
     "subtitle": "A mystery in the middle of the sea",
     "menu_new_game": "New game",
     "menu_resume": "Resume",
