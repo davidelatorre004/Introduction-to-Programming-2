@@ -203,6 +203,12 @@ def key_fused(state):
     return _made(state, "fused_key") or flags["crab_door"] is not None or flags["angel_door"] is not None
 
 
+def statue_broken(state):
+    """True once the crab has broken out of its statue on the deck: in a game for two, from the
+    solved cabin on. The statue stays in pieces even after the crab has turned to stone and vanished."""
+    return state["flags"]["two_players"] and state["flags"]["cabin_solved"]
+
+
 def crab_awake(state):
     """True while the crab statue hunts the players: only in a game for two, from the
     solved cabin until the key is fused, and never after an ending."""

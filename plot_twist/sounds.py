@@ -25,6 +25,7 @@ EFFECTS = {
     "revived": [(523, 0.06), (784, 0.06), (1047, 0.15)],               # back on their feet
     "ability": [(659, 0.04), (988, 0.04), (1319, 0.04), (1976, 0.12)],  # a character's ability: a quick rising run
     "drop": [(330, 0.04), (196, 0.07)],                                # an item dropped on the floor
+    "thunder": [(110, 0.03), (55, 0.1), (49, 0.12), (0, 0.04), (41, 0.18), (37, 0.3)],  # the bolt that opens the game
     "knocked_out": [(330, 0.15), (262, 0.15), (196, 0.15), (131, 0.4)],  # a player is out of the game
 }
 

@@ -39,6 +39,8 @@ CRAB_TO_DECK = act("enter", "crab_to_deck")
 TO_INFIRMARY = act("enter", "hold_to_infirmary")
 INFIRMARY_TO_HOLD = act("enter", "infirmary_to_hold")
 CABIN_TO_GALLEY = act("enter", "cabin_to_galley")
+CABIN_TO_EAST = act("enter", "cabin_to_east_room")
+EAST_TO_CABIN = act("enter", "east_room_to_cabin")
 GALLEY_TO_CABIN = act("enter", "galley_to_cabin")
 CABIN_TO_HELM = act("enter", "cabin_to_helm")
 HELM_TO_CABIN = act("enter", "helm_to_cabin")
@@ -86,20 +88,20 @@ GATHER_TINCTURES = [TO_INFIRMARY, TAKE_GREEN, TO_CORRIDOR, TAKE_BLUE, CORRIDOR_T
 # The remedy: the tinctures poured into the cauldron in the right order, then the doctor drinks it.
 RECIPE = [act("use_item", "cauldron", item=tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
 CALM_THE_DOCTOR = GATHER_TINCTURES + [TO_INFIRMARY] + RECIPE + [TAKE_POTION, GIVE_TO_DOCTOR, INFIRMARY_TO_HOLD]
-# From the deck to the galley and back: the anvil is there once the doctor is at peace.
-FUSE_IN_THE_GALLEY = [TO_CABIN, CABIN_TO_GALLEY, FUSE, GALLEY_TO_CABIN, CABIN_TO_DECK]
+# From the deck to the empty room and back: the anvil is there once the doctor is at peace.
+FUSE_AT_THE_ANVIL = [TO_CABIN, CABIN_TO_EAST, FUSE, EAST_TO_CABIN, CABIN_TO_DECK]
 # Wand, cabin puzzle, the first half of the key, and back on the deck.
 GET_KEY = [TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK]
 # Then the hold, no longer barred: the tiles, the second half, the remedy for the
-# doctor, back on the deck, and the two halves fused on the anvil in the galley.
+# doctor, back on the deck, and the two halves fused on the anvil in the empty room.
 GET_FUSED_KEY = (GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR
-                 + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
+                 + [HOLD_TO_DECK] + FUSE_AT_THE_ANVIL)
 # The shortest way to each ending: the barrel of the hold is optional.
 CRAB_ENDING = GET_FUSED_KEY + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
 ANGEL_ENDING = GET_FUSED_KEY + [OPEN_ANGEL, TO_ANGEL, GIVE_TO_ANGEL]
 # The long way: read the clue on the barrel too.
 CLUE_THEN_CRAB = (GET_KEY + [TO_HOLD, WAND_ON_BARREL] + SOLVE_TILES
-                  + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY
+                  + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_AT_THE_ANVIL
                   + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB])
 # Open both doors, go in one, come back and wander around without ending the game.
 CHOOSE_AND_WANDER = GET_FUSED_KEY + [OPEN_CRAB, OPEN_ANGEL, TO_CRAB, CRAB_TO_DECK, TO_CABIN]
@@ -456,7 +458,7 @@ def test_pt03_the_halves_do_not_open_the_doors(steps, half):
 def test_pt03_the_anvil_fuses_the_two_halves():
     """Either half on the anvil, with both in hand: the halves become the fused key, in the first half's place."""
     with_both = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR
-                     + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY])
+                     + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_EAST])
     assert with_both["inventory"] == ["wand", "key", "second_key"]
     for half in ("key", "second_key"):
         fused, outcome = engine.use_item(with_both, half, "anvil")
@@ -466,13 +468,13 @@ def test_pt03_the_anvil_fuses_the_two_halves():
     _, outcome = engine.use_item(with_both, "wand", "anvil")
     assert outcome["event"] == "nothing_happens"
     halves_first = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TAKE_WAND, TO_HOLD] + SOLVE_TILES
-                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
+                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_AT_THE_ANVIL)
     assert halves_first["inventory"] == ["fused_key", "wand"]  # the order things were found in is kept
 
 
 def test_pt03_one_half_alone_cannot_be_fused():
     """The anvil needs both halves: the refusal says the other one is missing, and nothing changes."""
-    state = play(GET_KEY + [TO_HOLD] + CALM_THE_DOCTOR + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY])
+    state = play(GET_KEY + [TO_HOLD] + CALM_THE_DOCTOR + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_EAST])
     after, outcome = engine.use_item(state, "key", "anvil")
     assert outcome["event"] == "missing_item"
     assert outcome["text"] == story.MESSAGES["missing_item"]
@@ -494,7 +496,7 @@ def test_pt03_a_lock_needing_several_items_wants_them_all(monkeypatch):
     """The engine's rule for any lock: every item it requires must be carried, or it explains what is missing."""
     monkeypatch.setitem(story.DOORS["deck_to_crab"], "requires", ["fused_key", "wand"])
     without_wand = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TO_HOLD] + SOLVE_TILES
-                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
+                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_AT_THE_ANVIL)
     after, outcome = engine.use_item(without_wand, "fused_key", "deck_to_crab")
     assert outcome["event"] == "missing_item"
     assert after == without_wand
@@ -1564,16 +1566,16 @@ def test_heart_waits_in_the_mine():
     assert reopen(after) == after
 
 
-def test_doctor_drinks_the_remedy_vanishes_and_the_anvil_appears_in_the_galley():
+def test_doctor_drinks_the_remedy_vanishes_and_the_anvil_appears_in_the_empty_room():
     before = play(WITH_THE_TINCTURES + RECIPE + [TAKE_POTION])
-    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY], before)
+    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_EAST], before)
     assert "anvil" not in [thing["id"] for thing in engine.things_here(in_galley)]
     after, outcome = engine.use_item(before, "potion", "doctor")
     assert outcome["event"] == "flag_set" and after["flags"]["doctor_at_peace"]
     here = [thing["id"] for thing in engine.things_here(after)]
     assert "doctor" not in here and "potion" not in here  # gone, and the cauldron gives no second remedy
     assert "potion" not in after["inventory"]  # drunk
-    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY], after)
+    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_EAST], after)
     assert "anvil" in [thing["id"] for thing in engine.things_here(in_galley)]
 
 
@@ -1748,8 +1750,8 @@ def test_giving_an_item_to_the_partner():
 def test_the_halves_fuse_only_in_the_hands_of_one_player():
     state = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK],
                  engine.new_game(two_players=True))
-    state = as_player(state, [TO_CABIN, CABIN_TO_GALLEY], 1)
-    state["flags"]["partner_room"] = "galley"
+    state = as_player(state, [TO_CABIN, CABIN_TO_EAST], 1)
+    state["flags"]["partner_room"] = "east_room"
     state, _ = engine.perform(state, act("give", "partner", item="second_key"), 1)
     _, outcome = engine.perform(state, FUSE, 2)
     assert outcome["event"] == "missing_item"  # player 2 has only one half
@@ -1788,11 +1790,11 @@ def test_the_crab_wakes_with_the_solved_cabin_and_sleeps_once_the_key_is_fused()
     assert not engine.crab_awake(two())
     assert not engine.crab_awake(two([TAKE_WAND, TO_CABIN]))
     assert engine.crab_awake(two([TAKE_WAND, TO_CABIN] + SOLVE_CABIN))  # the first puzzle is solved
-    halves = two(GET_FUSED_KEY[:-len(FUSE_IN_THE_GALLEY)] + [TO_CABIN, CABIN_TO_GALLEY])
+    halves = two(GET_FUSED_KEY[:-len(FUSE_AT_THE_ANVIL)] + [TO_CABIN, CABIN_TO_EAST])
     assert engine.crab_awake(halves) and not engine.key_fused(halves)
     fused = play([FUSE], halves)
     assert engine.key_fused(fused) and not engine.crab_awake(fused)
-    opened = play([GALLEY_TO_CABIN, CABIN_TO_DECK, OPEN_CRAB], fused)
+    opened = play([EAST_TO_CABIN, CABIN_TO_DECK, OPEN_CRAB], fused)
     assert engine.key_fused(opened) and not engine.crab_awake(opened)
 
 

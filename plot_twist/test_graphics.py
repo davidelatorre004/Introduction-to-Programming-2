@@ -56,8 +56,8 @@ TO_THE_CRAB_DOOR = ([("pick_up", "wand", None), ("enter", "deck_to_cabin", None)
                        ("enter", "deck_to_hold", None), ("enter", "hold_to_infirmary", None)]
                     + [("use_item", "cauldron", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
                     + [("pick_up", "potion", None), ("use_item", "doctor", "potion"), ("enter", "infirmary_to_hold", None),
-                       ("enter", "hold_to_deck", None), ("enter", "deck_to_cabin", None), ("enter", "cabin_to_galley", None),
-                       ("use_item", "anvil", "key"), ("enter", "galley_to_cabin", None), ("enter", "cabin_to_deck", None)])
+                       ("enter", "hold_to_deck", None), ("enter", "deck_to_cabin", None), ("enter", "cabin_to_east_room", None),
+                       ("use_item", "anvil", "key"), ("enter", "east_room_to_cabin", None), ("enter", "cabin_to_deck", None)])
 CRAB_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_crab", "fused_key"), ("enter", "deck_to_crab", None),
                                   ("use_item", "crab", "wand")]
 ANGEL_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_angel", "fused_key"), ("enter", "deck_to_angel", None),
@@ -78,7 +78,7 @@ def test_every_sprite_is_a_proper_picture():
         sharing = [thing for thing, info in story.OBJECTS.items() if info.get("picture") == name]
         if name.startswith("door_") or name == "ship":
             assert size == (2 * main.TILE, main.TILE), name
-        elif name == "decor_crab_pedestal":  # the statue without its crab: drawn in its place
+        elif name == "decor_crab_rubble":  # what is left of the statue: drawn in its place
             assert size == main.thing_rect("deck_statue").size, name
         elif sharing:  # a shared picture is as big as every piece that uses it
             for thing in sharing:

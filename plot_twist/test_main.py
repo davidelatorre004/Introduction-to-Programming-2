@@ -12,6 +12,7 @@ import time
 import pygame
 import pytest
 
+import effects
 import engine
 import main
 import net
@@ -53,9 +54,9 @@ DOCTOR_AT_PEACE = (TINCTURES_FOUND
                    + [act("use_item", "cauldron", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
                    + [act("pick_up", "potion"), act("use_item", "doctor", "potion")])  # in the infirmary
 KEY_FUSED = DOCTOR_AT_PEACE + [act("enter", "infirmary_to_hold"), act("enter", "hold_to_deck"),
-                               act("enter", "deck_to_cabin"), act("enter", "cabin_to_galley"),
+                               act("enter", "deck_to_cabin"), act("enter", "cabin_to_east_room"),
                                act("use_item", "anvil", "second_key"),
-                               act("enter", "galley_to_cabin"), act("enter", "cabin_to_deck")]  # back on the deck
+                               act("enter", "east_room_to_cabin"), act("enter", "cabin_to_deck")]  # back on the deck
 CRAB_DOOR_OPEN = KEY_FUSED + [act("use_item", "deck_to_crab", "fused_key")]
 TO_THE_CRAB_ENDING = CRAB_DOOR_OPEN + [act("enter", "deck_to_crab"), act("use_item", "crab", "wand")]
 TO_THE_ANGEL_ENDING = KEY_FUSED + [act("use_item", "deck_to_angel", "fused_key"), act("enter", "deck_to_angel"),
@@ -822,13 +823,13 @@ def test_a_whole_game_on_screen(app, door, character, ending):
     walk_into(app, "infirmary_to_hold")
     walk_into(app, "hold_to_deck")
     walk_into(app, "deck_to_cabin")
-    walk_into(app, "cabin_to_galley")
+    walk_into(app, "cabin_to_east_room")
     stand_next_to(app, "anvil")
     press(app, pygame.K_e)
     choose_in_menu(app, "use_item", "key")  # either half fuses both
     assert dialog_text(app) == story.OBJECTS["anvil"]["fuse_text"]
     read_all(app)
-    walk_into(app, "galley_to_cabin")
+    walk_into(app, "east_room_to_cabin")
     walk_into(app, "cabin_to_deck")
     p1(app)["pos"] = main.spawn_in_front_of(door)
     press(app, pygame.K_e)
@@ -1833,7 +1834,7 @@ def test_the_crab_wakes_on_the_deck_when_the_cabin_is_solved(app, heard):
     assert crab["room"] == "deck" and crab["wait"] > 0
     assert crab["pos"] == main.new_crab()["pos"] and main.is_free_floor(main.room_state(app["state"], "deck"), crab["pos"])
     assert app["banner"] == story.MESSAGES["crab_wakes"] and "crab_wake" in heard
-    assert sprites.image("decor_crab_pedestal") is not None  # the statue on the deck is empty now
+    assert engine.statue_broken(app["state"]) and sprites.image("decor_crab_rubble") is not None
     main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
 
 
@@ -2370,3 +2371,121 @@ def test_the_heart_brings_the_player_out_back_next_to_the_one_who_took_it(two_co
     assert distance(mine(guest)["pos"], mine(host)["pos"]) <= main.PLAYER_SIZE + 4  # right next to the host
     assert main.is_free_floor(main.view(guest), mine(guest)["pos"])
     assert main.view_position(guest) == mine(guest)["pos"]  # their own screen again
+
+
+# --- The opening lightning, the anvil in the empty room, the broken statue ---------------------
+
+
+def test_a_bolt_of_lightning_opens_a_new_game_then_the_player_can_move(app, heard, monkeypatch):
+    monkeypatch.setattr(main, "LIGHTNING_FRAMES", main.FPS)  # the tests play without it: here it is back
+    press(app, pygame.K_RETURN, pygame.K_RETURN, pygame.K_RETURN)
+    assert app["lightning"] == 0 and app["lightning_due"]  # not while the opening text is on screen
+    main.update(app, 1, 0)
+    assert "thunder" not in heard
+    read_all(app)
+    start = p1(app)["pos"]
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    quiet = pygame.Surface((main.WIDTH, main.HEIGHT))
+    app["fade"] = 0  # the room is out of the dark already
+    main.draw(app, quiet)
+    changed = 0
+    for _ in range(main.FPS):
+        main.update(app, 1, 0)
+        main.draw(app, screen)
+        changed += screen.get_at(main.LIGHTNING_BOLT[3]) != quiet.get_at(main.LIGHTNING_BOLT[3])
+    assert heard.count("thunder") == 1 and changed > main.FPS // 2  # the screen is torn for a second
+    assert p1(app)["pos"] == start  # nobody moves while it strikes
+    main.update(app, 1, 0)
+    assert p1(app)["pos"][0] > start[0] and app["lightning"] == 0
+    main.draw(app, screen)
+    assert screen.get_at(main.LIGHTNING_BOLT[3]) == quiet.get_at(main.LIGHTNING_BOLT[3])  # as before
+
+
+def test_no_lightning_when_a_game_is_resumed(app, heard, monkeypatch):
+    monkeypatch.setattr(main, "LIGHTNING_FRAMES", main.FPS)
+    start_new_game(app)
+    again = relaunch()
+    press(again, pygame.K_DOWN, pygame.K_RETURN)  # "Resume"
+    main.update(again, 1, 0)
+    assert again["lightning"] == 0 and not again["lightning_due"] and again["players"][0]["moving"]
+
+
+def test_the_bolt_goes_from_the_top_of_the_screen_to_the_bottom():
+    for path in (main.LIGHTNING_BOLT, main.LIGHTNING_BRANCH):
+        assert all(0 <= x < main.WIDTH and 0 <= y <= main.HEIGHT for x, y in path)
+    assert main.LIGHTNING_BOLT[0][1] == 0 and main.LIGHTNING_BOLT[-1][1] == main.HEIGHT
+    assert main.lightning_path((0, 0), (10, 100), seed=5) == main.lightning_path((0, 0), (10, 100), seed=5)
+
+
+def test_the_anvil_appears_in_the_middle_of_the_empty_room_with_red_sparks(app):
+    anvil = story.OBJECTS["anvil"]
+    columns, rows = main.room_size("east_room")
+    assert anvil["room"] == "east_room"
+    assert anvil["pos"] in [(col, row) for col in (columns // 2 - 1, columns // 2) for row in (rows // 2 - 1, rows // 2)]
+    start_new_game(app)
+    to_the_room = [act("enter", door) for door in ("infirmary_to_hold", "hold_to_deck", "deck_to_cabin",
+                                                    "cabin_to_east_room")]
+
+    def red_sparks(actions):
+        playing(app, actions)
+        app["fx"]["particles"].clear()
+        for _ in range(60):
+            main.update(app, 0, 0)
+        near = main.thing_rect("anvil").inflate(40, 60)
+        return [one for one in app["fx"]["particles"] if one["color"] in effects.RED and near.collidepoint(one["x"], one["y"])]
+    assert red_sparks(TINCTURES_FOUND + to_the_room) == []  # no anvil yet
+    assert red_sparks(DOCTOR_AT_PEACE + to_the_room)        # it waits for the key
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+    fused = DOCTOR_AT_PEACE + to_the_room + [act("use_item", "anvil", "second_key")]
+    playing(app, fused)
+    for _ in range(200):
+        main.update(app, 0, 0)  # the sparks of the welding die out
+    app["fx"]["particles"].clear()
+    for _ in range(60):
+        main.update(app, 0, 0)
+    assert [one for one in app["fx"]["particles"] if one["color"] in effects.RED] == []  # its work is done
+
+
+def test_the_statue_lies_in_pieces_once_the_crab_is_out_and_for_good(app):
+    start_new_game(app)
+    playing(app, FIRST_HALF)
+    assert not engine.statue_broken(app["state"])  # alone, the statue stands
+    statue = main.thing_rect("deck_statue")
+    assert sprites.image("decor_crab_rubble").get_size() == statue.size  # the same tiles as the statue
+    two_playing(app, IN_THE_CABIN)
+    whole = pygame.Surface((main.WIDTH, main.HEIGHT))
+    app["state"]["room"] = "deck"
+    app["state"]["flags"]["partner_room"] = "deck"
+    main.place_at_entry(app)
+    main.update(app, 0, 0)  # the effects settle on the deck
+    app["fade"] = 0
+    main.draw(app, whole)
+    app["state"] = play_two(FIRST_HALF)
+    app["fx"]["particles"].clear()
+    main.update(app, 0, 0)  # the crab bursts out: dust and pieces fly
+    assert len([one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS]) >= 30
+    assert statue.collidelist(main.solid_rects(app["state"])) != -1  # still in the way, as before
+    app["fx"]["particles"].clear()
+    app["banner_frames"] = 0
+    broken = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, broken)
+    cam_x, cam_y = main.camera("deck", main.view_position(app))
+    top = (statue.left + 3 - cam_x, statue.top + 5 - cam_y)  # where a claw of the statue was
+    assert whole.get_at(top) != broken.get_at(top)
+    app["state"] = play_two(KEY_FUSED)  # the crab turns to stone and vanishes: the pieces stay
+    main.update(app, 0, 0)
+    assert app["crab"] is None and engine.statue_broken(app["state"])
+
+
+def test_the_crab_vanishes_in_a_puff_of_dust(app):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    main.update(app, 0, 0)
+    where = main.player_rect(app["crab"]["pos"]).center
+    state = play_two(KEY_FUSED)
+    state["room"], state["flags"]["partner_room"] = "deck", "deck"
+    app["state"] = state
+    app["fx"]["particles"].clear()
+    main.update(app, 0, 0)
+    dust = [one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS]
+    assert len(dust) >= 20 and all(abs(one["x"] - where[0]) < 12 and abs(one["y"] - where[1]) < 12 for one in dust)

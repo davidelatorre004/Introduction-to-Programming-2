@@ -2,9 +2,17 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v30](versions/v30.md) - Dropping items, and the heart (2026-11-12)
+## [v31](versions/v31.md) - Lightning, the anvil, the broken statue (2026-11-12)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- A new game opens with a bolt of lightning: once the opening text is read, it tears the screen from top to bottom for a second, with a flash and thunder, and then the game is on. Not when a game is resumed.
+- The anvil now appears in the middle of the empty room east of the captain's cabin, not in the galley. Until the key is fused, red sparks fly around it and a red glow beats on it.
+- When the crab comes alive its statue bursts, with dust and pieces flying, and what is left on the deck is a heap of stones and broken pieces on the cracked base, as solid as the statue was. It stays there for good: when the key is fused the crab turns to stone and vanishes in a puff of dust.
+
+## [v30](versions/v30.md) - Dropping items, and the heart (2026-11-12)
+
+In commit [`3db9ddb`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/3db9ddbfc5a55eab9310df0ffe8b5dd3c1ffa0f7/plot_twist).
 
 - Q drops the item the player got last (picked up, or handed over by the partner) on the floor where they stand, as many times as there are items. Anyone can pick it up again with E. It works alone too.
 - A dropped item remembers its room and tile (a new flag for each item, dropped_<item>). While a key lies on the floor it opens nothing: drop the first half and the hold is barred again until someone picks it up.

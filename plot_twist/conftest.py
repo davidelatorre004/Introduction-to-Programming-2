@@ -2,6 +2,7 @@
 
 import pytest
 
+import main
 import save
 
 
@@ -14,3 +15,12 @@ def save_file(tmp_path, monkeypatch):
     path = tmp_path / "savegame.json"
     monkeypatch.setattr(save, "SAVE_PATH", str(path))
     return path
+
+
+@pytest.fixture(autouse=True)
+def no_opening_lightning(monkeypatch):
+    """The tests play without waiting for the bolt of lightning that opens a new game.
+
+    Its own tests turn it back on.
+    """
+    monkeypatch.setattr(main, "LIGHTNING_FRAMES", 0)

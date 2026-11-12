@@ -18,6 +18,7 @@ app["state"], the engine's state.
 
 import collections
 import math
+import random
 
 import pygame
 
@@ -48,6 +49,8 @@ BANNER_FRAMES = 2 * FPS    # how long the room name stays up after entering a ro
 DIALOG_LINES = 4           # lines of text per page of the text box
 DIALOG_PADDING = 8
 DIALOG_TEXT_WIDTH = WIDTH - 4 * DIALOG_PADDING  # margin and padding on both sides of the box
+LIGHTNING_FRAMES = FPS     # the bolt that tears the screen when a new game starts: one second
+ANVIL_SPARK_EVERY = 2      # frames between two red sparks around the anvil that waits for the key
 FADE_FRAMES = FPS // 4     # how long a room takes to come out of the dark after a door
 WALK_STEP_FRAMES = 8       # frames per step of the walking animation
 WAVE_FRAMES = FPS // 6     # frames between two pictures of the stormy sea (four of them)
@@ -652,6 +655,8 @@ def new_app(fonts):
         "crab": None,            # the crab of a game for two while it is awake (see new_crab), or None
         "downed": {},            # the players the crab has knocked down: number -> frames left before they are out
         "revive": {},            # the help given to each of them: number -> frames E has been held so far
+        "lightning": 0,          # frames left of the bolt of lightning that opens a new game
+        "lightning_due": False,  # a new game has just started: the bolt strikes once the opening text is read
         "hidden": {},            # the players the crab cannot see (the ghost's ability): number -> frames left
         "dash_trail": None,      # the streak of Flash's dash, while it fades (see dash)
         "act_held": False,       # E is held down on this keyboard (to help a player up)
@@ -844,6 +849,8 @@ def begin_game(app, state, opening_text):
     place_at_entry(app)
     reset_crab(app)
     app["fade"] = FADE_FRAMES
+    app["lightning"] = 0
+    app["lightning_due"] = bool(opening_text)  # a new game, not one that is resumed
     if opening_text:
         say(app, opening_text)
     else:
@@ -1363,6 +1370,14 @@ def update(app, dx, dy, act=False):
     if engine.is_over(app["state"]):
         set_scene(app, "ending")  # the last text has been read: on to the ending
         return
+    if app["lightning_due"]:
+        app["lightning_due"] = False  # the opening text is read: a bolt tears the screen, then the game is on
+        app["lightning"] = LIGHTNING_FRAMES
+        if LIGHTNING_FRAMES > 0:
+            sounds.play("thunder")
+    if app["lightning"] > 0:
+        app["lightning"] -= 1
+        return  # nobody moves while it strikes
     if not can_move(app):
         return  # down, or out of the game
     move_player(app, local_player(app), dx, dy)
@@ -1423,6 +1438,9 @@ HIDDEN_FRAMES = 5 * FPS            # how long the ghost stays out of the crab's 
 DASH_TILES = 5                     # how far Flash dashes
 DASH_STEP = 4                      # pixels at a time, so the dash stops at walls and finds doors
 DASH_TRAIL_FRAMES = 12             # how long the streak of the dash stays on screen
+
+
+RUBBLE_COLORS = [(232, 226, 210), (190, 184, 168), (96, 96, 112)]  # the marble of the statue, in pieces
 
 
 def new_crab():
@@ -1728,6 +1746,12 @@ def crab_news(app):
     elif awake != app["seen"]["awake"] and not engine.is_over(state):
         if awake:
             sounds.play("crab_wake")
+            if view(app)["room"] == story.OBJECTS["deck_statue"]["room"]:  # the statue bursts: dust and pieces fly
+                x, y = thing_rect("deck_statue").center
+                effects.spawn(app["fx"], x, y, 40, RUBBLE_COLORS, speed=2.6, life=45, gravity=0.12, up=1.6)
+        elif app["seen"]["crab_at"] is not None and app["seen"]["crab_at"][0] == view(app)["room"]:
+            x, y = player_rect(app["seen"]["crab_at"][1]).center  # the crab turns to stone, and to dust
+            effects.spawn(app["fx"], x, y, 30, RUBBLE_COLORS, speed=1.2, life=40, up=0.8)
         show_banner(app, story.MESSAGES["crab_wakes" if awake else "crab_sleeps"])
     downed = set(app["downed"])
     out = state["flags"]["out_player"]
@@ -1748,7 +1772,9 @@ def crab_news(app):
         sounds.play("knocked_out")
         if out != me:
             show_banner(app, story.MESSAGES["partner_eliminated"])
-    app["seen"] = {"awake": awake, "downed": downed, "out": out, "caught": caught}
+    crab = app["crab"]
+    app["seen"] = {"awake": awake, "downed": downed, "out": out, "caught": caught,
+                   "crab_at": None if crab is None else (crab["room"], crab["pos"])}
 
 
 def reset_crab(app):
@@ -1762,7 +1788,7 @@ def reset_crab(app):
     state = app["state"]
     app["seen"] = {"awake": state is not None and engine.crab_awake(state), "downed": set(),
                    "out": 0 if state is None else state["flags"]["out_player"],
-                   "caught": state is not None and state["ending"] == "caught"}
+                   "caught": state is not None and state["ending"] == "caught", "crab_at": None}
 
 
 def crab_info(app):
@@ -2298,6 +2324,10 @@ def update_effects(app):
                 if rng.random() < 1 / effects.GENERATOR_SPARK_EVERY:
                     effects.spawn(fx, rect.left + 14, rect.top + 1, rng.randint(1, 2), effects.SPARK, speed=0.8,
                                   life=18, gravity=0.06, up=0.8, spread=math.pi / 2, angle=-math.pi / 2)
+            elif thing["kind"] == "anvil" and effects.FX["anvil"] and not engine.key_fused(state):
+                if frame % ANVIL_SPARK_EVERY == 0:  # red sparks: this is where the key is made whole
+                    effects.spawn(fx, rng.uniform(rect.left - 8, rect.right + 8), rng.uniform(rect.top - 4, rect.bottom + 4),
+                                  1, effects.RED, speed=0.7, life=40, up=0.6)
             elif thing["kind"] == "cauldron" and effects.FX["cauldron"]:
                 flags = state["flags"]
                 if (flags["potion_step"] or flags["potion_solved"]) and frame % effects.CAULDRON_BUBBLE_EVERY == 0:
@@ -2902,6 +2932,11 @@ def draw_room(app, screen):
         if thing["id"] not in drawn:
             draw_standing(app, screen, thing)
     # The effects on top: barriers dissolving, the key welding, particles, dust, and the light.
+    for thing in things:
+        if thing["kind"] == "anvil" and effects.FX["anvil"] and not engine.key_fused(state):
+            # A red glow that beats around the anvil while it waits for the two halves.
+            effects.glow(screen, thing_rect(thing["id"]).center, 22, (120, 24, 16),
+                         effects.pulse(app["frame"], 0.1, 0.45, 1.0))
     draw_fading_barriers(app, screen)
     draw_fusing_key(app, screen)
     effects.draw_clue_glow(screen, app["fx"])
@@ -2926,10 +2961,10 @@ def draw_standing(app, screen, thing):
         draw_generator(app, screen, thing)
     elif story.OBJECTS.get(thing["id"], {}).get("picture") == "decor_lantern":
         draw_lantern(app, screen, thing)
-    elif thing["id"] == "deck_statue" and engine.crab_awake(app["state"]):
-        pedestal = sprites.image("decor_crab_pedestal")  # the crab has left its statue
-        if pedestal is not None:
-            screen.blit(pedestal, thing_rect("deck_statue"))
+    elif thing["id"] == "deck_statue" and engine.statue_broken(app["state"]):
+        rubble = sprites.image("decor_crab_rubble")  # the crab broke out of it: stones and pieces, for good
+        if rubble is not None:
+            screen.blit(rubble, thing_rect("deck_statue"))
     else:
         draw_thing(screen, thing)
 
@@ -3141,6 +3176,44 @@ def view_position(app):
     return app["players"][eye_number(app) - 1]["pos"]
 
 
+def lightning_path(start, end, seed, steps=14, sway=14):
+    """The points of a jagged bolt from `start` to `end`: always the same for the same seed."""
+    rng = random.Random(seed)
+    points = [start]
+    for step in range(1, steps):
+        along = step / steps
+        x = start[0] + (end[0] - start[0]) * along + rng.uniform(-sway, sway)
+        y = start[1] + (end[1] - start[1]) * along
+        points.append((round(x), round(y)))
+    points.append(end)
+    return points
+
+
+LIGHTNING_BOLT = lightning_path((WIDTH * 5 // 8, 0), (WIDTH * 3 // 8, HEIGHT), seed=7)
+LIGHTNING_BRANCH = lightning_path(LIGHTNING_BOLT[6], (WIDTH - 20, HEIGHT * 3 // 4), seed=3, steps=6, sway=8)
+
+
+def draw_lightning(app, screen):
+    """The bolt that tears the screen when a new game starts: a white flash, the bolt from top to
+    bottom with a branch, a second flicker, and the dark in between."""
+    left = app["lightning"]
+    if left <= 0:
+        return
+    age = LIGHTNING_FRAMES - left
+    whole = screen.get_rect()
+    shade(screen, whole, 150)  # the storm darkens everything
+    struck = age < 22 or 30 <= age < 38  # the bolt, then a second, shorter flicker
+    if struck and (age // 2) % 3 != 2:
+        for path in (LIGHTNING_BOLT, LIGHTNING_BRANCH):
+            pygame.draw.lines(screen, sprites.PALETTE["f"], False, path, 5)
+            pygame.draw.lines(screen, COLORS["text"], False, path, 2)
+    for start in (0, 30):
+        if start <= age < start + 5:  # the flash: white, fading fast
+            veil = pygame.Surface(whole.size, pygame.SRCALPHA)
+            veil.fill((255, 255, 255, 230 - 45 * (age - start)))
+            screen.blit(veil, (0, 0))
+
+
 def draw_play_screen(app, screen):
     """The room, seen through the camera, then the bar on top.
 
@@ -3163,6 +3236,7 @@ def draw_play_screen(app, screen):
     draw_hud(app, screen)
     draw_ability_hint(app, screen)
     draw_crab_overlay(app, screen)
+    draw_lightning(app, screen)
 
 
 def draw_actions(app, screen):

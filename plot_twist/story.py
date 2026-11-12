@@ -80,7 +80,7 @@ FLAGS = {
     # in the right order; then the remedy is ready (and the cauldron empty again).
     "potion_step": 0,
     "potion_solved": False,
-    # The doctor drank the remedy: his ghost is gone, and the anvil has appeared in the galley.
+    # The doctor drank the remedy: his ghost is gone, and the anvil has appeared in the empty room.
     "doctor_at_peace": False,
     # The rooms the player has been in, for the map in the corner of the screen.
     "visited_deck": True,
@@ -704,12 +704,13 @@ OBJECTS = {
         "done_text": None,
         "reactions": {},
     },
-    # The doctor's gift: it appears in the galley once he is at peace.
+    # The doctor's gift: it appears in the middle of the empty room, east of the
+    # cabin, once he is at peace. Red sparks fly around it until the key is fused.
     "anvil": {
         "kind": "anvil",
         "name": "Anvil",
-        "room": "galley",
-        "pos": (10, 8),
+        "room": "east_room",
+        "pos": (7, 5),
         "appears_if": "doctor_at_peace",
         "look_text": (
             "A black anvil, still warm, with a tag tied to it: \"For the one who finished my remedy.\" "
@@ -787,8 +788,8 @@ OBJECTS = {
                 "consumes": True,
                 "text": (
                     "The doctor drinks. The fever leaves his face, and for the first time he smiles. "
-                    "\"Thank you. I have left you a gift, in the galley.\" "
-                    "He fades like breath on a window. Far away, towards the galley, something heavy lands with a clang."
+                    "\"Thank you. I have left you a gift, in the empty room beside the captain's cabin.\" "
+                    "He fades like breath on a window. Far away, above deck, something heavy lands with a clang."
                 ),
             },
         },

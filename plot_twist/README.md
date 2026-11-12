@@ -97,13 +97,13 @@ Qualche aiuto:
 
 L'abilità con Spazio funziona una volta sola per partita: in basso a sinistra c'è scritto finché è disponibile. Se la usi mentre il granchio è ancora una statua, è sprecata.
 
-**Il granchio (solo in due).** Appena risolvete la cabina, la statua del granchio sul ponte prende vita e vi dà la caccia.
+**Il granchio (solo in due).** Appena risolvete la cabina, la statua del granchio sul ponte va in pezzi e ne esce il granchio, che vi dà la caccia. Le macerie restano lì fino alla fine.
 - Insegue il giocatore più vicino ed è più lento di voi. Se nella sua stanza non c'è nessuno, vi segue attraverso le porte aperte.
 - Se vi tocca, finite a terra e non potete muovervi. Il compagno ha un minuto per rialzarvi: deve stare vicino a voi e tenere premuto **E** per 4 secondi (la barra verde mostra quanto manca).
 - Se nessuno vi rialza in tempo, siete fuori fino alla fine della partita, e i vostri oggetti passano al compagno. Da fuori guardate il compagno giocare.
 - Se il granchio vi prende tutti e due, anche quando uno è già fuori, la partita è persa: è il terzo finale, "Caught by the crab".
 - Una strategia: uno tiene occupato il granchio, l'altro risolve gli enigmi.
-- Quando fondete le due metà della chiave, il granchio torna di pietra.
+- Quando fondete le due metà della chiave, il granchio torna di pietra e svanisce in una nuvola di polvere.
 
 ## 5. Lo scopo (senza spoiler)
 
@@ -164,7 +164,7 @@ uv run pytest
    - la **rossa** in cambusa, a sinistra della cabina;
    - la **oro** in timoneria, dalla porta in alto della cabina.
 5. Torna in infermeria. Vicino al calderone premi E e versa, in quest'ordine: **verde, rossa, oro, blu**. Se sbagli il calderone si svuota, ma le fialette restano a te: ricomincia dalla verde.
-6. Raccogli il rimedio dal calderone e dallo al dottore ("Give: Remedy"). In cambusa compare l'incudine: vicino all'incudine premi E e scegli "Use: Central key" (o la seconda). Le due metà diventano la "Fused key".
+6. Raccogli il rimedio dal calderone e dallo al dottore ("Give: Remedy"). L'incudine compare al centro della stanza vuota a destra della cabina, tra scintille rosse: vicino all'incudine premi E e scegli "Use: Central key" (o la seconda). Le due metà diventano la "Fused key".
 7. Torna sul ponte. Vicino alla porta a destra, quella con la chela, premi E e scegli "Use: Fused key". Entra.
 8. Vicino al granchio premi E, scegli "Give: Magic wand" e poi "Yes": **Ending 1 of 2 — Everyone saved**.
 

@@ -1615,8 +1615,69 @@ SPRITES["wall_corridor_end"] = SPRITES["wall_hold"]
 _images = {}
 
 
-# The empty pedestal of the crab statue, while the crab is awake: the statue's base only.
-SPRITES["decor_crab_pedestal"] = ["." * 32] * 27 + SPRITES["decor_crab_statue"][27:]
+# What is left of the crab statue once the crab has broken out of it: the cracked base,
+# and on it and around it a heap of stones and pieces of the statue (a claw, a leg).
+# It covers the same 2 x 2 tiles as the statue. The pieces are small pictures pasted
+# onto an empty one: (picture, column, row) of their top-left corner.
+RUBBLE_PIECES = {
+    "claw": [  # a claw of the statue, fallen on its side
+        "...kkkk....",
+        "..kMMMMkk..",
+        ".kMmmkkmMk.",
+        "kMmmk..kmMk",
+        "kMmmmkkkMMk",
+        ".kMMmmmmMk.",
+        "..kkMMMMk..",
+        "....kkkk...",
+    ],
+    "boulder": [
+        "..kkkkk..",
+        ".kmmmmMk.",
+        "kmmmmMMMk",
+        "kmmMMMMdk",
+        "kMMMMdddk",
+        ".kkkkkkk.",
+    ],
+    "stone": [
+        ".kkkk.",
+        "kmmMMk",
+        "kMMddk",
+        ".kkkk.",
+    ],
+    "pebble": [
+        ".kk.",
+        "kmMk",
+        ".kk.",
+    ],
+    "leg": [  # a leg of the statue, snapped off
+        "kk......",
+        "kMkk....",
+        ".kMMkk..",
+        "..kkMMkk",
+        "....kkMk",
+        "......kk",
+    ],
+}
+RUBBLE_LAYOUT = [("leg", 1, 9), ("boulder", 11, 7), ("claw", 20, 6), ("stone", 4, 14), ("claw", 1, 16),
+                 ("boulder", 9, 13), ("stone", 22, 15), ("boulder", 17, 18), ("stone", 12, 20), ("leg", 23, 20),
+                 ("pebble", 8, 22), ("stone", 2, 23), ("pebble", 27, 13), ("pebble", 16, 11), ("boulder", 6, 22),
+                 ("stone", 25, 24), ("pebble", 15, 25), ("pebble", 1, 21)]
+
+
+def _rubble():
+    """The picture of the broken statue: the base of the statue, cracked, with the pieces pasted on."""
+    rows = [list("." * 32) for _ in range(27)] + [list(row) for row in SPRITES["decor_crab_statue"][27:]]
+    for column, row in ((9, 27), (10, 28), (10, 29), (21, 28), (22, 29), (22, 27)):  # two cracks in the base
+        rows[row][column] = "k"
+    for name, left, top in RUBBLE_LAYOUT:
+        for dy, line in enumerate(RUBBLE_PIECES[name]):
+            for dx, letter in enumerate(line):
+                if letter != ".":
+                    rows[top + dy][left + dx] = letter
+    return ["".join(row) for row in rows]
+
+
+SPRITES["decor_crab_rubble"] = _rubble()
 
 
 def image(name, turns=0, flip=False):
