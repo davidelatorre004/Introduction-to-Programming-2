@@ -1861,3 +1861,59 @@ def test_the_crab_cannot_end_a_game_while_it_sleeps():
     for state in (two([TAKE_WAND]), play(GET_KEY), two(GET_FUSED_KEY)):
         same, outcome = engine.crab_catches_everyone(state)
         assert not outcome["ok"] and same is state
+
+
+# --- The abilities of the characters ----------------------------------------------------------
+
+
+ABILITY = act("ability", None)
+
+
+def two_as(character, partner, steps=()):
+    state = engine.choose_partner_character(engine.new_game(character, two_players=True), partner)[0]
+    return play(steps, state)
+
+
+def test_an_ability_works_once_in_a_game_for_two_and_is_remembered():
+    state = two_as("wizard", "flash")
+    assert engine.can_use_ability(state, 1) and engine.can_use_ability(state, 2)
+    before = copy.deepcopy(state)
+    used, outcome = engine.perform(state, ABILITY, 2)
+    assert state == before
+    assert outcome == {"ok": True, "event": "ability", "text": story.CHARACTERS["flash"]["power"]["text"]}
+    assert not engine.can_use_ability(used, 2) and engine.can_use_ability(used, 1)  # each their own
+    assert reopen(used) == used  # used up for good, also after reopening the game
+    again, outcome = engine.perform(used, ABILITY, 2)
+    assert not outcome["ok"] and outcome["event"] == "ability_used" and again is used
+    assert engine.perform(used, ABILITY, 1)[1]["ok"]
+
+
+def test_alone_there_are_no_abilities():
+    for character in story.CHARACTERS:
+        state = engine.new_game(character)
+        assert not engine.can_use_ability(state)
+        same, outcome = engine.perform(state, ABILITY)
+        assert not outcome["ok"] and same is state and outcome["text"] == story.MESSAGES["abilities_for_two"]
+
+
+def test_the_nurse_has_nothing_to_use_her_ability_is_always_on():
+    state = two_as("nurse", "ghost")
+    assert story.CHARACTERS["nurse"]["power"] is None
+    assert not engine.can_use_ability(state, 1)
+    assert not engine.perform(state, ABILITY, 1)[1]["ok"]
+    assert engine.can_use_ability(state, 2)
+
+
+def test_no_ability_once_out_of_the_game_or_after_an_ending():
+    out = engine.knock_out(two_as("wizard", "ghost"), 2)[0]
+    assert not engine.can_use_ability(out, 2) and engine.can_use_ability(out, 1)
+    over = engine.crab_catches_everyone(two_as("wizard", "ghost", GET_KEY))[0]
+    assert not engine.can_use_ability(over, 1)
+    assert not engine.perform(over, ABILITY, 1)[1]["ok"]
+
+
+def test_every_character_says_what_its_ability_does():
+    for character, info in story.CHARACTERS.items():
+        assert info["ability"], character
+        if info["power"] is not None:
+            assert info["power"]["label"] and info["power"]["text"], character

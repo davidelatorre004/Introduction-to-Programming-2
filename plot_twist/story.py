@@ -10,15 +10,22 @@ START_ROOM = "deck"
 # The characters the player can choose from when a new game starts, in the order
 # the choice shows them. They look the same, except for the colour of the shirt:
 # "sprite" is the start of the names of their pictures in sprites.py.
+# "ability" is what the choice screen says. "power" is the ability used with Space,
+# once in a game for two ("label" names it in the corner of the screen, "text" is
+# what the banner says when it is used); None for an ability that is always on.
 CHARACTERS = {
     "wizard": {"sprite": "wizard", "name": "Wizard",
-               "ability": "Spell: the crab stands stunned for 5 seconds."},
+               "ability": "Spell: the crab stands stunned for 5 seconds.",
+               "power": {"label": "Spell", "text": "A spell! The crab is stunned"}},
     "nurse": {"sprite": "nurse", "name": "Nurse",
-              "ability": "Always: helps a player up in 1 second."},
+              "ability": "Always: helps a player up in 1 second.",
+              "power": None},
     "ghost": {"sprite": "ghost", "name": "Ghost",
-              "ability": "Vanish: the crab cannot see you for 5 seconds."},
+              "ability": "Vanish: the crab cannot see you for 5 seconds.",
+              "power": {"label": "Vanish", "text": "You vanish: the crab cannot see you"}},
     "flash": {"sprite": "flash", "name": "Flash",
-              "ability": "Dash: a lightning sprint of 5 tiles, through doors too."},
+              "ability": "Dash: a lightning sprint of 5 tiles, through doors too.",
+              "power": {"label": "Dash", "text": "A lightning dash!"}},
 }
 
 # What the game remembers about the player's progress and choices, with the
@@ -28,6 +35,9 @@ FLAGS = {
     "character": "wizard",
     # In a game for two, the character player 2 chose: never the same as player 1's.
     "partner_character": "nurse",
+    # In a game for two, each player's ability (Space) works once: True once it is used.
+    "ability_used_1": False,
+    "ability_used_2": False,
     # A game for two players: player 2 is the other character.
     "two_players": False,
     # In a game for two, the room player 2 is in ("room" in the state is player 1's).
@@ -1708,6 +1718,10 @@ MESSAGES = {
     "choose_character_p2": "Player 2: choose",
     "character_taken": "Taken by player 1",
     "abilities_for_two": "Abilities only work in a game for two.",
+    "ability_used": "You have already used your ability.",
+    "hint_ability": "Space: {label}",
+    "hint_nurse": "Nurse: quick help",
+    "ability_wasted": "Nothing happens: the crab is still a statue",
     "lobby_choosing": "Player 2 is choosing a character",
     # A game for two, on two computers on the same network: one hosts, the other joins.
     "menu_join_game": "Join game",

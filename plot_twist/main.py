@@ -639,6 +639,8 @@ def new_app(fonts):
         "crab": None,            # the crab of a game for two while it is awake (see new_crab), or None
         "downed": {},            # the players the crab has knocked down: number -> frames left before they are out
         "revive": {},            # the help given to each of them: number -> frames E has been held so far
+        "hidden": {},            # the players the crab cannot see (the ghost's ability): number -> frames left
+        "dash_trail": None,      # the streak of Flash's dash, while it fades (see dash)
         "act_held": False,       # E is held down on this keyboard (to help a player up)
         "partner_reviving": False,  # E is held down on the other computer, as it said
         "seen": {},              # what this computer has already told about the crab (see crab_news)
@@ -1247,6 +1249,8 @@ def handle_play_key(app, key):
     if key in keys["act"]:
         if can_move(app) and downed_near(app, player) is None:  # next to a player down, E is held to help
             interact(app, player)
+    elif key == pygame.K_SPACE:
+        use_ability(app)
     elif key in keys["inventory"]:
         app["inventory_scroll"] = 0  # the list of items always opens at the top
         app["inventory_player"] = my_number(app)
@@ -1305,6 +1309,10 @@ def update(app, dx, dy, act=False):
     if is_host(app):
         update_crab(app)
     crab_news(app)
+    if app["dash_trail"] is not None:
+        app["dash_trail"]["frames"] -= 1
+        if app["dash_trail"]["frames"] <= 0:
+            app["dash_trail"] = None
     update_effects(app)
     for player in app["players"]:
         if player is local_player(app):
@@ -1373,7 +1381,13 @@ CRAB_TRANSIT_FRAMES = FPS          # between two rooms, out of sight
 CRAB_ARRIVE_FRAMES = FPS // 2      # still for a moment after coming through a door
 CRAB_CATCH_FRAMES = 2 * FPS        # still for a moment after catching someone
 DOWN_FRAMES = 60 * FPS             # how long a player can stay down before they are out
-REVIVE_FRAMES = 5 * FPS            # how long E must be held next to a player down to help them up
+REVIVE_FRAMES = 4 * FPS            # how long E must be held next to a player down to help them up
+NURSE_REVIVE_FRAMES = FPS          # ...and how long when the nurse helps: her ability, always on
+STUN_FRAMES = 5 * FPS              # how long the wizard's spell keeps the crab still
+HIDDEN_FRAMES = 5 * FPS            # how long the ghost stays out of the crab's sight
+DASH_TILES = 5                     # how far Flash dashes
+DASH_STEP = 4                      # pixels at a time, so the dash stops at walls and finds doors
+DASH_TRAIL_FRAMES = 12             # how long the streak of the dash stays on screen
 
 
 def new_crab():
@@ -1382,7 +1396,7 @@ def new_crab():
     body = pygame.Rect(0, 0, PLAYER_SIZE, PLAYER_SIZE)
     body.midtop = (statue.centerx, statue.bottom + 2)
     return {"room": "deck", "pos": (body.x, body.y), "facing": (0, 1), "moving": False, "walk": 0,
-            "wait": CRAB_WAKE_FRAMES, "away": 0}
+            "wait": CRAB_WAKE_FRAMES, "away": 0, "stun": 0}
 
 
 def is_host(app):
@@ -1400,6 +1414,18 @@ def active_players(app):
     state = app["state"]
     return [number for number in range(1, len(app["players"]) + 1)
             if not engine.is_out(state, number) and number not in app["downed"]]
+
+
+def hunted_players(app):
+    """The players the crab can see and catch: on their feet, and not hidden by the ghost's ability."""
+    return [number for number in active_players(app) if number not in app["hidden"]]
+
+
+def revive_frames(app, helper):
+    """How long player `helper` must hold E to help the other one up: less for the nurse."""
+    if engine.character_of(app["state"], helper) == "nurse":
+        return NURSE_REVIVE_FRAMES
+    return REVIVE_FRAMES
 
 
 def crab_rect(crab):
@@ -1464,10 +1490,16 @@ def door_toward(state, room, rooms):
 
 
 def crab_target(app):
-    """Where the crab heads now: ("player", number) for a player in its room, ("door", id), or None."""
+    """Where the crab heads now: ("player", number) for a player in its room, ("door", id),
+    ("flee", number) away from a hidden player when there is nobody else to hunt, or None."""
     crab = app["crab"]
     state = app["state"]
-    hunted = active_players(app)
+    hunted = hunted_players(app)
+    if not hunted:
+        for number in app["hidden"]:
+            if number in active_players(app) and engine.player_room(state, number) == crab["room"]:
+                return ("flee", number)  # it cannot see them, and it is afraid: as far as the room allows
+        return None
     here = [number for number in hunted if engine.player_room(state, number) == crab["room"]]
     if here:
         center = pygame.Vector2(crab_rect(crab).center)
@@ -1514,6 +1546,8 @@ def move_crab(app):
             step_crab(crab, body.center, solid_rects(seen))
             return
         goals = [goal_tile]
+    elif target[0] == "flee":
+        goals = [farthest_tile(free, start, player_rect(app["players"][target[1] - 1]["pos"]).center, crab["room"])]
     else:
         door = target[1]
         if crab_rect(crab).colliderect(door_rect(door).inflate(2, 2)):
@@ -1524,8 +1558,25 @@ def move_crab(app):
     tile = next_tile(free, start, goals)
     if tile is None:
         return
-    goal = tile_rect(*tile).center if tile != start else door_rect(target[1]).center
+    goal = tile_rect(*tile).center
+    if tile == start and target[0] == "door":
+        goal = door_rect(target[1]).center
     step_crab(crab, goal, solid_rects(seen))
+
+
+def farthest_tile(free, start, point, room):
+    """The floor tile the crab can walk to that is farthest from `point` (room pixels)."""
+    columns, rows = room_size(room)
+    seen = {start}
+    queue = collections.deque([start])
+    while queue:
+        tile = queue.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            near = (tile[0] + dx, tile[1] + dy)
+            if near in free and near not in seen and 1 <= near[0] <= columns - 2 and 1 <= near[1] <= rows - 2:
+                seen.add(near)
+                queue.append(near)
+    return max(sorted(seen), key=lambda tile: pygame.Vector2(tile_rect(*tile).center).distance_to(point))
 
 
 def go_through_crab(crab, door):
@@ -1544,7 +1595,7 @@ def catch_players(app):
     crab = app["crab"]
     state = app["state"]
     body = crab_rect(crab)
-    for number in active_players(app):
+    for number in hunted_players(app):  # it walks through a hidden player
         player = app["players"][number - 1]
         if engine.player_room(state, number) == crab["room"] and body.colliderect(player_rect(player["pos"])):
             app["downed"][number] = DOWN_FRAMES
@@ -1582,7 +1633,7 @@ def update_downed(app):
         helping = (helper in active_players(app) and is_reviving(app, helper)
                    and downed_near(app, app["players"][helper - 1]) == number)
         app["revive"][number] = app["revive"].get(number, 0) + 1 if helping else 0
-        if app["revive"][number] >= REVIVE_FRAMES:
+        if app["revive"][number] >= revive_frames(app, helper):
             del app["downed"][number]
             del app["revive"][number]
             continue
@@ -1604,11 +1655,17 @@ def update_crab(app):
         app["crab"] = None
         app["downed"] = {}
         app["revive"] = {}
+        app["hidden"] = {}
         return
     if app["crab"] is None:
         app["crab"] = new_crab()
     crab = app["crab"]
     update_downed(app)
+    app["hidden"] = {number: frames - 1 for number, frames in app["hidden"].items() if frames > 1}
+    if crab["stun"] > 0:
+        crab["stun"] -= 1  # the wizard's spell: it stands still, and harmless
+        crab["moving"] = False
+        return
     if crab["away"] > 0:
         crab["away"] -= 1
         return
@@ -1662,6 +1719,8 @@ def reset_crab(app):
     app["crab"] = None
     app["downed"] = {}
     app["revive"] = {}
+    app["hidden"] = {}
+    app["dash_trail"] = None
     app["partner_reviving"] = False
     state = app["state"]
     app["seen"] = {"awake": state is not None and engine.crab_awake(state), "downed": set(),
@@ -1672,7 +1731,8 @@ def reset_crab(app):
 def crab_info(app):
     """What the computer that joined needs to draw the crab and the players down."""
     return {"crab": app["crab"], "downed": {str(number): frames for number, frames in app["downed"].items()},
-            "revive": {str(number): frames for number, frames in app["revive"].items()}}
+            "revive": {str(number): frames for number, frames in app["revive"].items()},
+            "hidden": {str(number): frames for number, frames in app["hidden"].items()}}
 
 
 def take_crab_info(app, info):
@@ -1683,6 +1743,7 @@ def take_crab_info(app, info):
     app["crab"] = crab
     app["downed"] = {int(number): frames for number, frames in info.get("downed", {}).items()}
     app["revive"] = {int(number): frames for number, frames in info.get("revive", {}).items()}
+    app["hidden"] = {int(number): frames for number, frames in info.get("hidden", {}).items()}
 
 
 def can_move(app):
@@ -1717,6 +1778,13 @@ def draw_crab(app, screen):
         pygame.draw.rect(screen, COLORS["seal"], body)
         return
     screen.blit(picture, picture.get_rect(midbottom=(body.centerx, body.bottom + 2 - hop)))
+    if crab["stun"] > 0:  # stunned by the wizard: three stars turn above its head
+        for star in range(3):
+            angle = app["frame"] * 0.15 + star * 2 * math.pi / 3
+            x = body.centerx + round(8 * math.cos(angle))
+            y = body.top - 12 + round(3 * math.sin(angle))
+            pygame.draw.rect(screen, COLORS["highlight"], (x - 1, y - 1, 3, 3))
+            pygame.draw.rect(screen, COLORS["text"], (x, y, 1, 1))
 
 
 def crab_here(app):
@@ -1745,7 +1813,7 @@ def draw_downed_bars(app, screen, player):
     draw_bar(screen, body.centerx, body.top - 12, 16, app["downed"][number] / DOWN_FRAMES, COLORS["danger"])
     progress = app["revive"].get(number, 0)
     if progress > 0:
-        draw_bar(screen, body.centerx, body.top - 7, 16, progress / REVIVE_FRAMES, COLORS["help"])
+        draw_bar(screen, body.centerx, body.top - 7, 16, progress / revive_frames(app, 3 - number), COLORS["help"])
 
 
 def draw_crab_overlay(app, screen):
@@ -1761,7 +1829,120 @@ def draw_crab_overlay(app, screen):
         draw_bar(screen, WIDTH // 2, 112, 100, app["downed"][number] / DOWN_FRAMES, COLORS["danger"])
         progress = app["revive"].get(number, 0)
         if progress > 0:
-            draw_bar(screen, WIDTH // 2, 120, 100, progress / REVIVE_FRAMES, COLORS["help"])
+            draw_bar(screen, WIDTH // 2, 120, 100, progress / revive_frames(app, 3 - number), COLORS["help"])
+
+
+# --- The abilities of the characters, in a game for two: Space, once in a game -------------
+#
+# The wizard stuns the crab, the ghost hides from it, Flash dashes. The engine
+# remembers that the ability is used up (engine.use_ability); what happens on
+# screen is here. The crab's side of it (the stun, who it cannot see) is the
+# host's, like the rest of the crab; the dash moves the player on their own computer.
+# The nurse's ability is always on: see revive_frames.
+
+
+def use_ability(app):
+    """Space: the player on this computer uses their ability, if they still have it."""
+    if app["state"] is None or not can_move(app) or not engine.can_use_ability(app["state"], my_number(app)):
+        return
+    request(app, {"verb": "ability", "target": None, "item": None}, finish_ability)
+
+
+def finish_ability(app, action, before, state, outcome):
+    if not outcome["ok"]:
+        return
+    app["state"] = state
+    save_progress(app)
+    number = my_number(app)
+    character = engine.character_of(state, number)
+    sounds.play("ability")
+    wasted = character in ("wizard", "ghost") and not engine.crab_awake(state)
+    show_banner(app, story.MESSAGES["ability_wasted"] if wasted else outcome["text"])
+    if is_host(app):
+        apply_ability(app, number)
+    if character == "flash":
+        dash(app)
+
+
+def apply_ability(app, number):
+    """The host's part of an ability player `number` has just used: the crab stunned, or a player hidden.
+
+    With the crab still a statue there is nothing to stun or to hide from: the ability is wasted.
+    """
+    character = engine.character_of(app["state"], number)
+    if not engine.crab_awake(app["state"]):
+        return
+    if character == "wizard":
+        if app["crab"] is None:
+            app["crab"] = new_crab()
+        app["crab"]["stun"] = STUN_FRAMES  # wherever it is
+    elif character == "ghost":
+        app["hidden"][number] = HIDDEN_FRAMES
+
+
+def dash(app):
+    """Flash sprints DASH_TILES tiles the way they face: stopped by anything solid, and through
+    an open door or a portal on the way (a shut door stops them, and says why)."""
+    player = local_player(app)
+    dx, dy = player["facing"]
+    start = player_rect(player["pos"]).center
+    room = view(app)["room"]
+    left = DASH_TILES * TILE
+    while left > 0:
+        step = min(DASH_STEP, left)
+        left -= step
+        seen = view(app)
+        before = player["pos"]
+        player["pos"] = move(player["pos"], dx * step, dy * step, solid_rects(seen))
+        door = door_touched(seen["room"], player["pos"], dx, dy)
+        if door is not None:
+            if door != player["touching"]:
+                player["touching"] = door
+                go_through(app, door)
+            break
+        portal = portal_touched(seen, player["pos"])
+        if portal is not None:
+            go_through_portal(app, portal)
+            break
+        if player["pos"] == before:
+            break  # against something solid
+    app["dash_trail"] = {"room": room, "from": start, "to": player_rect(player["pos"]).center,
+                         "frames": DASH_TRAIL_FRAMES}
+    if view(app)["room"] != room:
+        app["dash_trail"] = None  # through the door at once (alone or on the host): nothing to show there
+
+
+def draw_dash_trail(app, screen):
+    """The yellow streak Flash leaves behind, fading."""
+    trail = app["dash_trail"]
+    if trail is None or trail["room"] != view(app)["room"]:
+        return
+    width = 1 + 4 * trail["frames"] // DASH_TRAIL_FRAMES
+    pygame.draw.line(screen, COLORS["highlight"], trail["from"], trail["to"], width)
+    pygame.draw.line(screen, COLORS["text"], trail["from"], trail["to"], 1)
+
+
+def ability_hint(app):
+    """What the corner of the screen says about the ability of the player on this computer, and its color.
+
+    None alone, and once the ability is used up.
+    """
+    state = app["state"]
+    number = my_number(app)
+    if not state["flags"]["two_players"] or engine.is_out(state, number):
+        return None
+    if engine.character_of(state, number) == "nurse":
+        return (story.MESSAGES["hint_nurse"], COLORS["dim_text"])
+    if not engine.can_use_ability(state, number):
+        return None
+    label = story.CHARACTERS[engine.character_of(state, number)]["power"]["label"]
+    return (story.MESSAGES["hint_ability"].format(label=label), COLORS["highlight"])
+
+
+def draw_ability_hint(app, screen):
+    hint = ability_hint(app)
+    if hint is not None:
+        draw_text(screen, app["fonts"]["text"], hint[0], hint[1], (4, HEIGHT - 12), "left", True)
 
 
 # --- Two computers: hosting, joining, and keeping the two games in step ---------------------
@@ -1934,6 +2115,8 @@ def handle_message(app, message):
         if outcome["ok"]:
             app["state"] = state
             save_progress(app)
+            if message["action"].get("verb") == "ability":
+                apply_ability(app, 2)
         send(app, {"t": "done", "id": message.get("id"), "state": app["state"], "outcome": outcome})
         connection["sent_state"] = app["state"]
     elif kind == "done" and connection["role"] == "client":
@@ -2471,6 +2654,9 @@ def player_picture(app, player):
 def draw_player(app, screen, player):
     body = player_rect(player["pos"])
     picture = player_picture(app, player)
+    if picture is not None and player_number(app, player) in app["hidden"]:
+        picture = picture.copy()
+        picture.set_alpha(110)  # hidden from the crab: half there
     if picture is not None and player_number(app, player) in app["downed"]:
         lying = pygame.transform.rotate(picture, 90)  # knocked down by the crab: on the floor
         screen.blit(lying, lying.get_rect(midbottom=(body.centerx, body.bottom + 1)))
@@ -2650,6 +2836,7 @@ def draw_room(app, screen):
     for player in app["players"]:
         if same_room(app, player):
             draw_downed_bars(app, screen, player)
+    draw_dash_trail(app, screen)
     for thing in standing:
         if thing["id"] not in drawn:
             draw_standing(app, screen, thing)
@@ -2913,6 +3100,7 @@ def draw_play_screen(app, screen):
     effects.draw_warp(screen, VIEW, app["fx"])   # just through a portal: the purple warp
     effects.draw_flash(screen, VIEW, app["fx"])  # the white flash of the anvil
     draw_hud(app, screen)
+    draw_ability_hint(app, screen)
     draw_crab_overlay(app, screen)
 
 

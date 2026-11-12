@@ -230,6 +230,30 @@ def crab_catches_everyone(state):
     return _accept(new, "ending", story.MESSAGES["crab_ending"])
 
 
+def can_use_ability(state, player=1):
+    """True if `player` still has the ability used with Space: in a game for two, once, and not for
+    a character whose ability is always on. Not after an ending, nor once out of the game."""
+    if not state["flags"]["two_players"] or is_over(state) or is_out(state, player):
+        return False
+    if story.CHARACTERS[character_of(state, player)]["power"] is None:
+        return False
+    return not state["flags"]["ability_used_" + str(player)]
+
+
+def use_ability(state, player=1):
+    """`player` uses their ability: it is used up for the whole game. What it does on screen
+    (stunning the crab, vanishing, dashing) is main.py's part."""
+    if not state["flags"]["two_players"]:
+        return _refuse(state, "nothing_happens", story.MESSAGES["abilities_for_two"])
+    if not can_use_ability(state, player):
+        if state["flags"]["ability_used_" + str(player)]:
+            return _refuse(state, "ability_used", story.MESSAGES["ability_used"])
+        return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
+    new = copy.deepcopy(state)
+    new["flags"]["ability_used_" + str(player)] = True
+    return _accept(new, "ability", story.CHARACTERS[character_of(state, player)]["power"]["text"])
+
+
 def player_room(state, player=1):
     """The room a player is in: "room" for player 1, the flag "partner_room" for player 2."""
     return state["room"] if player == 1 else state["flags"]["partner_room"]
@@ -656,6 +680,8 @@ def _perform(state, action, player):
         return use_item(state, action["item"], action["target"], player)
     if verb == "give":
         return give(state, action["item"], player)
+    if verb == "ability":
+        return use_ability(state, player)
     if verb == "examine":
         return examine(state, action["target"])
     if verb == "activate":
@@ -1080,6 +1106,8 @@ def _allowed_values(flag):
     for info in story.ITEMS.values():
         if info.get("sets_flag") == flag:
             values.append(True)
+    if flag in ("ability_used_1", "ability_used_2"):
+        values.append(True)
     if flag == "partner_character":
         values += list(story.CHARACTERS)
     if flag == "character":

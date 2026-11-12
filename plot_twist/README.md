@@ -61,6 +61,7 @@ La prima volta uv installa pygame: ci vuole qualche secondo. Poi si apre la fine
 | Frecce o WASD | Muoverti |
 | E | Interagire con ciò che hai vicino. Nei riquadri di testo, andare avanti |
 | I | Aprire e chiudere l'inventario |
+| Spazio | Usare l'abilità del personaggio (solo nelle partite a due, una volta per partita) |
 | Esc | Il menu di pausa: Continue, Restart, Main menu, Quit |
 | Su, giù e Invio (o E) | Scegliere nei menu |
 
@@ -84,9 +85,20 @@ Qualche aiuto:
 - Il gioco si salva solo sul computer che ospita la partita. Per riprenderla, su quel computer scegli **Resume**; poi l'altro rientra con Join game.
 - Se il secondo computer non trova la partita, controlla che i due computer siano sulla stessa rete. Controlla anche che il firewall del primo lasci entrare il gioco (porta 50555).
 
+**I personaggi.** All'inizio scegli tra quattro personaggi. Da soli cambia solo l'aspetto. In due ognuno sceglie il suo sul proprio schermo (chi entra non può prendere quello dell'host), e ognuno ha un'abilità:
+
+| Personaggio | Abilità |
+|---|---|
+| Wizard (Mago) | Spazio: il granchio resta stordito e fermo per 5 secondi, in qualunque stanza sia |
+| Nurse (Infermiera) | Sempre attiva: rialza un compagno a terra in 1 secondo invece di 4 |
+| Ghost (Fantasma) | Spazio: per 5 secondi il granchio non ti vede e va dall'altro giocatore. Se l'altro è a terra o fuori, il granchio scappa lontano da te |
+| Flash | Spazio: uno scatto di 5 caselle nella direzione in cui guardi. Si ferma contro gli ostacoli e attraversa porte aperte e portali |
+
+L'abilità con Spazio funziona una volta sola per partita: in basso a sinistra c'è scritto finché è disponibile. Se la usi mentre il granchio è ancora una statua, è sprecata.
+
 **Il granchio (solo in due).** Appena risolvete la cabina, la statua del granchio sul ponte prende vita e vi dà la caccia.
 - Insegue il giocatore più vicino ed è più lento di voi. Se nella sua stanza non c'è nessuno, vi segue attraverso le porte aperte.
-- Se vi tocca, finite a terra e non potete muovervi. Il compagno ha un minuto per rialzarvi: deve stare vicino a voi e tenere premuto **E** per 5 secondi (la barra verde mostra quanto manca).
+- Se vi tocca, finite a terra e non potete muovervi. Il compagno ha un minuto per rialzarvi: deve stare vicino a voi e tenere premuto **E** per 4 secondi (la barra verde mostra quanto manca).
 - Se nessuno vi rialza in tempo, siete fuori fino alla fine della partita, e i vostri oggetti passano al compagno. Da fuori guardate il compagno giocare.
 - Se il granchio vi prende tutti e due, anche quando uno è già fuori, la partita è persa: è il terzo finale, "Caught by the crab".
 - Una strategia: uno tiene occupato il granchio, l'altro risolve gli enigmi.

@@ -2056,3 +2056,235 @@ def test_the_crab_and_the_players_down_reach_the_other_computer(two_computers):
     assert host["downed"] == {}
     pump(host, guest, lambda: guest["downed"] == {})
     assert host["banner"] == story.MESSAGES["back_up"]
+
+
+# --- The abilities of the characters (Space, once in a game for two) -------------------------
+
+
+def as_characters(app, first, second):
+    """Change who the two players of the game on screen are."""
+    app["state"]["flags"]["character"] = first
+    app["state"]["flags"]["partner_character"] = second
+
+
+def test_the_wizards_spell_stuns_the_crab_for_five_seconds_wherever_it_is(app, heard):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")], partner_room="deck")  # the wizard is in the cabin
+    awake_crab(app)  # the crab is on the deck, with player 2
+    app["players"][1]["pos"] = free_spot(app, 4, 3, "deck")
+    press(app, pygame.K_SPACE)
+    assert app["crab"]["stun"] == main.STUN_FRAMES and "ability" in heard
+    assert app["banner"] == story.CHARACTERS["wizard"]["power"]["text"]
+    assert engine.restore_state(save.load_game())["flags"]["ability_used_1"] is True
+    where = app["crab"]["pos"]
+    app["players"][1]["pos"] = where  # player 2 walks right onto it
+    for _ in range(main.STUN_FRAMES):
+        main.update(app, 0, 0)
+        assert app["crab"]["pos"] == where and app["downed"] == {}  # still, and harmless
+    app["state"]["room"] = "deck"
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))  # the stars above it (the last frame of the spell)
+    main.update(app, 0, 0)
+    main.update(app, 0, 0)
+    assert 2 in app["downed"]  # the spell is over
+    press(app, pygame.K_SPACE)  # once only
+    assert app["crab"]["stun"] == 0 and main.ability_hint(app) is None
+
+
+def test_an_ability_used_while_the_crab_is_a_statue_is_wasted(app):
+    two_playing(app, [])
+    assert main.ability_hint(app) == (story.MESSAGES["hint_ability"].format(label="Spell"), main.COLORS["highlight"])
+    press(app, pygame.K_SPACE)
+    assert app["state"]["flags"]["ability_used_1"] is True and app["crab"] is None
+    assert app["banner"] == story.MESSAGES["ability_wasted"]
+    assert main.ability_hint(app) is None
+
+
+def test_alone_space_does_nothing(app):
+    start_new_game(app)
+    before = app["state"]
+    press(app, pygame.K_SPACE)
+    assert app["state"] is before and app["banner_frames"] == 0
+    assert main.ability_hint(app) is None
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+
+
+def test_the_nurse_helps_a_player_up_in_one_second_and_the_others_in_four(app):
+    assert main.REVIVE_FRAMES == 4 * main.FPS and main.NURSE_REVIVE_FRAMES == main.FPS
+    two_playing(app, FIRST_HALF)
+    as_characters(app, "nurse", "flash")
+    assert main.ability_hint(app) == (story.MESSAGES["hint_nurse"], main.COLORS["dim_text"])
+    awake_crab(app, wait=10 ** 6)
+    p1(app)["pos"] = free_spot(app, 4, 4)
+    app["players"][1]["pos"] = (p1(app)["pos"][0] + main.PLAYER_SIZE + 2, p1(app)["pos"][1])
+    app["downed"] = {2: main.DOWN_FRAMES}
+    for _ in range(main.NURSE_REVIVE_FRAMES - 1):
+        main.update(app, 0, 0, True)
+    assert 2 in app["downed"]
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+    main.update(app, 0, 0, True)
+    assert app["downed"] == {}
+    press(app, pygame.K_SPACE)  # nothing to use
+    assert app["state"]["flags"]["ability_used_1"] is False
+
+
+def test_the_crab_cannot_see_the_ghost_and_goes_for_the_other_player(app):
+    two_playing(app, FIRST_HALF)
+    as_characters(app, "ghost", "wizard")
+    awake_crab(app)
+    p1(app)["pos"] = free_spot(app, 6, 14)            # the ghost, near the crab
+    app["players"][1]["pos"] = free_spot(app, 14, 3)  # the other one, far away
+    assert main.crab_target(app) == ("player", 1)
+    press(app, pygame.K_SPACE)
+    assert app["hidden"] == {1: main.HIDDEN_FRAMES}
+    assert main.crab_target(app) == ("player", 2)
+    p1(app)["pos"] = app["crab"]["pos"]  # it walks straight through the ghost
+    main.update(app, 0, 0)
+    assert app["downed"] == {}
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))  # half there
+    app["players"][1]["pos"] = free_spot(app, 14, 3)
+    p1(app)["pos"] = free_spot(app, 2, 2)
+    for _ in range(main.HIDDEN_FRAMES):
+        main.update(app, 0, 0)
+    assert app["hidden"] == {}  # five seconds later it sees the ghost again
+    assert 2 in app["downed"]   # meanwhile it went for the other player, and got them
+    assert main.crab_target(app) == ("player", 1)
+
+
+def test_with_nobody_else_to_hunt_the_crab_runs_from_the_hidden_ghost(app):
+    two_playing(app, FIRST_HALF)
+    as_characters(app, "ghost", "wizard")
+    awake_crab(app)
+    app["downed"] = {2: main.DOWN_FRAMES}  # the other player is down
+    app["players"][1]["pos"] = free_spot(app, 14, 3)
+    p1(app)["pos"] = free_spot(app, 6, 14)
+    press(app, pygame.K_SPACE)
+    assert main.crab_target(app) == ("flee", 1)
+    before = distance(app["crab"]["pos"], p1(app)["pos"])
+    for _ in range(120):
+        main.update(app, 0, 0)
+    assert distance(app["crab"]["pos"], p1(app)["pos"]) > before + 60
+    assert app["crab"]["room"] == "deck"  # it does not leave the room
+    assert app["state"]["ending"] is None and 1 not in app["downed"]
+
+
+def test_the_crab_stays_put_when_the_hidden_ghost_is_in_another_room(app):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")], partner_room="deck")
+    as_characters(app, "ghost", "wizard")
+    app["state"] = engine.knock_out(app["state"], 2)[0]  # the other player is out
+    main.reset_crab(app)
+    awake_crab(app)
+    assert main.crab_target(app) == ("door", "deck_to_cabin")
+    press(app, pygame.K_SPACE)
+    assert main.crab_target(app) is None
+    where = app["crab"]["pos"]
+    for _ in range(30):
+        main.update(app, 0, 0)
+    assert app["crab"]["pos"] == where and app["crab"]["room"] == "deck"
+
+
+def flash_game(app, actions=()):
+    two_playing(app, list(actions))
+    as_characters(app, "flash", "wizard")
+
+
+def test_flash_dashes_five_tiles_the_way_they_face(app, heard):
+    flash_game(app)
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    main.update(app, 1, 0)  # facing right
+    start = p1(app)["pos"]
+    press(app, pygame.K_SPACE)
+    assert p1(app)["pos"] == (start[0] + main.DASH_TILES * main.TILE, start[1])
+    assert app["dash_trail"] is not None and "ability" in heard
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))  # the streak
+    for _ in range(main.DASH_TRAIL_FRAMES):
+        main.update(app, 0, 0)
+    assert app["dash_trail"] is None
+    where = p1(app)["pos"]
+    press(app, pygame.K_SPACE)  # once only
+    assert p1(app)["pos"] == where
+
+
+def test_the_dash_stops_against_a_wall(app):
+    flash_game(app)
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    main.update(app, -1, 0)  # facing left, three tiles from the railing
+    press(app, pygame.K_SPACE)
+    body = main.player_rect(p1(app)["pos"])
+    assert body.left == main.tile_rect(1, 0).left and body.collidelist(main.solid_rects(app["state"])) == -1
+    assert app["state"]["room"] == "deck"
+
+
+def test_the_dash_goes_through_an_open_door_on_its_way(app):
+    flash_game(app)
+    p1(app)["pos"] = main.spawn_in_front_of("deck_to_cabin")
+    p1(app)["pos"] = (p1(app)["pos"][0], p1(app)["pos"][1] + 2 * main.TILE)  # two tiles below the door
+    p1(app)["facing"] = (0, -1)
+    press(app, pygame.K_SPACE)
+    assert app["state"]["room"] == "cabin"
+    assert p1(app)["pos"] == main.spawn_in_front_of("cabin_to_deck")  # where anyone comes in
+
+
+def test_the_dash_stops_at_a_shut_door_which_says_why(app):
+    flash_game(app)
+    p1(app)["pos"] = main.spawn_in_front_of("deck_to_hold")
+    p1(app)["pos"] = (p1(app)["pos"][0], p1(app)["pos"][1] - 2 * main.TILE)
+    p1(app)["facing"] = (0, 1)
+    press(app, pygame.K_SPACE)
+    assert app["state"]["room"] == "deck" and dialog_text(app) == " ".join(
+        main.wrap(story.DOORS["deck_to_hold"]["barred_text"], main.DIALOG_TEXT_WIDTH, main.text_width(app["fonts"]["text"])))
+
+
+def test_the_dash_takes_a_portal_on_its_way(app):
+    flash_game(app)
+    app["state"]["room"] = "corridor_end"
+    app["state"]["flags"]["partner_room"] = "corridor_end"
+    ring = main.thing_rect("corridor_portal")
+    p1(app)["pos"] = (ring.centerx - main.PLAYER_SIZE // 2, ring.bottom + main.TILE)
+    p1(app)["facing"] = (0, -1)
+    press(app, pygame.K_SPACE)
+    assert app["state"]["room"] == "mine"
+
+
+def test_the_dash_carries_flash_past_the_crab(app):
+    flash_game(app, FIRST_HALF)
+    as_characters(app, "flash", "wizard")
+    awake_crab(app, wait=0)
+    app["players"][1]["pos"] = free_spot(app, 14, 3)
+    crab = app["crab"]["pos"]
+    p1(app)["pos"] = (crab[0] - 2 * main.TILE, crab[1])  # the crab two tiles to the right
+    p1(app)["facing"] = (1, 0)
+    press(app, pygame.K_SPACE)
+    assert p1(app)["pos"][0] > crab[0] + main.TILE  # on its other side
+    main.update(app, 0, 0)
+    assert app["downed"] == {}
+
+
+def test_the_dash_lights_only_the_tile_it_lands_on(app, heard):
+    flash_game(app, IN_THE_HOLD)
+    as_characters(app, "flash", "wizard")
+    first, last = main.thing_rect("tile_1"), main.thing_rect("tile_3")
+    lane = first.centery - main.PLAYER_SIZE // 2
+    p1(app)["pos"] = (first.centerx - main.PLAYER_SIZE // 2 - (main.DASH_TILES * main.TILE - (last.centerx - first.centerx)), lane)
+    main.settle_on_floor(app, p1(app))
+    p1(app)["facing"] = (1, 0)
+    press(app, pygame.K_SPACE)  # over tile 1 and tile 2, landing on tile 3
+    assert main.tile_under(app["state"], p1(app)["pos"]) == "tile_3"
+    main.update(app, 0, 0)
+    assert "blip" not in heard and app["state"]["flags"]["hold_step"] == 0  # tile 3 is not the first of the wave
+
+
+def test_abilities_reach_the_host_from_the_other_computer(two_computers):
+    host, guest = two_computers  # the host is the wizard; the guest becomes the ghost
+    state = play_two(FIRST_HALF)
+    state["flags"]["partner_character"] = "ghost"
+    host["state"], guest["state"] = state, engine.restore_state(state)
+    for app in (host, guest):
+        main.place_at_entry(app)
+        main.reset_crab(app)
+    pump(host, guest, lambda: guest["crab"] is not None)
+    press(guest, pygame.K_SPACE)
+    pump(host, guest, lambda: 2 in guest["hidden"])
+    assert 2 in host["hidden"] and host["state"]["flags"]["ability_used_2"] is True
+    assert main.ability_hint(guest) is None
+    press(host, pygame.K_SPACE)
+    pump(host, guest, lambda: guest["crab"]["stun"] > 0)
+    main.draw(guest, pygame.Surface((main.WIDTH, main.HEIGHT)))

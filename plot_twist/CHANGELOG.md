@@ -2,9 +2,20 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v28](versions/v28.md) - Four characters (2026-11-12)
+## [v29](versions/v29.md) - Abilities (2026-11-12)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- In a game for two each character has an ability. Space uses it, once in the whole game (it is saved); the corner of the screen says so while it is there. Alone, Space does nothing.
+- Wizard: a spell stuns the crab for 5 seconds, wherever it is: it stands still and harmless, with stars above its head.
+- Nurse: always on, she helps a player up in 1 second. For everyone else it now takes 4 seconds instead of 5.
+- Ghost: for 5 seconds the crab cannot see them (half transparent on both screens) and walks through them. It goes for the other player; if the other one is down or out, it runs as far from the ghost as its room allows, or stays put if the ghost is in another room.
+- Flash: a dash of 5 tiles the way they face. It stops against anything solid, goes through an open door or a portal on its way, passes the crab, and lights only the tile it lands on.
+- An ability used while the crab is still a statue is wasted.
+
+## [v28](versions/v28.md) - Four characters (2026-11-12)
+
+In commit [`218585d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/218585db726df071d1a5b1f64d354c2a3d2d09f1/plot_twist).
 
 - Four characters replace the green and the red one: the Wizard, the Nurse, the Ghost and Flash, each with its own pictures. The choice screen shows all four, with the name and the ability of the one highlighted.
 - In a game for two each player chooses on their own screen: the host before hosting, the player who joins right after joining, any character but the host's (shown dark). The host waits meanwhile; if the other player gives up, it goes back to waiting.
