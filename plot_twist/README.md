@@ -23,22 +23,22 @@ What changed in each version: [CHANGELOG.md](CHANGELOG.md), with one page per ve
 
 ## 2. Download the game
 
-The game is on the branch `claude/funny-ramanujan-ffrx60`. **It is not on `main`.** The repository is private: GitHub will ask you to sign in with your account.
+The game is in the `plot_twist` folder of the repository, on the `main` branch. The repository is private: GitHub will ask you to sign in with your account.
 
 **With git.** In the terminal, from the folder where you want to put the game (the one the terminal opens in is fine too):
 ```
-git clone -b claude/funny-ramanujan-ffrx60 https://github.com/davidelatorre004/Introduction-to-Programming-2.git
+git clone https://github.com/davidelatorre004/Introduction-to-Programming-2.git
 ```
-This creates the folder `Introduction-to-Programming-2`, already on the right branch.
+This creates the folder `Introduction-to-Programming-2`.
 
-If you already have the repository on your computer, go into its folder and get the branch:
+If you already have the repository on your computer, go into its folder and get the latest version:
 ```
-git fetch origin
-git checkout claude/funny-ramanujan-ffrx60
+git checkout main
+git pull
 ```
 
 **Without git:**
-1. Open the [branch page on GitHub](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60).
+1. Open the [repository page on GitHub](https://github.com/davidelatorre004/Introduction-to-Programming-2).
 2. Click the green **Code** button, then **Download ZIP**.
 3. Extract the ZIP.
 
@@ -133,7 +133,7 @@ The Space ability works only once per game: the bottom left corner says so as lo
 | `uv: command not found`, or "uv is not recognized" | Install uv (step 1), then close the terminal and open it again |
 | `'origin' does not appear to be a git repository`, or `pathspec ... did not match` | You are not in the repository's folder: download it with `git clone` (step 2), or go into its folder |
 | `can't open file 'main.py'` | You are not in the right folder: go into `plot_twist` |
-| You cannot find the `plot_twist` folder | You are on `main`: run `git checkout claude/funny-ramanujan-ffrx60` |
+| You cannot find the `plot_twist` folder | You have an old copy: run `git checkout main` and then `git pull` |
 | You cannot see the window | Look for it behind the other windows, or in the Dock on a Mac |
 
 To run the automatic tests, inside `plot_twist`:
