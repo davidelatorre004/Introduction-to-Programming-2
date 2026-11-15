@@ -116,6 +116,7 @@ The Space ability works only once per game: the bottom left corner says so as lo
 - The fused key opens both doors. Behind each one there is someone who wants your wand, and who you give it to decides the ending.
 - **Hint for the cabin:** the eight generators are wired together in a ring, and switching one also switches the two next to it. You must turn them all on at the same time.
 - **Hint for the infirmary:** the doctor's remedy is made with four bottles, in a precise order. The first one is in the infirmary; when you pick it up, the others appear around the ship: look for them. The doctor's notes give the order.
+- **Dark rooms:** the corridor under the hold, its far end and the mine are dark. Lanterns, crystals and portals light the room around them, and you carry your own light: a glow around you and a cone in the direction you face. Turn around to look.
 - **The mine:** the portal at the end of the corridor leads to a mine. At the far end of the mine a second portal takes you back to the ship, but it only works one way.
 - **Hint for the hold:** the five numbered tiles are stepped on, in three trials one after the other. A wrong tile, or walking off the metal grating around them, starts the current trial over: "BZZZ!". The names of the trials are engraved on the barrier around the altar at the far end of the hold: examine it.
 

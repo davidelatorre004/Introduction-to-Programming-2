@@ -2656,6 +2656,86 @@ def draw_fusing_key(app, surface):
         effects.glow(surface, (x, y), 10, (120, 90, 30), 1 - (age - FUSE_MEET) / (effects.FUSE_FRAMES - FUSE_MEET))
 
 
+# --- Dark rooms: where the light is ----------------------------------------------------------
+#
+# effects.py has the tools (a layer of darkness, and holes of light stamped on it).
+# Here is what gives light in the game, and how much: lanterns (a glow, and a cone
+# down onto the floor that sways with them), crystals, portals, the heart of the mine,
+# and the players, each with a glow around them and a cone the way they face.
+
+LANTERN_LIGHT = 30          # radius of the glow of a lantern in a dark room, in pixels
+LANTERN_CONE = (48, 34)     # the cone it throws down: how long, and half its angle in degrees
+CRYSTAL_LIGHT = (14, 22)    # a crystal's glow, from its dimmest to its brightest
+PORTAL_LIGHT = 26
+HEART_LIGHT = (9, 12)       # the heart of the mine beats
+PLAYER_LIGHT = 22           # the glow around a player...
+PLAYER_CONE = (62, 27)      # ...and the cone in front of them: how long, and half its angle
+DOWNED_LIGHT = 11           # a player on the floor gives only a little light
+
+
+def room_darkness(room):
+    """How dark a room is, from 0 (fully lit) to 255: story.py says it, and the switch can turn it off."""
+    if not effects.FX["darkness"]:
+        return 0
+    return story.ROOMS[room].get("dark", 0)
+
+
+def room_lights(app, state, things):
+    """Every light in the room shown, as tuples: ("glow", centre, radius) for a round light and
+    ("cone", point, angle in degrees, length, half angle) for a cone. In room pixels."""
+    frame = app["frame"]
+    lights = []
+    for thing in things:
+        info = story.OBJECTS.get(thing["id"])
+        if thing["kind"] == "item":
+            if thing["id"] == "heart":  # it beats, and glows a little with each beat
+                beat = effects.pulse(frame, 0.12)
+                lights.append(("glow", place_rect(thing).center, HEART_LIGHT[0] + round((HEART_LIGHT[1] - HEART_LIGHT[0]) * beat)))
+            continue
+        if info is None:
+            continue
+        rect = thing_rect(thing["id"])
+        picture = info.get("picture")
+        if picture == "decor_lantern":
+            angle, sway = lantern_swing(app, thing["id"])
+            flame = (rect.centerx + sway, rect.top + 7)
+            flicker = 2 if (frame // 5 + rect.top) % 3 == 0 else 0  # the flame jumps now and then
+            lights.append(("glow", flame, LANTERN_LIGHT + flicker))
+            lights.append(("cone", flame, 90 + round(angle), LANTERN_CONE[0], LANTERN_CONE[1]))
+        elif picture == "decor_crystal":
+            glow = effects.pulse(frame, 0.045, 0.0, 1.0, rect.left * 0.3 + rect.top)  # in step with its colour
+            lights.append(("glow", rect.center, CRYSTAL_LIGHT[0] + round((CRYSTAL_LIGHT[1] - CRYSTAL_LIGHT[0]) * glow)))
+        elif info["kind"] == "portal":
+            lights.append(("glow", rect.center, PORTAL_LIGHT + ((frame // 20) % 2)))
+        elif info["kind"] == "cauldron":
+            lights.append(("glow", (rect.centerx, rect.top + 13), effects.FIRE_GLOW + 6))
+    for number, player in enumerate(app["players"], start=1):
+        if not same_room(app, player) or engine.is_out(app["state"], number):
+            continue
+        middle = player_rect(player["pos"]).center
+        if number in app["downed"]:
+            lights.append(("glow", middle, DOWNED_LIGHT))
+            continue
+        lights.append(("glow", middle, PLAYER_LIGHT))
+        fx, fy = player["facing"]
+        lights.append(("cone", middle, round(math.degrees(math.atan2(fy, fx))), PLAYER_CONE[0], PLAYER_CONE[1]))
+    return lights
+
+
+def draw_darkness(app, surface, state, things):
+    """In a dark room, lay the darkness over the room, with a hole for every light in it."""
+    dark = room_darkness(state["room"])
+    if dark <= 0:
+        return
+    layer = effects.darkness(surface.get_size(), dark)
+    for light in room_lights(app, state, things):
+        if light[0] == "glow":
+            effects.punch(layer, effects.light_hole(light[2], dark), light[1])
+        else:
+            effects.punch(layer, effects.light_cone(light[3], light[4], light[2], dark), light[1])
+    surface.blit(layer, (0, 0))
+
+
 def draw_lights(app, surface, things):
     """The light of the room, added on top: lanterns, crystals, the blue fire of the cauldron."""
     if not effects.FX["lights"] and not effects.FX["cauldron"]:
@@ -3125,6 +3205,7 @@ def draw_room(app, screen):
     effects.draw_clue_glow(screen, app["fx"])
     effects.draw_particles(screen, app["fx"]["particles"])
     effects.draw_dust(screen, app["fx"], app["frame"])
+    draw_darkness(app, screen, state, things)  # a dark room: dark, but for the holes of light
     draw_lights(app, screen, things)
     # The letter of each generator, on the floor above it.
     for thing in things:

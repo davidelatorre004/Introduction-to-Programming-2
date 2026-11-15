@@ -40,11 +40,16 @@ FX = {
     "clues": True,          # a glow and twinkles on the thing that gave a new clue
     "crumble": True,        # the crab statue shaking the ship, trembling and dropping stones before it breaks
     "shatter": True,        # the giant claw that breaks the screen when the crab has caught both players
+    "darkness": True,       # the dark rooms, lit only around lanterns, crystals, portals and the players
 }
 
 # --- Timing and sizes (frames are 1/60 of a second) --------------------------------------
 
 SEED = 7                     # the seed of the randomness of the effects
+DARK_COLOR = (6, 8, 22)      # what the dark of a dark room looks like: almost black, a little blue
+LIGHT_REACH = (1.0, 0.82, 0.64, 0.46)  # how far each step of a light reaches, of its radius: the last is fully lit
+LIGHT_BANDS = len(LIGHT_REACH)         # a light fades into the dark in this many hard steps, not smoothly
+CONE_BANDS = 3               # and a cone of light in this many, along its length
 SHARD_GRAVITY = 0.2          # pixels per frame, per frame: how fast the pieces of a broken screen fall
 SHARD_PUSH = 1.6             # how hard they are pushed away from where the screen was hit
 SHARD_SPIN = 5               # degrees per frame, at most, either way
@@ -554,3 +559,83 @@ def draw_cracks(surface, pieces, center, reach, offset=(0, 0)):
             b = (round(far[0]) + offset[0], round(far[1]) + offset[1])
             pygame.draw.line(surface, SHARD_EDGE, (a[0] + 1, a[1]), (b[0] + 1, b[1]), 1)
             pygame.draw.line(surface, CRACK_DARK, a, b, 1)
+
+
+# --- Dark rooms: a layer of darkness with holes of light in it -----------------------------
+#
+# The room is drawn as usual, and a layer as big as the room goes over it: see-through
+# dark everywhere, clear where there is light. A light is a picture of a hole: clear in
+# the middle, and darker ring by ring out to the full dark at its edge, in hard steps
+# (no smooth fade: these are big pixels). Each hole is stamped on the layer keeping, for
+# every pixel, the clearer of the two: so two lights next to each other join, and one
+# never darkens what the other has lit.
+#
+# The idea of a dark layer with a stepped hole in it comes from the "punch_a_hole" sample
+# of Mekire's pygame-samples (github.com/Mekire/pygame-samples); the code here is ours.
+
+_dark_layers = {}  # size -> the layer for rooms of that size, made once
+_holes = {}        # (radius, dark) -> the picture of a round hole
+_cones = {}        # (length, half angle, angle, dark) -> the picture of a cone-shaped hole
+
+
+def darkness(size, dark):
+    """A layer of this size, all dark: `dark` from 0 (clear) to 255 (pitch black). Stamp lights on it
+    with punch(), then blit it over the room."""
+    if size not in _dark_layers:
+        _dark_layers[size] = pygame.Surface(size, pygame.SRCALPHA)
+    layer = _dark_layers[size]
+    layer.fill(DARK_COLOR + (dark,))
+    return layer
+
+
+def band_alpha(dark, band, bands):
+    """How dark the `band`-th step of a light is, from the outside (0) in: the last one is clear."""
+    return round(dark * (bands - 1 - band) / bands)
+
+
+def light_hole(radius, dark):
+    """The picture of a round light in a darkness of `dark`: rings from almost as dark as the room
+    at the edge to clear in the middle."""
+    key = (radius, dark)
+    if key not in _holes:
+        size = radius * 2 + 1
+        picture = pygame.Surface((size, size), pygame.SRCALPHA)
+        picture.fill(DARK_COLOR + (dark,))
+        for band in range(LIGHT_BANDS):
+            reach = round(radius * LIGHT_REACH[band])
+            pygame.draw.circle(picture, DARK_COLOR + (band_alpha(dark, band, LIGHT_BANDS),), (radius, radius), reach)
+        _holes[key] = picture
+    return _holes[key]
+
+
+def cone_points(origin, angle, length, half, steps=6):
+    """The corners of a cone of light: its point at `origin`, opening `half` degrees either side of
+    `angle` (degrees, 0 to the right, 90 down), `length` pixels long, with a round far end."""
+    points = [origin]
+    for step in range(steps + 1):
+        turn = math.radians(angle - half + 2 * half * step / steps)
+        points.append((origin[0] + length * math.cos(turn), origin[1] + length * math.sin(turn)))
+    return [(round(x), round(y)) for x, y in points]
+
+
+def light_cone(length, half, angle, dark):
+    """The picture of a cone of light in a darkness of `dark`, its point in the middle of the picture:
+    clear near the point, darker step by step along its length."""
+    key = (length, half, angle, dark)
+    if key not in _cones:
+        size = length * 2 + 1
+        picture = pygame.Surface((size, size), pygame.SRCALPHA)
+        picture.fill(DARK_COLOR + (dark,))
+        for band in range(CONE_BANDS):
+            reach = round(length * (CONE_BANDS - band) / CONE_BANDS)
+            pygame.draw.polygon(picture, DARK_COLOR + (band_alpha(dark, band, CONE_BANDS),),
+                                cone_points((length, length), angle, reach, half))
+        _cones[key] = picture
+    return _cones[key]
+
+
+def punch(layer, picture, center):
+    """Stamp a light (a light_hole or a light_cone) on a layer of darkness, centred there: every
+    pixel keeps the clearer of the two."""
+    place = picture.get_rect(center=(round(center[0]), round(center[1])))
+    layer.blit(picture, place, special_flags=pygame.BLEND_RGBA_MIN)

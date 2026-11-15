@@ -101,6 +101,8 @@ FLAGS = {
     "visited_mine": False,
 }
 
+# "dark" (optional) makes a room dark, from 1 to 255: only lanterns, crystals, portals
+# and the players light it. Without it the room is fully lit.
 # "outdoor" tells the screen to draw the sea around the room. "entry" is the tile
 # (column, row) where the player appears when a game starts or resumes in the room.
 # A room is 16 x 12 tiles, walls included: the floor goes from (1, 1) to (14, 10).
@@ -186,12 +188,14 @@ ROOMS = {
         "outdoor": False,
         "entry": (12, 3),
         "size": (48, 6),  # long and cramped: the view scrolls sideways
+        "dark": 150,
     },
     "corridor_end": {
         "name": "End of the corridor",
         "description": "The corridor ends here, in front of a ring of purple light that hums softly.",
         "outdoor": False,
         "entry": (7, 8),
+        "dark": 160,
     },
     "mine": {
         "name": "Mine",
@@ -202,6 +206,7 @@ ROOMS = {
         "outdoor": False,
         "entry": (7, 7),
         "size": (16, 24),
+        "dark": 185,  # deep in the rock: the darkest place of all
         # Only a portal leads here: no door says where it lies, so the map is told.
         "map_pos": (34, 20),
     },
@@ -5752,6 +5757,86 @@ def draw_fusing_key(app, surface):
         effects.glow(surface, (x, y), 10, (120, 90, 30), 1 - (age - FUSE_MEET) / (effects.FUSE_FRAMES - FUSE_MEET))
 
 
+# --- Dark rooms: where the light is ----------------------------------------------------------
+#
+# effects.py has the tools (a layer of darkness, and holes of light stamped on it).
+# Here is what gives light in the game, and how much: lanterns (a glow, and a cone
+# down onto the floor that sways with them), crystals, portals, the heart of the mine,
+# and the players, each with a glow around them and a cone the way they face.
+
+LANTERN_LIGHT = 30          # radius of the glow of a lantern in a dark room, in pixels
+LANTERN_CONE = (48, 34)     # the cone it throws down: how long, and half its angle in degrees
+CRYSTAL_LIGHT = (14, 22)    # a crystal's glow, from its dimmest to its brightest
+PORTAL_LIGHT = 26
+HEART_LIGHT = (9, 12)       # the heart of the mine beats
+PLAYER_LIGHT = 22           # the glow around a player...
+PLAYER_CONE = (62, 27)      # ...and the cone in front of them: how long, and half its angle
+DOWNED_LIGHT = 11           # a player on the floor gives only a little light
+
+
+def room_darkness(room):
+    """How dark a room is, from 0 (fully lit) to 255: story.py says it, and the switch can turn it off."""
+    if not effects.FX["darkness"]:
+        return 0
+    return story.ROOMS[room].get("dark", 0)
+
+
+def room_lights(app, state, things):
+    """Every light in the room shown, as tuples: ("glow", centre, radius) for a round light and
+    ("cone", point, angle in degrees, length, half angle) for a cone. In room pixels."""
+    frame = app["frame"]
+    lights = []
+    for thing in things:
+        info = story.OBJECTS.get(thing["id"])
+        if thing["kind"] == "item":
+            if thing["id"] == "heart":  # it beats, and glows a little with each beat
+                beat = effects.pulse(frame, 0.12)
+                lights.append(("glow", place_rect(thing).center, HEART_LIGHT[0] + round((HEART_LIGHT[1] - HEART_LIGHT[0]) * beat)))
+            continue
+        if info is None:
+            continue
+        rect = thing_rect(thing["id"])
+        picture = info.get("picture")
+        if picture == "decor_lantern":
+            angle, sway = lantern_swing(app, thing["id"])
+            flame = (rect.centerx + sway, rect.top + 7)
+            flicker = 2 if (frame // 5 + rect.top) % 3 == 0 else 0  # the flame jumps now and then
+            lights.append(("glow", flame, LANTERN_LIGHT + flicker))
+            lights.append(("cone", flame, 90 + round(angle), LANTERN_CONE[0], LANTERN_CONE[1]))
+        elif picture == "decor_crystal":
+            glow = effects.pulse(frame, 0.045, 0.0, 1.0, rect.left * 0.3 + rect.top)  # in step with its colour
+            lights.append(("glow", rect.center, CRYSTAL_LIGHT[0] + round((CRYSTAL_LIGHT[1] - CRYSTAL_LIGHT[0]) * glow)))
+        elif info["kind"] == "portal":
+            lights.append(("glow", rect.center, PORTAL_LIGHT + ((frame // 20) % 2)))
+        elif info["kind"] == "cauldron":
+            lights.append(("glow", (rect.centerx, rect.top + 13), effects.FIRE_GLOW + 6))
+    for number, player in enumerate(app["players"], start=1):
+        if not same_room(app, player) or engine.is_out(app["state"], number):
+            continue
+        middle = player_rect(player["pos"]).center
+        if number in app["downed"]:
+            lights.append(("glow", middle, DOWNED_LIGHT))
+            continue
+        lights.append(("glow", middle, PLAYER_LIGHT))
+        fx, fy = player["facing"]
+        lights.append(("cone", middle, round(math.degrees(math.atan2(fy, fx))), PLAYER_CONE[0], PLAYER_CONE[1]))
+    return lights
+
+
+def draw_darkness(app, surface, state, things):
+    """In a dark room, lay the darkness over the room, with a hole for every light in it."""
+    dark = room_darkness(state["room"])
+    if dark <= 0:
+        return
+    layer = effects.darkness(surface.get_size(), dark)
+    for light in room_lights(app, state, things):
+        if light[0] == "glow":
+            effects.punch(layer, effects.light_hole(light[2], dark), light[1])
+        else:
+            effects.punch(layer, effects.light_cone(light[3], light[4], light[2], dark), light[1])
+    surface.blit(layer, (0, 0))
+
+
 def draw_lights(app, surface, things):
     """The light of the room, added on top: lanterns, crystals, the blue fire of the cauldron."""
     if not effects.FX["lights"] and not effects.FX["cauldron"]:
@@ -6221,6 +6306,7 @@ def draw_room(app, screen):
     effects.draw_clue_glow(screen, app["fx"])
     effects.draw_particles(screen, app["fx"]["particles"])
     effects.draw_dust(screen, app["fx"], app["frame"])
+    draw_darkness(app, screen, state, things)  # a dark room: dark, but for the holes of light
     draw_lights(app, screen, things)
     # The letter of each generator, on the floor above it.
     for thing in things:
@@ -7020,11 +7106,16 @@ FX = {
     "clues": True,          # a glow and twinkles on the thing that gave a new clue
     "crumble": True,        # the crab statue shaking the ship, trembling and dropping stones before it breaks
     "shatter": True,        # the giant claw that breaks the screen when the crab has caught both players
+    "darkness": True,       # the dark rooms, lit only around lanterns, crystals, portals and the players
 }
 
 # --- Timing and sizes (frames are 1/60 of a second) --------------------------------------
 
 SEED = 7                     # the seed of the randomness of the effects
+DARK_COLOR = (6, 8, 22)      # what the dark of a dark room looks like: almost black, a little blue
+LIGHT_REACH = (1.0, 0.82, 0.64, 0.46)  # how far each step of a light reaches, of its radius: the last is fully lit
+LIGHT_BANDS = len(LIGHT_REACH)         # a light fades into the dark in this many hard steps, not smoothly
+CONE_BANDS = 3               # and a cone of light in this many, along its length
 SHARD_GRAVITY = 0.2          # pixels per frame, per frame: how fast the pieces of a broken screen fall
 SHARD_PUSH = 1.6             # how hard they are pushed away from where the screen was hit
 SHARD_SPIN = 5               # degrees per frame, at most, either way
@@ -7534,6 +7625,86 @@ def draw_cracks(surface, pieces, center, reach, offset=(0, 0)):
             b = (round(far[0]) + offset[0], round(far[1]) + offset[1])
             pygame.draw.line(surface, SHARD_EDGE, (a[0] + 1, a[1]), (b[0] + 1, b[1]), 1)
             pygame.draw.line(surface, CRACK_DARK, a, b, 1)
+
+
+# --- Dark rooms: a layer of darkness with holes of light in it -----------------------------
+#
+# The room is drawn as usual, and a layer as big as the room goes over it: see-through
+# dark everywhere, clear where there is light. A light is a picture of a hole: clear in
+# the middle, and darker ring by ring out to the full dark at its edge, in hard steps
+# (no smooth fade: these are big pixels). Each hole is stamped on the layer keeping, for
+# every pixel, the clearer of the two: so two lights next to each other join, and one
+# never darkens what the other has lit.
+#
+# The idea of a dark layer with a stepped hole in it comes from the "punch_a_hole" sample
+# of Mekire's pygame-samples (github.com/Mekire/pygame-samples); the code here is ours.
+
+_dark_layers = {}  # size -> the layer for rooms of that size, made once
+_holes = {}        # (radius, dark) -> the picture of a round hole
+_cones = {}        # (length, half angle, angle, dark) -> the picture of a cone-shaped hole
+
+
+def darkness(size, dark):
+    """A layer of this size, all dark: `dark` from 0 (clear) to 255 (pitch black). Stamp lights on it
+    with punch(), then blit it over the room."""
+    if size not in _dark_layers:
+        _dark_layers[size] = pygame.Surface(size, pygame.SRCALPHA)
+    layer = _dark_layers[size]
+    layer.fill(DARK_COLOR + (dark,))
+    return layer
+
+
+def band_alpha(dark, band, bands):
+    """How dark the `band`-th step of a light is, from the outside (0) in: the last one is clear."""
+    return round(dark * (bands - 1 - band) / bands)
+
+
+def light_hole(radius, dark):
+    """The picture of a round light in a darkness of `dark`: rings from almost as dark as the room
+    at the edge to clear in the middle."""
+    key = (radius, dark)
+    if key not in _holes:
+        size = radius * 2 + 1
+        picture = pygame.Surface((size, size), pygame.SRCALPHA)
+        picture.fill(DARK_COLOR + (dark,))
+        for band in range(LIGHT_BANDS):
+            reach = round(radius * LIGHT_REACH[band])
+            pygame.draw.circle(picture, DARK_COLOR + (band_alpha(dark, band, LIGHT_BANDS),), (radius, radius), reach)
+        _holes[key] = picture
+    return _holes[key]
+
+
+def cone_points(origin, angle, length, half, steps=6):
+    """The corners of a cone of light: its point at `origin`, opening `half` degrees either side of
+    `angle` (degrees, 0 to the right, 90 down), `length` pixels long, with a round far end."""
+    points = [origin]
+    for step in range(steps + 1):
+        turn = math.radians(angle - half + 2 * half * step / steps)
+        points.append((origin[0] + length * math.cos(turn), origin[1] + length * math.sin(turn)))
+    return [(round(x), round(y)) for x, y in points]
+
+
+def light_cone(length, half, angle, dark):
+    """The picture of a cone of light in a darkness of `dark`, its point in the middle of the picture:
+    clear near the point, darker step by step along its length."""
+    key = (length, half, angle, dark)
+    if key not in _cones:
+        size = length * 2 + 1
+        picture = pygame.Surface((size, size), pygame.SRCALPHA)
+        picture.fill(DARK_COLOR + (dark,))
+        for band in range(CONE_BANDS):
+            reach = round(length * (CONE_BANDS - band) / CONE_BANDS)
+            pygame.draw.polygon(picture, DARK_COLOR + (band_alpha(dark, band, CONE_BANDS),),
+                                cone_points((length, length), angle, reach, half))
+        _cones[key] = picture
+    return _cones[key]
+
+
+def punch(layer, picture, center):
+    """Stamp a light (a light_hole or a light_cone) on a layer of darkness, centred there: every
+    pixel keeps the clearer of the two."""
+    place = picture.get_rect(center=(round(center[0]), round(center[1])))
+    layer.blit(picture, place, special_flags=pygame.BLEND_RGBA_MIN)
 
 
 ================================================================================
@@ -15116,6 +15287,181 @@ def test_both_computers_see_the_claw_and_then_the_ending(two_computers, heard):
     assert guest["state"]["ending"] == "caught" and guest["shatter"] is None and host["shatter"] is None
 
 
+# --- Dark rooms, and the light in them --------------------------------------------------------
+
+
+DARK_ROOMS = {"corridor", "corridor_end", "mine"}
+
+
+def in_the_dark(app, room, tile=None, facing=(0, 1)):
+    """A game alone, moved to a room, the player on a free tile, looking one way. A few frames have passed."""
+    start_new_game(app)
+    state = play(BOTH_HALVES)
+    state["room"] = room
+    app["state"] = state
+    p1(app)["pos"] = free_spot(app, *tile) if tile else main.spawn_at_entry(room)
+    p1(app)["facing"] = facing
+    for _ in range(3):
+        main.update(app, 0, 0)
+    app["fade"] = 0
+    app["banner_frames"] = 0
+
+
+def lights(app):
+    state = main.view(app)
+    return main.room_lights(app, state, engine.things_here(state))
+
+
+def room_picture(app):
+    """The whole room as it is drawn now, in room pixels."""
+    surface = pygame.Surface(main.room_surface(main.view(app)["room"]).get_size())
+    main.draw_room(app, surface)
+    return surface
+
+
+def brightness(color):
+    return sum(tuple(color)[:3])
+
+
+def test_the_rooms_under_the_hold_are_dark_and_the_others_are_not():
+    assert {room for room, info in story.ROOMS.items() if info.get("dark")} == DARK_ROOMS
+    for room in DARK_ROOMS:
+        assert 100 <= story.ROOMS[room]["dark"] < 255 and main.room_darkness(room) == story.ROOMS[room]["dark"]
+    assert story.ROOMS["mine"]["dark"] > story.ROOMS["corridor"]["dark"]  # the deepest, the darkest
+    assert main.room_darkness("deck") == 0 and main.room_darkness("cabin") == 0
+
+
+def test_a_dark_room_is_dark_but_for_the_light_around_the_player(app, monkeypatch):
+    in_the_dark(app, "mine", (7, 12), (1, 0))
+    dark = room_picture(app)
+    monkeypatch.setitem(effects.FX, "darkness", False)
+    lit = room_picture(app)
+    monkeypatch.setitem(effects.FX, "darkness", True)
+    x, y = main.player_rect(p1(app)["pos"]).center
+    floor = main.floor_rect("mine")
+    spots = [(fx, fy) for fx in range(floor.left + 4, floor.right - 4, 6) for fy in range(floor.top + 4, floor.bottom - 4, 6)]
+    far = max(spots, key=lambda spot: min(pygame.Vector2(spot).distance_to(light[1]) for light in lights(app)))
+    assert min(pygame.Vector2(far).distance_to(light[1]) for light in lights(app)) > 50  # nothing gives light there
+    assert brightness(dark.get_at(far)) < brightness(lit.get_at(far)) * 0.6  # much darker
+    assert brightness(dark.get_at((x, y + 9))) >= brightness(lit.get_at((x, y + 9)))  # at the player's feet: as lit
+    ahead, behind = (x + 34, y + 3), (x - 34, y + 3)
+    assert brightness(dark.get_at(ahead)) > brightness(dark.get_at(behind))  # the cone in front, the dark behind
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+
+
+def test_the_cone_of_a_player_points_the_way_they_face(app):
+    in_the_dark(app, "mine", (7, 12))
+    middle = main.player_rect(p1(app)["pos"]).center
+    for facing, angle in (((1, 0), 0), ((0, 1), 90), ((-1, 0), 180), ((0, -1), -90)):
+        p1(app)["facing"] = facing
+        mine_lights = [light for light in lights(app) if light[1] == middle]
+        assert ("glow", middle, main.PLAYER_LIGHT) in mine_lights
+        assert ("cone", middle, angle, main.PLAYER_CONE[0], main.PLAYER_CONE[1]) in mine_lights
+    start = p1(app)["pos"]
+    main.update(app, -1, 0)  # walking left: the light goes with the player, and turns
+    moved = main.player_rect(p1(app)["pos"]).center
+    assert moved != middle and ("cone", moved, 180, main.PLAYER_CONE[0], main.PLAYER_CONE[1]) in lights(app)
+
+
+def test_lanterns_throw_a_glow_and_a_cone_down_that_sways_with_them(app):
+    in_the_dark(app, "mine")
+    lanterns = [name for name, info in story.OBJECTS.items() if info["room"] == "mine" and info.get("picture") == "decor_lantern"]
+    assert len(lanterns) == 3
+    cones = [light for light in lights(app) if light[0] == "cone" and light[3] == main.LANTERN_CONE[0]]
+    glows = [light for light in lights(app) if light[0] == "glow" and light[2] >= main.LANTERN_LIGHT]
+    assert len(cones) == 3 and len(glows) == 3
+    for cone in cones:
+        assert abs(cone[2] - 90) <= effects.LANTERN_SWING  # downwards, a little to one side or the other
+        assert any(glow[1] == cone[1] for glow in glows)   # from the flame
+    angles, sizes = set(), set()
+    for _ in range(200):
+        main.update(app, 0, 0)
+        angles |= {light[2] for light in lights(app) if light[0] == "cone" and light[3] == main.LANTERN_CONE[0]}
+        sizes |= {light[2] for light in lights(app) if light[0] == "glow" and light[2] >= main.LANTERN_LIGHT}
+    assert len(angles) >= 5 and min(angles) < 90 < max(angles)  # it sways
+    assert sizes == {main.LANTERN_LIGHT, main.LANTERN_LIGHT + 2}  # and the flame jumps
+
+
+def test_crystals_portals_and_the_heart_glow(app):
+    in_the_dark(app, "mine")
+    centers = {light[1]: light[2] for light in lights(app) if light[0] == "glow"}
+    crystals = [name for name, info in story.OBJECTS.items() if info["room"] == "mine" and info.get("picture") == "decor_crystal"]
+    portals = [name for name, info in story.OBJECTS.items() if info["room"] == "mine" and info["kind"] == "portal"]
+    assert len(crystals) == 4 and len(portals) == 2
+    for crystal in crystals:
+        assert main.CRYSTAL_LIGHT[0] <= centers[main.thing_rect(crystal).center] <= main.CRYSTAL_LIGHT[1]
+    for portal in portals:
+        assert centers[main.thing_rect(portal).center] in (main.PORTAL_LIGHT, main.PORTAL_LIGHT + 1)
+    heart = main.thing_rect("heart").center
+    assert main.HEART_LIGHT[0] <= centers[heart] <= main.HEART_LIGHT[1]
+    seen = {name: set() for name in crystals + ["heart"]}
+    for _ in range(160):
+        main.update(app, 0, 0)
+        now = {light[1]: light[2] for light in lights(app) if light[0] == "glow"}
+        for name in seen:
+            seen[name].add(now[main.thing_rect(name).center])
+    assert all(len(sizes) >= 3 for sizes in seen.values())  # they pulse
+    stand_next_to(app, "heart")
+    press(app, pygame.K_e)  # picked up: used, gone, and its light with it
+    read_all(app)
+    p1(app)["pos"] = main.spawn_at_entry("mine")  # away from where it was
+    assert heart not in {light[1] for light in lights(app)}
+
+
+def test_only_players_in_the_room_and_in_the_game_give_light(app):
+    two_playing(app, FIRST_HALF)
+    app["state"]["room"] = "mine"
+    app["state"]["flags"]["partner_room"] = "mine"
+    main.place_at_entry(app)
+    main.update(app, 0, 0)
+
+    def cones():
+        return [light for light in lights(app) if light[0] == "cone" and light[3] == main.PLAYER_CONE[0]]
+    assert len(cones()) == 2  # each with their own
+    partner = main.player_rect(app["players"][1]["pos"]).center
+    app["downed"] = {2: main.DOWN_FRAMES}
+    assert len(cones()) == 1 and ("glow", partner, main.DOWNED_LIGHT) in lights(app)  # down: a small glow only
+    app["downed"] = {}
+    app["state"]["flags"]["partner_room"] = "deck"
+    assert len(cones()) == 1 and partner not in {light[1] for light in lights(app)}  # elsewhere: no light here
+    app["state"]["flags"]["partner_room"] = "mine"
+    app["state"] = engine.knock_out(app["state"], 2)[0]
+    assert len(cones()) == 1  # out of the game: gone
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+
+
+def test_a_lit_room_is_drawn_exactly_as_before(app, monkeypatch):
+    start_new_game(app)
+    playing(app, IN_THE_CABIN)
+    main.update(app, 0, 0)
+    with_it = room_picture(app)
+    monkeypatch.setitem(effects.FX, "darkness", False)
+    without = room_picture(app)
+    size = with_it.get_size()
+    assert all(with_it.get_at((x, y)) == without.get_at((x, y)) for x in range(0, size[0], 3) for y in range(0, size[1], 3))
+
+
+def test_without_the_effect_the_dark_rooms_are_lit_as_before(app, monkeypatch):
+    monkeypatch.setitem(effects.FX, "darkness", False)
+    in_the_dark(app, "corridor")
+    assert main.room_darkness("corridor") == 0
+    calls = []
+    monkeypatch.setattr(effects, "darkness", lambda size, dark: calls.append(size))
+    room_picture(app)
+    assert calls == []
+
+
+def test_every_dark_room_can_be_walked_and_drawn(app):
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for room in sorted(DARK_ROOMS):
+        in_the_dark(app, room)
+        for direction in ((1, 0), (0, 1), (-1, 0), (0, -1)):
+            for _ in range(12):
+                main.update(app, *direction)
+                main.draw(app, screen)
+        assert len(lights(app)) >= 4, room  # never left in the dark: lanterns and the player at least
+
+
 ================================================================================
 # FILE: plot_twist/test_effects.py
 ================================================================================
@@ -15126,6 +15472,8 @@ The effects never change the game: these tests check that they start when they
 should, end when they should, and that their tools (particles, glows, dissolves,
 ripples) do what they promise. conftest.py keeps the save file in a temporary folder.
 """
+
+import math
 
 import pygame
 import pytest
@@ -15515,6 +15863,83 @@ def test_the_cracks_run_outwards_from_the_hit():
 
 def test_the_two_new_effects_have_their_switches():
     assert effects.FX["crumble"] is True and effects.FX["shatter"] is True
+
+
+# --- Dark rooms: a layer of darkness with holes of light ----------------------------------
+
+
+def alpha(picture, x, y):
+    return picture.get_at((x, y))[3]
+
+
+def test_a_layer_of_darkness_is_dark_everywhere_and_made_once_for_a_size():
+    layer = effects.darkness((64, 48), 150)
+    assert layer.get_size() == (64, 48)
+    assert all(tuple(layer.get_at((x, y))) == effects.DARK_COLOR + (150,) for x in range(0, 64, 7) for y in range(0, 48, 5))
+    effects.punch(layer, effects.light_hole(10, 150), (30, 20))
+    again = effects.darkness((64, 48), 90)
+    assert again is layer  # the same picture, wiped: no new one every frame
+    assert all(alpha(again, x, y) == 90 for x in range(0, 64, 7) for y in range(0, 48, 5))
+
+
+def test_a_light_is_clear_in_the_middle_and_darker_ring_by_ring_in_hard_steps():
+    radius, dark = 20, 160
+    hole = effects.light_hole(radius, dark)
+    assert hole.get_size() == (2 * radius + 1, 2 * radius + 1)
+    assert alpha(hole, radius, radius) == 0  # clear where the light is
+    assert alpha(hole, 0, 0) == dark and alpha(hole, 2 * radius, 0) == dark  # the corners: outside the light
+    along = [alpha(hole, radius + step, radius) for step in range(radius - 1)]  # from the middle to just inside its edge
+    assert along == sorted(along)  # never brighter further out
+    steps = sorted(set(along))
+    assert len(steps) == effects.LIGHT_BANDS and steps[0] == 0 and steps[-1] < dark  # bands, not a smooth fade
+    assert steps == [effects.band_alpha(dark, band, effects.LIGHT_BANDS) for band in reversed(range(effects.LIGHT_BANDS))]
+    seen = {alpha(hole, x, y) for x in range(2 * radius + 1) for y in range(2 * radius + 1)}
+    assert seen == set(steps) | {dark}  # no value in between anywhere: nothing blurred
+    assert effects.light_hole(radius, dark) is hole  # drawn once, then kept
+    assert all(tuple(hole.get_at((x, radius)))[:3] == effects.DARK_COLOR for x in range(2 * radius + 1))
+
+
+def test_two_lights_join_and_one_never_darkens_what_the_other_lit():
+    dark = 200
+    layer = effects.darkness((120, 60), dark)
+    hole = effects.light_hole(20, dark)
+    effects.punch(layer, hole, (40, 30))
+    before = [[alpha(layer, x, y) for x in range(120)] for y in range(60)]
+    assert before[30][40] == 0 and before[30][110] == dark
+    effects.punch(layer, hole, (70, 30))  # a second light, overlapping the first
+    after = [[alpha(layer, x, y) for x in range(120)] for y in range(60)]
+    assert all(after[y][x] <= before[y][x] for x in range(120) for y in range(60))  # never darker than before
+    assert after[30][40] == 0 and after[30][70] == 0  # both middles clear
+    assert after[30][55] < dark and after[30][55] == min(alpha(hole, 20 + 15, 20), alpha(hole, 20 - 15, 20))
+    assert after[5][5] == dark  # far from both: still dark
+
+
+def test_a_cone_of_light_is_clear_at_its_point_and_fades_along_its_length():
+    length, half, dark = 40, 30, 180
+    cone = effects.light_cone(length, half, 0, dark)  # pointing right
+    assert cone.get_size() == (2 * length + 1, 2 * length + 1)
+    middle = length
+    assert alpha(cone, middle + 3, middle) == 0  # just in front of its point
+    along = [alpha(cone, middle + step, middle) for step in range(1, length)]
+    assert along == sorted(along) and len(set(along)) == effects.CONE_BANDS
+    assert alpha(cone, middle - 10, middle) == dark  # nothing behind it
+    assert alpha(cone, middle + 20, middle - 30) == dark and alpha(cone, middle + 20, middle + 30) == dark  # nor beside
+    assert alpha(cone, middle + 20, middle + 8) < dark and alpha(cone, middle + 20, middle - 8) < dark  # inside its angle
+    down = effects.light_cone(length, half, 90, dark)
+    assert alpha(down, middle, middle + 12) == alpha(cone, middle + 12, middle)  # the same cone, turned
+    assert alpha(down, middle + 12, middle) == dark
+    assert effects.light_cone(length, half, 0, dark) is cone
+
+
+def test_the_corners_of_a_cone():
+    points = effects.cone_points((50, 50), 90, 30, 45, steps=4)
+    assert points[0] == (50, 50) and len(points) == 6
+    assert points[1] == (71, 71) and points[-1] == (29, 71) and points[3] == (50, 80)  # opening downwards
+    assert all(abs(math.hypot(x - 50, y - 50) - 30) < 1 for x, y in points[1:])  # a round far end
+
+
+def test_darkness_has_its_switch():
+    assert effects.FX["darkness"] is True
 
 
 ================================================================================

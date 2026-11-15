@@ -2,9 +2,18 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v35](versions/v35.md) - A real crab's limb (2026-11-15)
+## [v36](versions/v36.md) - Dark rooms and light (2026-11-15)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- Three rooms are dark now: the corridor under the hold, its far end, and the mine, the darkest (a new optional "dark" in story.ROOMS, from 1 to 255). The other rooms are drawn exactly as before.
+- What gives light: lanterns (a glow, and a cone thrown down on the floor that sways with them, with a flame that jumps), crystals and the heart of the mine (pulsing), portals, and the players: a glow around each and a cone the way they face. A player who is down gives only a little light; one in another room or out of the game gives none.
+- How: a layer of darkness as big as the room goes over it, with a hole for every light. A hole is clear in the middle and darker ring by ring, in four hard steps, never a smooth fade; a cone does the same along its length. Holes are stamped keeping the clearer of the two for every pixel, so lights next to each other join and none darkens what another lit. The coloured glows that were already there are added on top.
+- The idea of a dark layer with a stepped hole comes from the punch_a_hole sample of Mekire's pygame-samples; it had one light and one hole, so joining several lights and the cones are new here. The tools are in effects.py with a new switch, "darkness": off, the rooms are lit as before. About 3 ms a frame.
+
+## [v35](versions/v35.md) - A real crab's limb (2026-11-15)
+
+In commit [`3a6e8fc`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/3a6e8fc39c47d83b53ee28eb4c503a0bca45e0ef/plot_twist).
 
 - The giant claw that breaks the screen is no longer a plain red arm: it is a crab's limb in three segments, each at an angle to the next: the upper arm from beyond the top right corner, the thick forearm, and the massive hand that holds the two jaws. Dark plated joints, one plate over the other, join them.
 - It moves like a limb. The shoulder stays put and the elbow bends by itself (an arm of two bones): folded out of sight at first, it stretches out as it strikes, and the wrist, cocked back on the way in, snaps forward as the jaws shut.
