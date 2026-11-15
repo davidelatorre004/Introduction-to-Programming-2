@@ -98,11 +98,11 @@ Some help:
 
 The Space ability works only once per game: the bottom left corner says so as long as it is available. If you use it while the crab is still a statue, it is wasted.
 
-**The crab (two players only).** As soon as you solve the cabin, the crab statue on the deck breaks into pieces and the crab comes out to hunt you. The rubble stays there until the end.
+**The crab (two players only).** As soon as you solve the cabin, the whole ship shakes: the crab statue on the deck trembles, breaks into pieces, and the crab comes out to hunt you. The rubble stays there until the end.
 - It chases the nearest player and is slower than you. If nobody is in its room, it follows you through the open doors.
 - If it touches you, you go down and cannot move. Your partner has one minute to help you up: they must stand next to you and hold **E** for 4 seconds (the green bar shows how much is left).
 - If nobody helps you up in time, you are out until the end of the game, and your items pass to your partner. While you are out you watch your partner play.
-- If the crab catches both of you, even when one of you is already out, the game is lost: that is the third ending, "Caught by the crab".
+- If the crab catches both of you, even when one of you is already out, the game is lost: a giant claw snaps shut on the screen and breaks it to pieces, and then comes the third ending, "Caught by the crab".
 - A strategy: one player keeps the crab busy while the other solves the puzzles.
 - When you fuse the two halves of the key, the crab turns back to stone and vanishes in a cloud of dust.
 

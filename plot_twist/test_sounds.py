@@ -64,3 +64,44 @@ def test_with_audio_every_effect_is_made_for_the_mixer(monkeypatch):
     finally:
         sounds._loaded.clear()
         pygame.mixer.quit()
+
+
+def test_a_negative_frequency_is_noise_held_for_as_long_as_it_says():
+    """-1000 at 8000 samples per second: a level every 8 samples, up or down with no pattern, the same every time."""
+    data = sounds.samples([(-1000, 0.1)], 8000)
+    assert len(data) == 800
+    levels = [data[index] for index in range(0, 720, 8)]
+    for index in range(0, 720, 8):
+        assert set(data[index:index + 8]) == {data[index]}  # held between two steps
+    assert set(levels) == {PEAK, -PEAK}  # as loud as a square wave, both ways
+    runs = [len(run) for run in "".join("u" if level > 0 else "d" for level in levels).replace("ud", "u d").replace("du", "d u").split()]
+    assert len(set(runs)) > 2  # runs of different lengths: not a regular wave
+    assert list(data) == list(sounds.samples([(-1000, 0.1)], 8000))
+    assert 0 < abs(data[-1]) < PEAK  # it fades out like a note
+
+
+def test_low_noise_is_rougher_than_high_noise():
+    low = sounds.samples([(-50, 0.2)], 8000)
+    high = sounds.samples([(-4000, 0.2)], 8000)
+
+    def changes(data):
+        return sum(1 for index in range(1, len(data) - 100) if (data[index] > 0) != (data[index - 1] > 0))
+    assert changes(low) < 12 < 200 < changes(high)
+
+
+def test_the_register_of_the_noise_never_gets_stuck():
+    register, seen = sounds.NOISE_SEED, set()
+    for _ in range(2000):
+        register = sounds.noise_bit(register)
+        assert 0 < register < 2 ** 15
+        seen.add(register)
+    assert len(seen) == 2000  # no short loop
+
+
+def test_the_statue_and_the_claw_have_their_sounds():
+    for name, noisy in (("crumble", True), ("snap", True), ("shatter", True)):
+        notes = sounds.EFFECTS[name]
+        assert any(frequency < 0 for frequency, _ in notes) == noisy, name
+    assert min(frequency for frequency, _ in sounds.EFFECTS["crumble"] if frequency > 0) < 60   # deep
+    assert sum(length for _, length in sounds.EFFECTS["snap"]) < 0.15                            # dry
+    assert max(-frequency for frequency, _ in sounds.EFFECTS["shatter"] if frequency < 0) > 8000  # sharp

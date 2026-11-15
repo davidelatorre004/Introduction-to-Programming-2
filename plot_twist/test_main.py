@@ -1954,12 +1954,11 @@ def test_when_the_crab_catches_both_players_the_game_is_over(app, heard):
     main.update(app, 0, 0)
     assert app["state"]["ending"] == "caught"
     assert engine.restore_state(save.load_game())["ending"] == "caught"  # saved, like the other endings
-    assert dialog_text(app) == story.MESSAGES["crab_ending"] and "knocked_out" in heard
+    assert app["scene"] == "shatter" and app["dialog"] == []  # the giant claw first...
     main.update(app, 0, 0)
     assert app["crab"] is None and app["downed"] == {}  # the game is over: the crab is gone
-    assert app["scene"] == "play"  # the text first...
-    read_all(app)
-    main.update(app, 0, 0)
+    for _ in range(main.SHATTER_FRAMES):
+        main.update(app, 0, 0)
     assert app["scene"] == "ending"  # ...then the third ending
     screen = pygame.Surface((main.WIDTH, main.HEIGHT))
     for frames in (0, main.CRAB_RISE_FRAMES // 2, main.CRAB_RISE_FRAMES + 10):
@@ -2462,9 +2461,13 @@ def test_the_statue_lies_in_pieces_once_the_crab_is_out_and_for_good(app):
     main.draw(app, whole)
     app["state"] = play_two(FIRST_HALF)
     app["fx"]["particles"].clear()
-    main.update(app, 0, 0)  # the crab bursts out: dust and pieces fly
+    main.update(app, 0, 0)  # the crab is breaking out: the statue trembles, then bursts
+    for _ in range(main.CRUMBLE_BREAK + 1):
+        main.update(app, 0, 0)
     assert len([one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS]) >= 30
     assert statue.collidelist(main.solid_rects(app["state"])) != -1  # still in the way, as before
+    for _ in range(main.CRUMBLE_FRAMES):
+        main.update(app, 0, 0)  # the ship stops shaking
     app["fx"]["particles"].clear()
     app["banner_frames"] = 0
     broken = pygame.Surface((main.WIDTH, main.HEIGHT))
@@ -2516,3 +2519,342 @@ def test_showing_the_game_on_a_bigger_screen_leaves_black_around_it():
     assert tuple(window.get_at(area.center))[:3] == (200, 10, 10)
     assert tuple(window.get_at((2, 2)))[:3] == main.COLORS["black"]
     assert main.FULLSCREEN_KEY == pygame.K_F11 and "F11" in story.MESSAGES["window_title"]
+
+
+# --- The statue shaking and crumbling ---------------------------------------------------------
+
+
+def on_deck_before_the_crab(app):
+    """A game for two with both players on the deck, the cabin not solved yet: the statue stands."""
+    two_playing(app, IN_THE_CABIN)
+    app["state"]["room"] = "deck"
+    app["state"]["flags"]["partner_room"] = "deck"
+    main.place_at_entry(app)
+    p1(app)["pos"] = free_spot(app, 4, 12)  # near the statue: it is on screen
+    main.update(app, 0, 0)
+    app["fade"] = 0
+    app["banner_frames"] = 0
+
+
+def wake_the_crab(app):
+    """The cabin has just been solved: the next frame the crab comes alive."""
+    state = play_two(FIRST_HALF)
+    state["room"], state["flags"]["partner_room"] = app["state"]["room"], app["state"]["flags"]["partner_room"]
+    app["state"] = state
+    main.update(app, 0, 0)
+
+
+def test_the_ship_shakes_less_and_less_while_the_statue_crumbles(app, heard):
+    on_deck_before_the_crab(app)
+    assert main.room_shake(app) == (0, 0)
+    wake_the_crab(app)
+    assert 35 <= main.CRUMBLE_FRAMES <= 45 and app["crumble"] == main.CRUMBLE_FRAMES - 1
+    assert heard.count("crumble") == 1 and "crab_wake" in heard  # the low rumble, with the crab's notes
+    shakes = []
+    for _ in range(main.CRUMBLE_FRAMES):
+        shakes.append(main.room_shake(app))
+        main.update(app, 0, 0)
+    strength = [abs(dx) + abs(dy) for dx, dy in shakes]
+    assert max(strength[:10]) >= 3 and max(strength[:10]) > max(strength[-10:])  # hard at first, then dying down
+    assert len(set(shakes[:15])) > 6 and any(dx != 0 for dx, dy in shakes) and any(dy != 0 for dx, dy in shakes)
+    assert app["crumble"] == 0 and main.room_shake(app) == (0, 0)
+    assert heard.count("crumble") == 1
+
+
+def test_the_shake_moves_the_room_but_not_the_bar_on_top(app):
+    on_deck_before_the_crab(app)
+    still = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, still)
+    wake_the_crab(app)
+    app["banner_frames"] = 0
+    shaken = pygame.Surface((main.WIDTH, main.HEIGHT))
+    moved = 0
+    for _ in range(10):
+        dx, dy = main.room_shake(app)
+        main.draw(app, shaken)
+        name = pygame.Rect(0, 0, 90, 14)  # the name of the room, in the bar (the wand's icon glows on its own)
+        assert all(shaken.get_at((x, y)) == still.get_at((x, y)) for x in range(name.width) for y in range(name.height))
+        if (dx, dy) != (0, 0):
+            wall = (2, main.HUD_HEIGHT + 60)  # a pixel of the wall on the left, far from the statue and the players
+            moved += shaken.get_at((wall[0] + 8 + dx, wall[1] + dy)) == still.get_at((wall[0] + 8, wall[1]))
+        main.update(app, 0, 0)
+    assert moved >= 5  # the room is the same picture, pushed aside
+
+
+def test_the_statue_trembles_whole_then_bursts_and_only_then_the_crab_is_out(app):
+    on_deck_before_the_crab(app)
+    statue = main.thing_rect("deck_statue")
+    wake_the_crab(app)
+    assert engine.statue_broken(app["state"]) and main.statue_trembles(app)
+    assert app["crab"] is not None and not main.crab_here(app)  # still inside its statue
+    drawn = []
+    monkey = main.draw_trembling_statue
+
+    def spy(app, screen):
+        drawn.append(app["crumble"])
+        monkey(app, screen)
+    main.draw_trembling_statue = spy
+    try:
+        screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+        looks = set()
+        cam_x, cam_y = main.camera("deck", main.view_position(app))
+        for frame in range(main.CRUMBLE_BREAK - 1):
+            assert main.statue_trembles(app), frame
+            main.draw(app, screen)
+            dx, dy = main.room_shake(app)
+            shell = (statue.centerx - cam_x + dx, statue.centery + 2 - cam_y + dy)  # the middle of its shell
+            looks.add(tuple(screen.get_at(shell))[:3])
+            falling = [one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS]
+            main.update(app, 0, 0)
+        assert len(drawn) == main.CRUMBLE_BREAK - 1  # the whole statue, every one of those frames
+        assert len(looks) >= 2  # it flashes pale now and then
+        assert falling and all(one["vy"] >= 0 or one["gravity"] > 0 for one in falling)  # stones and dust come down
+        assert all(statue.left - 12 <= one["x"] <= statue.right + 12 for one in falling)  # around the statue
+        before = len(falling)
+        for _ in range(3):
+            main.update(app, 0, 0)
+        assert not main.statue_trembles(app) and main.crab_here(app)  # it has burst: the crab is out
+        assert len([one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS]) >= before + 30
+        main.draw(app, screen)
+        assert len(drawn) == main.CRUMBLE_BREAK - 1  # rubble from now on
+    finally:
+        main.draw_trembling_statue = monkey
+
+
+def test_far_from_the_deck_the_ship_still_shakes_but_no_stones_fall(app, heard):
+    two_playing(app, IN_THE_CABIN)  # both in the cabin, where the generators are: nobody sees the statue
+    main.update(app, 0, 0)
+    app["state"] = play_two(CIRCUIT_COMPLETE)
+    app["fx"]["particles"].clear()
+    main.update(app, 0, 0)
+    assert app["crumble"] > 0 and "crumble" in heard
+    assert any(main.room_shake(app) != (0, 0) or main.update(app, 0, 0) for _ in range(5))
+    for _ in range(main.CRUMBLE_FRAMES):
+        main.update(app, 0, 0)
+    assert [one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS] == []
+
+
+def test_without_the_effect_the_statue_bursts_at_once_as_before(app, heard, monkeypatch):
+    monkeypatch.setitem(effects.FX, "crumble", False)
+    on_deck_before_the_crab(app)
+    app["fx"]["particles"].clear()
+    wake_the_crab(app)
+    assert app["crumble"] == 0 and "crumble" not in heard and main.room_shake(app) == (0, 0)
+    assert len([one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS]) >= 30
+    assert main.crab_here(app)
+
+
+def test_a_new_game_starts_without_anything_left_of_the_crumbling(app):
+    on_deck_before_the_crab(app)
+    wake_the_crab(app)
+    assert app["crumble"] > 0
+    press(app, pygame.K_ESCAPE)
+    choose = main.menu_entries(app).index("main_menu")
+    press(app, *([pygame.K_DOWN] * choose), pygame.K_RETURN)
+    assert app["scene"] == "menu" and app["crumble"] == 0
+    press(app, pygame.K_RETURN, pygame.K_RETURN, pygame.K_RETURN, pygame.K_RETURN)  # New game, Yes, 1 player, the wizard
+    read_all(app)
+    assert app["scene"] == "play" and app["crumble"] == 0 and main.room_shake(app) == (0, 0)
+    main.update(app, 0, 0)
+    assert app["crab"] is None
+
+
+# --- The giant claw that breaks the screen ----------------------------------------------------
+
+
+def caught_both(app):
+    """A game for two at the moment the crab catches the second player: the claw sequence has just started."""
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    for _ in range(main.CRUMBLE_FRAMES):
+        main.update(app, 0, 0)
+    app["crab"]["wait"] = 0
+    app["fade"] = 0
+    app["banner_frames"] = 0
+    app["downed"] = {2: main.DOWN_FRAMES}
+    app["players"][1]["pos"] = free_spot(app, 12, 6)
+    p1(app)["pos"] = app["crab"]["pos"]
+    main.update(app, 0, 0)
+    assert app["scene"] == "shatter"
+
+
+def colors(screen, step=4):
+    return [tuple(screen.get_at((x, y)))[:3] for x in range(0, main.WIDTH, step) for y in range(0, main.HEIGHT, step)]
+
+
+def test_the_claw_breaks_a_copy_of_the_last_picture_of_the_game(app):
+    caught_both(app)
+    shatter = app["shatter"]
+    assert shatter["frozen"].get_size() == (main.WIDTH, main.HEIGHT)  # the small screen, before it is enlarged
+    again = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw_play_screen(app, again, overlays=False)
+    room = tuple(shatter["frozen"].get_at((20, main.HUD_HEIGHT + 100)))[:3]
+    assert room != main.COLORS["black"] and room == sprites.PALETTE["b"] or room in sprites.PALETTE.values()
+    assert len(set(colors(shatter["frozen"]))) > 8  # the room, the bar, the players: a real picture
+    assert len(shatter["shards"]) == len(shatter["pieces"]) >= 20 and shatter["hit"] == (main.WIDTH // 2, main.HEIGHT // 2)
+    frozen_before = colors(shatter["frozen"])
+    for _ in range(40):
+        main.update(app, 0, 0)
+    assert colors(shatter["frozen"]) == frozen_before  # frozen: the game behind it has stopped
+
+
+def test_the_three_parts_of_the_sequence_come_at_their_frames_with_their_sounds(app, heard):
+    caught_both(app)
+    assert main.CLAW_ATTACK == 15 and main.CLAW_IMPACT == 27 and 80 <= main.SHATTER_FRAMES <= 90
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    frozen = app["shatter"]["frozen"]
+    corner = (6, main.HEIGHT - 6)  # far from the claw and from the middle
+    black, played = {}, {}
+    del heard[:]
+    while app["scene"] == "shatter":
+        age = app["shatter"]["age"]
+        main.draw(app, screen)
+        black[age] = sum(1 for color in colors(screen) if color == main.COLORS["black"])
+        if age < main.CLAW_ATTACK:
+            assert screen.get_at(corner) == frozen.get_at(corner), age  # the picture, still, under the claw
+        if age in (main.CLAW_ATTACK, main.CLAW_ATTACK + 1):
+            assert tuple(screen.get_at(corner))[:3] != tuple(frozen.get_at(corner))[:3], age  # the white flash
+            assert sum(tuple(screen.get_at(corner))[:3]) > 500
+        before = len(heard)
+        main.update(app, 0, 0)
+        for name in heard[before:]:
+            played[name] = age + 1
+    assert played == {"snap": main.CLAW_ATTACK, "shatter": main.CLAW_IMPACT}  # the snap at the hit, the glass after
+    assert heard == ["snap", "shatter"]
+    whole = (main.WIDTH // 4) * (main.HEIGHT // 4)
+    assert black[main.CLAW_IMPACT - 1] < whole // 10           # cracked, but still in one piece
+    falling = [black[age] for age in range(main.CLAW_IMPACT, main.SHATTER_FRAMES)]
+    assert falling[5] < falling[25] < falling[45]                # more and more black behind the pieces
+    assert falling[-1] > whole * 0.9                             # at the end almost nothing is left
+    assert app["scene"] == "ending" and app["shatter"] is None and app["scene_frames"] == 0
+
+
+def test_the_claw_comes_in_from_the_corner_closes_on_the_middle_and_pulls_back():
+    outside, opening = main.claw_place(0)
+    assert not pygame.Rect(0, 0, main.WIDTH, main.HEIGHT).collidepoint(outside) and opening == main.CLAW_OPEN
+    middle = (main.WIDTH // 2, main.HEIGHT // 2)
+    gaps = []
+    for age in range(main.CLAW_ATTACK):
+        tip, opening = main.claw_place(age)
+        gaps.append(abs(tip[0] - middle[0]) + abs(tip[1] - middle[1]))
+    assert gaps == sorted(gaps, reverse=True)  # closer and closer
+    arrived, opening = main.claw_place(main.CLAW_REACH)
+    assert abs(arrived[1] - middle[1]) <= 1 and opening == main.CLAW_OPEN  # there, still open
+    assert main.claw_place(main.CLAW_ATTACK - 1) == (arrived, 0)  # shut
+    assert main.claw_place(main.CLAW_IMPACT - 1) == (arrived, 0)  # and holding while the screen cracks
+    assert main.claw_place(main.CLAW_IMPACT + main.CLAW_RETREAT)[0] == outside  # gone again
+    upper, lower = main.claw_jaws()
+    jaw = sprites.image("giant_claw")
+    assert upper.get_size() == (jaw.get_width() * main.CLAW_ZOOM, jaw.get_height() * main.CLAW_ZOOM)
+    assert lower.get_at((0, 0)) == upper.get_at((0, upper.get_height() - 1))  # the lower jaw: the upper one, mirrored
+    reds = {sprites.PALETTE["r"], sprites.PALETTE["R"], sprites.PALETTE["o"], sprites.PALETTE["k"]}
+    assert {tuple(upper.get_at((x, y)))[:3] for x in range(upper.get_width()) for y in range(upper.get_height())
+            if upper.get_at((x, y))[3]} <= reds  # the colours of the crab
+
+
+def test_the_cracked_screen_shakes_hard_at_the_hit(app):
+    caught_both(app)
+    for _ in range(main.CLAW_ATTACK):
+        main.update(app, 0, 0)
+    frozen = app["shatter"]["frozen"]
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    moved = 0
+    for _ in range(main.CLAW_FLASH, main.CLAW_IMPACT - main.CLAW_ATTACK - 1):
+        while app["shatter"]["age"] < main.CLAW_ATTACK + main.CLAW_FLASH:
+            main.update(app, 0, 0)
+        main.draw(app, screen)
+        corner = (8, main.HEIGHT - 20)
+        moved += any(screen.get_at((corner[0] + dx, corner[1] + dy)) == frozen.get_at(corner) and (dx, dy) != (0, 0)
+                     for dx in range(-main.CLAW_SHAKE, main.CLAW_SHAKE + 1) for dy in range(-main.CLAW_SHAKE, main.CLAW_SHAKE + 1))
+        main.update(app, 0, 0)
+    assert moved >= 3
+
+
+def test_no_key_does_anything_while_the_claw_breaks_the_screen(app):
+    caught_both(app)
+    age = app["shatter"]["age"]
+    for key in (pygame.K_ESCAPE, pygame.K_e, pygame.K_RETURN, pygame.K_i, pygame.K_q, pygame.K_SPACE):
+        press(app, key)
+        assert app["scene"] == "shatter" and app["shatter"]["age"] == age
+    main.update(app, 1, 0, True)
+    assert app["shatter"]["age"] == age + 1
+    assert engine.restore_state(save.load_game())["ending"] == "caught"  # the ending is already saved
+
+
+def test_after_the_claw_a_new_game_starts_clean(app):
+    caught_both(app)
+    for _ in range(main.SHATTER_FRAMES):
+        main.update(app, 0, 0)
+    assert app["scene"] == "ending" and app["shatter"] is None
+    press(app, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN, pygame.K_RETURN, pygame.K_RETURN)  # New game, Yes, 1 player, wizard
+    read_all(app)
+    assert app["scene"] == "play" and app["state"]["ending"] is None
+    assert app["shatter"] is None and app["crumble"] == 0 and app["crab"] is None and app["downed"] == {}
+    start = p1(app)["pos"]
+    main.update(app, 1, 0)
+    assert p1(app)["pos"][0] > start[0]  # playing again, nothing in the way
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+
+
+def test_leaving_in_the_middle_of_the_sequence_leaves_nothing_behind(app):
+    caught_both(app)
+    for _ in range(30):
+        main.update(app, 0, 0)
+    main.open_main_menu(app)
+    assert app["scene"] == "menu" and app["shatter"] is None
+    main.update(app, 0, 0)
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+    again = relaunch()
+    press(again, pygame.K_DOWN, pygame.K_RETURN)  # "Resume": straight to the ending, no claw again
+    assert again["scene"] == "ending" and again["shatter"] is None
+
+
+def test_without_the_effect_the_text_comes_first_as_before(app, heard, monkeypatch):
+    monkeypatch.setitem(effects.FX, "shatter", False)
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    app["downed"] = {2: main.DOWN_FRAMES}
+    app["players"][1]["pos"] = free_spot(app, 14, 3)
+    p1(app)["pos"] = app["crab"]["pos"]
+    main.update(app, 0, 0)
+    assert app["scene"] == "play" and app["shatter"] is None
+    assert dialog_text(app) == story.MESSAGES["crab_ending"] and "knocked_out" in heard
+    read_all(app)
+    main.update(app, 0, 0)
+    assert app["scene"] == "ending"
+
+
+def test_the_sequence_is_drawn_on_the_small_screen_whatever_the_size_of_the_window(app):
+    caught_both(app)
+    small = pygame.Surface((main.WIDTH, main.HEIGHT))
+    pygame.display.set_mode((1, 1))
+    for size in ((main.WIDTH * main.SCALE, main.HEIGHT * main.SCALE), (1920, 1080), (1366, 768)):
+        window = pygame.Surface(size)
+        for age in (5, main.CLAW_ATTACK + 4, main.CLAW_IMPACT + 20):
+            app["shatter"]["age"] = age
+            main.draw(app, small)
+            main.show(small, window)
+            area = main.picture_area(size)
+            zoom = area.width // main.WIDTH
+            for x, y in ((10, 200), (128, 112), (240, 40)):
+                assert window.get_at((area.left + x * zoom + zoom // 2, area.top + y * zoom + zoom // 2)) == small.get_at((x, y))
+
+
+def test_both_computers_see_the_claw_and_then_the_ending(two_computers, heard):
+    host, guest = two_computers
+    state = play_two(FIRST_HALF)
+    host["state"], guest["state"] = state, engine.restore_state(state)
+    for app in (host, guest):
+        main.place_at_entry(app)
+        main.reset_crab(app)
+    pump(host, guest, lambda: guest["crab"] is not None)
+    host["crab"]["wait"] = 0
+    host["crumble"] = guest["crumble"] = 0
+    host["downed"] = {2: main.DOWN_FRAMES}  # the guest is down, and the crab gets the host
+    mine(host)["pos"] = host["crab"]["pos"]
+    pump(host, guest, lambda: host["scene"] == "shatter" and guest["scene"] == "shatter")
+    assert guest["shatter"]["frozen"].get_size() == (main.WIDTH, main.HEIGHT)
+    main.draw(guest, pygame.Surface((main.WIDTH, main.HEIGHT)))
+    pump(host, guest, lambda: host["scene"] == "ending" and guest["scene"] == "ending")
+    assert guest["state"]["ending"] == "caught" and guest["shatter"] is None and host["shatter"] is None

@@ -274,3 +274,122 @@ def test_every_room_can_be_drawn_with_every_effect_running(app):
             main.update(app, 0, 0)
             main.draw(app, screen)
     assert sprites.image("portal") is not None
+
+
+# --- Shaking, and a screen that breaks into pieces ----------------------------------------
+
+
+def test_a_shake_pushes_the_picture_around_and_dies_down():
+    total, power = 40, 4
+    first = [effects.shake_offset(frame, total - frame, total, power) for frame in range(10)]
+    last = [effects.shake_offset(frame, total - frame, total, power) for frame in range(30, 40)]
+    assert len(set(first)) > 5  # a different push in almost every frame
+    assert any(dx != 0 for dx, dy in first) and any(dy != 0 for dx, dy in first)  # both ways
+    assert any(dx < 0 for dx, dy in first + last) and any(dx > 0 for dx, dy in first + last)
+    for frame in range(total):
+        dx, dy = effects.shake_offset(frame, total - frame, total, power)
+        reach = power * (total - frame) / total
+        assert abs(dx) <= reach + 0.5 and abs(dy) <= reach + 0.5, frame  # never further than it should
+    assert max(abs(dx) + abs(dy) for dx, dy in first) > max(abs(dx) + abs(dy) for dx, dy in last)
+    assert effects.shake_offset(7, 0, total, power) == (0, 0) and effects.shake_offset(7, -3, total, power) == (0, 0)
+    assert effects.shake_offset(12, 30, total, power) == effects.shake_offset(12, 30, total, power)  # no surprises
+
+
+SCREEN = (256, 224)
+HIT = (128, 112)
+
+
+def test_the_web_of_cracks_covers_the_whole_screen_with_pieces_around_the_hit():
+    pieces = effects.crack_web(SCREEN, HIT, seed=11)
+    assert pieces == effects.crack_web(SCREEN, HIT, seed=11) and pieces != effects.crack_web(SCREEN, HIT, seed=12)
+    assert len(pieces) >= 20 and all(len(piece) >= 3 for piece in pieces)
+    for piece in pieces:
+        for x, y in piece:
+            assert 0 <= x <= SCREEN[0] and 0 <= y <= SCREEN[1]
+    assert sum(1 for piece in pieces if HIT in piece) >= 8  # a fan of pieces meets where the claw hit
+    for corner in ((0, 0), (SCREEN[0], 0), (0, SCREEN[1]), SCREEN):
+        assert any(corner in piece for piece in pieces), corner
+    covered = pygame.Surface(SCREEN)
+    for piece in pieces:
+        pygame.draw.polygon(covered, (255, 255, 255), piece)
+    assert all(covered.get_at((x, y))[0] == 255 for x in range(SCREEN[0]) for y in range(SCREEN[1]))  # no hole
+
+
+def test_the_web_works_for_a_hit_anywhere():
+    for hit in ((40, 30), (200, 200), (128, 20)):
+        covered = pygame.Surface(SCREEN)
+        for piece in effects.crack_web(SCREEN, hit, seed=3):
+            pygame.draw.polygon(covered, (255, 255, 255), piece)
+        assert all(covered.get_at((x, y))[0] == 255 for x in range(0, SCREEN[0], 3) for y in range(0, SCREEN[1], 3))
+
+
+def painted():
+    """A picture with a different colour in every corner, to tell where a piece comes from."""
+    picture = pygame.Surface(SCREEN)
+    for x in range(SCREEN[0]):
+        for y in range(0, SCREEN[1], 1):
+            picture.set_at((x, y), (x, y, 90))
+    return picture
+
+
+def test_the_shards_are_cut_from_the_picture_and_put_together_they_are_the_picture():
+    picture = painted()
+    pieces = effects.crack_web(SCREEN, HIT, seed=11)
+    shards = effects.cut_shards(picture, pieces, HIT, seed=11)
+    assert len(shards) == len(pieces)
+    again = pygame.Surface(SCREEN)
+    again.fill((255, 0, 255))
+    effects.draw_shards(again, shards, age=0)  # nothing has moved yet
+    same = edges = 0
+    for x in range(0, SCREEN[0], 2):
+        for y in range(0, SCREEN[1], 2):
+            color = tuple(again.get_at((x, y)))[:3]
+            assert color != (255, 0, 255), (x, y)  # every pixel belongs to a shard
+            same += color == (x, y, 90)
+            edges += color == effects.SHARD_EDGE
+    assert same > 0.85 * (SCREEN[0] // 2) * (SCREEN[1] // 2)  # the picture, but for the light on the edges
+    assert edges > 100
+
+
+def test_the_shards_fall_away_from_the_hit_turning_until_nothing_is_left():
+    shards = effects.cut_shards(painted(), effects.crack_web(SCREEN, HIT, seed=11), HIT, seed=11)
+    assert min(shard["delay"] for shard in shards) < max(shard["delay"] for shard in shards)  # the near ones first
+    for shard in shards:
+        start, turned = effects.shard_position(shard, shard["delay"])
+        assert start == shard["rect"].center and turned == 0.0
+        early, _ = effects.shard_position(shard, shard["delay"] + 5)
+        late, angle = effects.shard_position(shard, shard["delay"] + 60)
+        assert late[1] > early[1] and late[1] > SCREEN[1]  # down, and off the screen in a second
+        away = shard["rect"].centerx - HIT[0]
+        if abs(away) > 20:
+            assert (early[0] - start[0]) * away > 0  # pushed away from the hit, sideways too
+        assert angle == shard["spin"] * 60
+    assert len({round(shard["spin"], 3) for shard in shards}) > len(shards) // 2  # each turns its own way
+    screen = pygame.Surface(SCREEN)
+    black = []
+    for age in (0, 15, 30, 45, 70):
+        screen.fill((0, 0, 0))
+        effects.draw_shards(screen, shards, age)
+        black.append(sum(1 for x in range(0, SCREEN[0], 4) for y in range(0, SCREEN[1], 4)
+                         if tuple(screen.get_at((x, y)))[:3] == (0, 0, 0)))
+    assert black == sorted(black) and black[0] == 0  # more and more of the black behind shows
+    assert black[-1] == (SCREEN[0] // 4) * (SCREEN[1] // 4)  # in the end, all of it
+
+
+def test_the_cracks_run_outwards_from_the_hit():
+    pieces = effects.crack_web(SCREEN, HIT, seed=11)
+
+    def cracked(reach):
+        screen = pygame.Surface(SCREEN)
+        screen.fill((90, 90, 90))
+        effects.draw_cracks(screen, pieces, HIT, reach)
+        return [(x, y) for x in range(SCREEN[0]) for y in range(SCREEN[1]) if tuple(screen.get_at((x, y)))[:3] != (90, 90, 90)]
+    assert cracked(0) == [] or len(cracked(0)) < 12
+    near, all_of_it = cracked(40), cracked(400)
+    assert 0 < len(near) < len(all_of_it)
+    assert all(abs(x - HIT[0]) <= 42 and abs(y - HIT[1]) <= 42 for x, y in near)  # not further than they have got
+    assert any(x < 4 for x, y in all_of_it) and any(y > SCREEN[1] - 4 for x, y in all_of_it)  # to the edges
+
+
+def test_the_two_new_effects_have_their_switches():
+    assert effects.FX["crumble"] is True and effects.FX["shatter"] is True
