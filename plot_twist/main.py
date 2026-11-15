@@ -656,6 +656,8 @@ def new_app(fonts):
         "downed": {},            # the players the crab has knocked down: number -> frames left before they are out
         "revive": {},            # the help given to each of them: number -> frames E has been held so far
         "lightning": 0,          # frames left of the bolt of lightning that opens a new game
+        "crumble": 0,            # frames left of the crab statue shaking and crumbling (see start_crumble)
+        "shatter": None,         # the giant claw breaking the screen, while it lasts (see start_shatter)
         "lightning_due": False,  # a new game has just started: the bolt strikes once the opening text is read
         "hidden": {},            # the players the crab cannot see (the ghost's ability): number -> frames left
         "dash_trail": None,      # the streak of Flash's dash, while it fades (see dash)
@@ -682,6 +684,8 @@ def open_main_menu(app):
     end_network(app)
     app["me"] = 0
     app["taken"] = None
+    app["crumble"] = 0     # no animation of the last game left running
+    app["shatter"] = None
     app["players"] = [new_player()]
     app["state"] = None
     app["existing"] = engine.restore_state(save.load_game())
@@ -1208,6 +1212,8 @@ def handle_key(app, key):
     """React to one key press."""
     scene = app["scene"]
     app["notice"] = ""  # the line about the last game for two goes away at the first key
+    if scene == "shatter":
+        return  # the claw is breaking the screen: no key does anything until it is over
     if scene == "play":
         handle_play_key(app, key)
     elif scene == "inventory":
@@ -1355,7 +1361,11 @@ def update(app, dx, dy, act=False):
         app["dash_trail"]["frames"] -= 1
         if app["dash_trail"]["frames"] <= 0:
             app["dash_trail"] = None
+    update_crumble(app)
     update_effects(app)
+    if app["scene"] == "shatter":
+        update_shatter(app)  # nothing else happens while the claw breaks the screen
+        return
     for player in app["players"]:
         if player is local_player(app):
             player["moving"] = False
@@ -1740,15 +1750,16 @@ def crab_news(app):
     me = my_number(app)
     caught = state["ending"] == "caught"
     if caught and not app["seen"]["caught"]:
-        sounds.play("knocked_out")
         app["banner_frames"] = 0
-        say(app, story.MESSAGES["crab_ending"])  # then the ending, once it is read
+        if effects.FX["shatter"]:
+            start_shatter(app)  # the giant claw breaks the screen, then the ending
+        else:
+            sounds.play("knocked_out")
+            say(app, story.MESSAGES["crab_ending"])  # then the ending, once it is read
     elif awake != app["seen"]["awake"] and not engine.is_over(state):
         if awake:
             sounds.play("crab_wake")
-            if view(app)["room"] == story.OBJECTS["deck_statue"]["room"]:  # the statue bursts: dust and pieces fly
-                x, y = thing_rect("deck_statue").center
-                effects.spawn(app["fx"], x, y, 40, RUBBLE_COLORS, speed=2.6, life=45, gravity=0.12, up=1.6)
+            start_crumble(app)  # the ship shakes, the statue trembles and bursts
         elif app["seen"]["crab_at"] is not None and app["seen"]["crab_at"][0] == view(app)["room"]:
             x, y = player_rect(app["seen"]["crab_at"][1]).center  # the crab turns to stone, and to dust
             effects.spawn(app["fx"], x, y, 30, RUBBLE_COLORS, speed=1.2, life=40, up=0.8)
@@ -1777,6 +1788,203 @@ def crab_news(app):
                    "crab_at": None if crab is None else (crab["room"], crab["pos"])}
 
 
+# --- The statue crumbling, and the claw that breaks the screen ---------------------------
+#
+# Two short sequences, counted in frames like every animation. Neither is part of
+# the game's state: the engine has already decided (the crab is awake, the crab has
+# caught everyone), and these only show it.
+
+CRUMBLE_FRAMES = 40    # how long the ship shakes when the crab statue comes alive
+CRUMBLE_BREAK = 18     # how many of those frames the statue trembles, whole, before it bursts
+CRUMBLE_SHAKE = 4      # pixels the room is pushed aside at the start of the shaking: then less and less
+
+CLAW_ATTACK = 15       # frames the giant claw takes to come in from the corner and snap shut
+CLAW_REACH = 10        # ...of which these to get to the middle of the screen; the rest to close
+CLAW_IMPACT = 27       # the frame the cracked screen falls to pieces: until then the hit, the flash, the cracks
+SHATTER_FRAMES = 86    # how long the whole sequence lasts: then the ending screen
+CLAW_FLASH = 3         # frames of white flash when the claw hits
+CLAW_SHAKE = 6         # pixels of shake at the hit, dying down until the screen falls apart
+CLAW_OPEN = 18         # pixels each jaw is away from the middle while the claw comes in
+CLAW_ZOOM = 3          # the jaw's picture is drawn three times bigger
+CLAW_RETREAT = 12      # frames the claw takes to pull back out once the screen breaks
+SHATTER_SEED = 11      # the web of cracks is always the same one
+
+
+def start_crumble(app):
+    """The crab has just come alive: the ship shakes and the statue starts to crumble.
+
+    With the effect switched off the statue simply bursts at once, as it did before.
+    """
+    if effects.FX["crumble"]:
+        app["crumble"] = CRUMBLE_FRAMES
+        sounds.play("crumble")
+    else:
+        burst_statue(app)
+
+
+def statue_on_screen(app):
+    """True if this computer shows the room of the crab statue."""
+    return view(app)["room"] == story.OBJECTS["deck_statue"]["room"]
+
+
+def burst_statue(app):
+    """The statue bursts: dust and pieces fly (for whoever is on the deck to see it)."""
+    if statue_on_screen(app):
+        x, y = thing_rect("deck_statue").center
+        effects.spawn(app["fx"], x, y, 40, RUBBLE_COLORS, speed=2.6, life=45, gravity=0.12, up=1.6)
+
+
+def statue_trembles(app):
+    """True in the first frames of the crumbling: the statue is still whole, shaking, about to burst."""
+    return app["crumble"] > CRUMBLE_FRAMES - CRUMBLE_BREAK
+
+
+def update_crumble(app):
+    """One frame of the crumbling: stones and dust fall around the statue, and at the right moment it bursts."""
+    if app["crumble"] <= 0:
+        return
+    age = CRUMBLE_FRAMES - app["crumble"]
+    if age == CRUMBLE_BREAK:
+        burst_statue(app)
+    elif statue_on_screen(app) and app["state"] is not None:
+        statue = thing_rect("deck_statue")
+        rng = app["fx"]["rng"]
+        for _ in range(2 if age < CRUMBLE_BREAK else 1):  # more while it is still breaking up
+            effects.spawn(app["fx"], rng.uniform(statue.left - 6, statue.right + 6), rng.uniform(statue.top - 4, statue.centery),
+                          1, RUBBLE_COLORS, speed=0.4, life=34, gravity=0.14, spread=math.pi / 2, angle=math.pi / 2)
+    app["crumble"] -= 1
+
+
+def room_shake(app):
+    """How far the room is pushed aside in this frame: the ship shaking while the statue crumbles."""
+    return effects.shake_offset(app["frame"], app["crumble"], CRUMBLE_FRAMES, CRUMBLE_SHAKE)
+
+
+def draw_trembling_statue(app, screen):
+    """The statue in its last moments: jumping a pixel left and right, and flashing pale."""
+    picture = sprites.image("decor_crab_statue")
+    if picture is None:
+        return
+    rect = thing_rect("deck_statue")
+    age = CRUMBLE_FRAMES - app["crumble"]
+    if (age // 2) % 3 == 2:
+        picture = picture.copy()
+        picture.fill((90, 90, 90, 0), special_flags=pygame.BLEND_RGB_ADD)  # a pale flash: about to give way
+    screen.blit(picture, rect.move((age % 2) * 2 - 1, 0))
+
+
+def start_shatter(app):
+    """The crab has caught both players. Keep the last picture of the game, cut it along a web
+    of cracks, and start the sequence of the giant claw; the ending comes when it is over."""
+    frozen = pygame.Surface((WIDTH, HEIGHT))
+    draw_play_screen(app, frozen, overlays=False)  # the game as it was at that moment, on the small screen
+    hit = (WIDTH // 2, HEIGHT // 2)
+    pieces = effects.crack_web((WIDTH, HEIGHT), hit, SHATTER_SEED)
+    app["shatter"] = {"age": 0, "frozen": frozen, "hit": hit, "pieces": pieces,
+                      "shards": effects.cut_shards(frozen, pieces, hit, SHATTER_SEED)}
+    app["dialog"] = []
+    app["crumble"] = 0
+    sounds.play("knocked")
+    set_scene(app, "shatter")
+
+
+def update_shatter(app):
+    """One frame of the claw breaking the screen. Nothing can be done meanwhile; then the ending."""
+    shatter = app["shatter"]
+    shatter["age"] += 1
+    if shatter["age"] == CLAW_ATTACK:
+        sounds.play("snap")      # the claw snaps shut on the screen
+    elif shatter["age"] == CLAW_IMPACT:
+        sounds.play("shatter")   # and the screen falls to pieces
+    if shatter["age"] >= SHATTER_FRAMES:
+        app["shatter"] = None
+        set_scene(app, "ending")
+
+
+def claw_place(age):
+    """Where the giant claw is `age` frames into the sequence: (the point its two tips close on,
+    how far each jaw is open). It comes in from the top right corner, closes on the middle of the
+    screen, holds, and pulls back out once the screen breaks."""
+    outside = (WIDTH + 24, -70)
+    middle = (WIDTH // 2 - 22, HEIGHT // 2)  # the tips: so that the jaws close around the middle of the screen
+    if age < CLAW_IMPACT:
+        way = min(age / CLAW_REACH, 1.0)
+        opening = CLAW_OPEN if age < CLAW_REACH else CLAW_OPEN * max(CLAW_ATTACK - 1 - age, 0) / (CLAW_ATTACK - 1 - CLAW_REACH)
+    else:
+        way = 1.0 - min((age - CLAW_IMPACT) / CLAW_RETREAT, 1.0)
+        opening = 0
+    way = way * way * (3 - 2 * way)  # fast in the middle of the way, soft at both ends
+    tip = (round(outside[0] + (middle[0] - outside[0]) * way), round(outside[1] + (middle[1] - outside[1]) * way))
+    return tip, round(opening)
+
+
+_claw_jaws = []  # the two jaws, enlarged: made the first time they are drawn
+
+
+def claw_jaws():
+    """The upper and the lower jaw of the giant claw, enlarged; (None, None) without the picture."""
+    if not _claw_jaws:
+        jaw = sprites.image("giant_claw")
+        if jaw is None:
+            return None, None
+        upper = pygame.transform.scale(jaw, (jaw.get_width() * CLAW_ZOOM, jaw.get_height() * CLAW_ZOOM))
+        _claw_jaws.extend([upper, pygame.transform.flip(upper, False, True)])
+    return _claw_jaws[0], _claw_jaws[1]
+
+
+def draw_giant_claw(screen, tip, opening, offset=(0, 0)):
+    """The crab's claw, giant: an arm from the top right corner, the hand, and the two jaws
+    `opening` pixels away from the point they close on."""
+    upper, lower = claw_jaws()
+    if upper is None:
+        return
+    x, y = tip[0] + offset[0], tip[1] + offset[1]
+    red, dark, black = sprites.PALETTE["r"], sprites.PALETTE["R"], sprites.PALETTE["k"]
+    hand = pygame.Rect(0, 0, 40, 56 + 2 * opening)
+    hand.midleft = (x + upper.get_width() - 22, y)
+    shoulder = (WIDTH + 60 + offset[0], -90 + offset[1])
+    along = pygame.Vector2(shoulder[0] - hand.centerx, shoulder[1] - hand.centery)
+    side = pygame.Vector2(-along.y, along.x)
+    if side.length() > 0:
+        side.scale_to_length(15)
+        arm = [(hand.centerx + side.x, hand.centery + side.y), (shoulder[0] + side.x, shoulder[1] + side.y),
+               (shoulder[0] - side.x, shoulder[1] - side.y), (hand.centerx - side.x, hand.centery - side.y)]
+        pygame.draw.polygon(screen, dark, arm)
+        pygame.draw.polygon(screen, black, arm, 3)
+    pygame.draw.ellipse(screen, red, hand)
+    pygame.draw.ellipse(screen, black, hand, 3)
+    screen.blit(upper, upper.get_rect(bottomleft=(x, y - opening + 4)))
+    screen.blit(lower, lower.get_rect(topleft=(x, y + opening - 4)))
+
+
+def draw_shatter(app, screen):
+    """The giant claw breaking the screen, in three parts: the claw comes in over the last picture
+    of the game and snaps shut; a white flash, a hard shake and cracks all over; then the picture
+    falls apart in pieces over black, and the claw pulls back."""
+    shatter = app["shatter"]
+    if shatter is None:
+        screen.fill(COLORS["black"])
+        return
+    age = shatter["age"]
+    shake = effects.shake_offset(app["frame"], CLAW_IMPACT - age, CLAW_IMPACT - CLAW_ATTACK, CLAW_SHAKE) \
+        if age >= CLAW_ATTACK else (0, 0)
+    screen.fill(COLORS["black"])
+    if age < CLAW_IMPACT:
+        screen.blit(shatter["frozen"], shake)
+        if age >= CLAW_ATTACK:
+            farthest = math.hypot(WIDTH, HEIGHT)
+            grown = min((age - CLAW_ATTACK + 1) / (CLAW_IMPACT - CLAW_ATTACK - 4), 1.0)  # the cracks run outwards
+            effects.draw_cracks(screen, shatter["pieces"], shatter["hit"], farthest * grown, shake)
+    else:
+        effects.draw_shards(screen, shatter["shards"], age - CLAW_IMPACT)
+    tip, opening = claw_place(age)
+    draw_giant_claw(screen, tip, opening, shake)
+    if CLAW_ATTACK <= age < CLAW_ATTACK + CLAW_FLASH:
+        veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        veil.fill((255, 255, 255, 255 - 70 * (age - CLAW_ATTACK)))  # the hit: everything stops in white
+        screen.blit(veil, (0, 0))
+
+
 def reset_crab(app):
     """A game starts or resumes: no crab in sight yet (it is not saved), nobody down."""
     app["crab"] = None
@@ -1784,6 +1992,8 @@ def reset_crab(app):
     app["revive"] = {}
     app["hidden"] = {}
     app["dash_trail"] = None
+    app["crumble"] = 0
+    app["shatter"] = None
     app["partner_reviving"] = False
     state = app["state"]
     app["seen"] = {"awake": state is not None and engine.crab_awake(state), "downed": set(),
@@ -1853,6 +2063,8 @@ def draw_crab(app, screen):
 def crab_here(app):
     """True if the crab is in sight in the room shown on this computer."""
     crab = app["crab"]
+    if statue_trembles(app):
+        return False  # still inside its statue
     return crab is not None and crab["away"] == 0 and crab["room"] == view(app)["room"]
 
 
@@ -2961,6 +3173,8 @@ def draw_standing(app, screen, thing):
         draw_generator(app, screen, thing)
     elif story.OBJECTS.get(thing["id"], {}).get("picture") == "decor_lantern":
         draw_lantern(app, screen, thing)
+    elif thing["id"] == "deck_statue" and statue_trembles(app):
+        draw_trembling_statue(app, screen)  # the crab is breaking out: one more moment
     elif thing["id"] == "deck_statue" and engine.statue_broken(app["state"]):
         rubble = sprites.image("decor_crab_rubble")  # the crab broke out of it: stones and pieces, for good
         if rubble is not None:
@@ -3214,19 +3428,22 @@ def draw_lightning(app, screen):
             screen.blit(veil, (0, 0))
 
 
-def draw_play_screen(app, screen):
+def draw_play_screen(app, screen, overlays=True):
     """The room, seen through the camera, then the bar on top.
 
     The whole room is drawn on its own surface, in room pixels, so nothing else
     needs to know about the camera: walls, things and the player keep their places.
+    Without `overlays` it is the game alone, with no message over it (for the
+    picture the giant claw breaks).
     """
     room = view(app)["room"]
     whole = room_surface(room)
     draw_room(app, whole)
     x, y = camera(room, view_position(app))
     screen.fill(COLORS["black"])
+    shake_x, shake_y = room_shake(app)  # the ship shakes while the crab statue crumbles
     screen.set_clip(VIEW)
-    screen.blit(whole, (-x, -y))
+    screen.blit(whole, (-x + shake_x, -y + shake_y))
     screen.set_clip(None)
     if app["fade"] > 0:
         # Just through a door: the room comes out of the dark.
@@ -3235,8 +3452,9 @@ def draw_play_screen(app, screen):
     effects.draw_flash(screen, VIEW, app["fx"])  # the white flash of the anvil
     draw_hud(app, screen)
     draw_ability_hint(app, screen)
-    draw_crab_overlay(app, screen)
-    draw_lightning(app, screen)
+    if overlays:
+        draw_crab_overlay(app, screen)
+        draw_lightning(app, screen)
 
 
 def draw_actions(app, screen):
@@ -3601,6 +3819,8 @@ def draw(app, screen):
     elif scene == "ending":
         draw_ending_screen(app, screen)
         draw_menu(app, screen, ENDING_MENU_TOP)
+    elif scene == "shatter":
+        draw_shatter(app, screen)
     elif scene == "character":
         draw_character_choice(app, screen)
     elif scene == "mode":

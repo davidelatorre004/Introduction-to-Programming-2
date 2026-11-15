@@ -38,11 +38,19 @@ FX = {
     "dust": True,           # dust and salt floating in the rooms indoors
     "lights": True,         # swinging lanterns, pulsing crystals
     "clues": True,          # a glow and twinkles on the thing that gave a new clue
+    "crumble": True,        # the crab statue shaking the ship, trembling and dropping stones before it breaks
+    "shatter": True,        # the giant claw that breaks the screen when the crab has caught both players
 }
 
 # --- Timing and sizes (frames are 1/60 of a second) --------------------------------------
 
 SEED = 7                     # the seed of the randomness of the effects
+SHARD_GRAVITY = 0.2          # pixels per frame, per frame: how fast the pieces of a broken screen fall
+SHARD_PUSH = 1.6             # how hard they are pushed away from where the screen was hit
+SHARD_SPIN = 5               # degrees per frame, at most, either way
+SHARD_STAGGER = 14           # pixels from the hit for each frame a piece waits before it falls
+SHARD_EDGE = (214, 240, 255)  # the light on the edges of a piece, and on the cracks
+CRACK_DARK = (12, 12, 20)
 MAX_PARTICLES = 400          # never more than this many at once
 
 GENERATOR_SPARK_EVERY = 26   # frames between two sparks of a generator that is on (on average)
@@ -387,3 +395,162 @@ def draw_flash(screen, view, fx, color=(255, 255, 255)):
     veil = pygame.Surface(view.size, pygame.SRCALPHA)
     veil.fill(color + (int(220 * fx["flash"] / FLASH_FRAMES),))
     screen.blit(veil, view.topleft)
+
+
+# --- Shaking, and a screen that breaks into pieces --------------------------------------
+
+
+def shake_offset(frame, left, total, power):
+    """How far the picture is pushed aside in this frame of a shake: (dx, dy) in pixels.
+
+    The push goes any way, looks random but is always the same for the same
+    frame, and dies down: `power` pixels at most when the shake starts (`left`
+    equal to `total` frames), nothing when it is over.
+    """
+    if left <= 0 or total <= 0:
+        return (0, 0)
+    reach = power * left / total
+    x = math.sin(frame * 12.9898) * 43758.5453
+    y = math.sin(frame * 78.233 + 1.7) * 24634.6345
+    x -= math.floor(x)  # the part after the point: a number from 0 to 1 that jumps around
+    y -= math.floor(y)
+    return (round((2 * x - 1) * reach), round((2 * y - 1) * reach))
+
+
+def crack_web(size, center, seed, rays=11, rings=(0.28, 0.6)):
+    """Break a picture of this size into polygons, like glass hit at `center`: a web of cracks.
+
+    Rays run from the hit to the edges, at uneven angles, and rings cross them at
+    uneven distances. Returns the pieces between them as lists of (x, y) corners:
+    a fan of triangles around the hit, then a band of pieces for each ring, the
+    last reaching the edges. Together they cover the whole picture, and the same
+    seed always gives the same web.
+    """
+    rng = random.Random(seed)
+    width, height = size
+    cx, cy = center
+    angles = sorted(2 * math.pi * ray / rays + rng.uniform(-0.2, 0.2) for ray in range(rays))
+
+    def at_the_edge(angle):
+        dx, dy = math.cos(angle), math.sin(angle)
+        reaches = []
+        if dx > 1e-9:
+            reaches.append((width - cx) / dx)
+        elif dx < -1e-9:
+            reaches.append(-cx / dx)
+        if dy > 1e-9:
+            reaches.append((height - cy) / dy)
+        elif dy < -1e-9:
+            reaches.append(-cy / dy)
+        reach = min(reaches)
+        return (min(max(cx + dx * reach, 0), width), min(max(cy + dy * reach, 0), height))
+
+    def along_the_edge(point):
+        """How far a point of the edge is from the top left corner, going round clockwise."""
+        x, y = point
+        if y <= 0.5:
+            return x
+        if x >= width - 0.5:
+            return width + y
+        if y >= height - 0.5:
+            return width + height + (width - x)
+        return 2 * width + height + (height - y)
+
+    corners = [((width, 0), width), ((width, height), width + height), ((0, height), 2 * width + height),
+               ((0, 0), 2 * width + 2 * height)]
+    around = 2 * width + 2 * height
+    edges = [at_the_edge(angle) for angle in angles]
+    bands = []
+    for share in rings:
+        band = []
+        for x, y in edges:
+            part = share * rng.uniform(0.8, 1.2)
+            band.append((cx + (x - cx) * part, cy + (y - cy) * part))
+        bands.append(band)
+    pieces = []
+    for ray in range(rays):
+        after = (ray + 1) % rays
+        pieces.append([(cx, cy), bands[0][ray], bands[0][after]])
+        for inner, outer in zip(bands, bands[1:]):
+            pieces.append([inner[ray], outer[ray], outer[after], inner[after]])
+        start = along_the_edge(edges[ray])
+        span = (along_the_edge(edges[after]) - start) % around
+        between = sorted(((where - start) % around, corner) for corner, where in corners)
+        piece = [bands[-1][ray], edges[ray]]
+        piece += [corner for gap, corner in between if 0 < gap < span]  # the corners of the picture on the way
+        piece += [edges[after], bands[-1][after]]
+        pieces.append(piece)
+    return [[(round(x), round(y)) for x, y in piece] for piece in pieces]
+
+
+def cut_shards(picture, pieces, center, seed):
+    """Cut a picture into the pieces of a crack_web, ready to fall: a list of shards.
+
+    Each shard has its own "picture" (the part of the picture inside its piece,
+    with light on its edges), the "rect" it came from, and how it will move: a push
+    away from `center` ("vx", "vy"), a "spin" in degrees per frame, and the frames
+    it waits before falling ("delay": the pieces near the hit go first).
+    """
+    rng = random.Random(seed)
+    whole = picture.get_rect()
+    shards = []
+    for piece in pieces:
+        xs = [x for x, y in piece]
+        ys = [y for x, y in piece]
+        rect = pygame.Rect(min(xs), min(ys), max(xs) - min(xs) + 1, max(ys) - min(ys) + 1).clip(whole)
+        if rect.width <= 0 or rect.height <= 0:
+            continue
+        local = [(x - rect.x, y - rect.y) for x, y in piece]
+        cut = pygame.Surface(rect.size, pygame.SRCALPHA)
+        cut.blit(picture, (0, 0), rect)
+        shape = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.polygon(shape, (255, 255, 255, 255), local)
+        cut.blit(shape, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)  # nothing left outside the piece
+        pygame.draw.lines(cut, SHARD_EDGE, True, local, 1)
+        dx, dy = rect.centerx - center[0], rect.centery - center[1]
+        far = math.hypot(dx, dy) or 1.0
+        push = SHARD_PUSH * rng.uniform(0.5, 1.5)
+        shards.append({"picture": cut, "rect": rect,
+                       "vx": dx / far * push + rng.uniform(-0.3, 0.3), "vy": dy / far * push - rng.uniform(0.0, 1.0),
+                       "spin": rng.uniform(-SHARD_SPIN, SHARD_SPIN), "delay": int(far / SHARD_STAGGER)})
+    return shards
+
+
+def shard_position(shard, age):
+    """The middle of a shard `age` frames after the screen broke, and how far it has turned (degrees)."""
+    time = age - shard["delay"]
+    x, y = shard["rect"].center
+    if time <= 0:
+        return (x, y), 0.0
+    return (x + shard["vx"] * time, y + shard["vy"] * time + SHARD_GRAVITY * time * time / 2), shard["spin"] * time
+
+
+def draw_shards(surface, shards, age, offset=(0, 0)):
+    """The pieces of the broken screen, `age` frames after it broke: falling, pushed outwards, turning."""
+    bottom = surface.get_height()
+    for shard in shards:
+        (x, y), angle = shard_position(shard, age)
+        picture = shard["picture"]
+        if angle != 0.0:
+            picture = pygame.transform.rotate(picture, angle)
+        place = picture.get_rect(center=(round(x) + offset[0], round(y) + offset[1]))
+        if place.top < bottom:
+            surface.blit(picture, place)
+
+
+def draw_cracks(surface, pieces, center, reach, offset=(0, 0)):
+    """The cracks between the pieces, as far as `reach` pixels from the hit: a dark line with light beside it."""
+    for piece in pieces:
+        for start, end in zip(piece, piece[1:] + piece[:1]):
+            near, far = sorted((start, end), key=lambda point: math.hypot(point[0] - center[0], point[1] - center[1]))
+            near_gap = math.hypot(near[0] - center[0], near[1] - center[1])
+            far_gap = math.hypot(far[0] - center[0], far[1] - center[1])
+            if near_gap > reach:
+                continue
+            if far_gap > reach and far_gap > near_gap:
+                part = (reach - near_gap) / (far_gap - near_gap)  # the crack has not got to the far end yet
+                far = (near[0] + (far[0] - near[0]) * part, near[1] + (far[1] - near[1]) * part)
+            a = (round(near[0]) + offset[0], round(near[1]) + offset[1])
+            b = (round(far[0]) + offset[0], round(far[1]) + offset[1])
+            pygame.draw.line(surface, SHARD_EDGE, (a[0] + 1, a[1]), (b[0] + 1, b[1]), 1)
+            pygame.draw.line(surface, CRACK_DARK, a, b, 1)
