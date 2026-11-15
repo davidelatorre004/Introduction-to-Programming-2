@@ -190,8 +190,8 @@ def test_a_lit_tile_sends_a_wave_and_a_mistake_red_sparks(app):
 
 def test_the_halves_weld_with_sparks_and_a_flash(app):
     before_anvil = game.DOCTOR_AT_PEACE + [game.act("enter", "infirmary_to_hold"), game.act("enter", "hold_to_deck"),
-                                           game.act("enter", "deck_to_cabin"), game.act("enter", "cabin_to_galley")]
-    playing(app, before_anvil, main.tile_rect(10, 6).topleft)
+                                           game.act("enter", "deck_to_cabin"), game.act("enter", "cabin_to_east_room")]
+    playing(app, before_anvil, main.tile_rect(7, 7).topleft)
     act(app, "use_item", "anvil", "key")
     assert app["fx"]["fuse"] is not None
     screen = pygame.Surface((main.WIDTH, main.HEIGHT))
@@ -227,16 +227,20 @@ def test_dust_floats_only_indoors_and_always_the_same(app):
         assert floor.collidepoint(speck["x"], speck["y"])
 
 
-def test_the_map_shows_the_anvil_once_the_doctor_is_at_peace_and_the_galley_is_known(app):
+def test_the_map_shows_the_anvil_once_the_doctor_is_at_peace_and_its_room_is_known(app):
     screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    # To the empty room east of the cabin, and back into the cabin (so the player's dot is not on it).
+    there_and_back = [game.act("enter", door) for door in ("infirmary_to_hold", "hold_to_deck", "deck_to_cabin",
+                                                           "cabin_to_east_room", "east_room_to_cabin")]
 
     def anvil_drawn(actions):
         playing(app, actions)
         main.draw_hud(app, screen)
-        area = main.map_area("galley")
+        area = main.map_area("east_room")
         return tuple(screen.get_at(area.center))[:3] == main.COLORS["black"]
-    assert not anvil_drawn(game.TINCTURES_FOUND)  # the galley is known, the doctor not at peace yet
-    assert anvil_drawn(game.DOCTOR_AT_PEACE)
+    assert not anvil_drawn(game.TINCTURES_FOUND + there_and_back)  # the room is known, the doctor not at peace yet
+    assert not anvil_drawn(game.DOCTOR_AT_PEACE)                   # at peace, but the room not seen yet
+    assert anvil_drawn(game.DOCTOR_AT_PEACE + there_and_back)
 
 
 def test_every_effect_can_be_switched_off(app, monkeypatch):

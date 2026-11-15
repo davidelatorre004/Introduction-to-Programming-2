@@ -2,9 +2,51 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v27](versions/v27.md) - The third ending (2026-11-09)
+## [v32](versions/v32.md) - Full screen (2026-11-12)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- F11 switches between the window and the whole screen. On the whole screen the game is as big as fits in whole multiples of its size, so every pixel stays a sharp square, in the middle, with black around it. The title of the window says so.
+
+## [v31](versions/v31.md) - Lightning, the anvil, the broken statue (2026-11-12)
+
+In commit [`ffff2db`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/ffff2db9eec2636112a823ab8162719556140f90/plot_twist).
+
+- A new game opens with a bolt of lightning: once the opening text is read, it tears the screen from top to bottom for a second, with a flash and thunder, and then the game is on. Not when a game is resumed.
+- The anvil now appears in the middle of the empty room east of the captain's cabin, not in the galley. Until the key is fused, red sparks fly around it and a red glow beats on it.
+- When the crab comes alive its statue bursts, with dust and pieces flying, and what is left on the deck is a heap of stones and broken pieces on the cracked base, as solid as the statue was. It stays there for good: when the key is fused the crab turns to stone and vanishes in a puff of dust.
+
+## [v30](versions/v30.md) - Dropping items, and the heart (2026-11-12)
+
+In commit [`3db9ddb`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/3db9ddbfc5a55eab9310df0ffe8b5dd3c1ffa0f7/plot_twist).
+
+- Q drops the item the player got last (picked up, or handed over by the partner) on the floor where they stand, as many times as there are items. Anyone can pick it up again with E. It works alone too.
+- A dropped item remembers its room and tile (a new flag for each item, dropped_<item>). While a key lies on the floor it opens nothing: drop the first half and the hold is barred again until someone picks it up.
+- The heart of the mine is no longer carried: picking it up uses it at once, and it is gone for good. In a game for two it helps the other player up at once if they are down, and brings them back into the game if they were out, right next to the one who took it. Their items stay with whoever has them, and an ability already used does not come back. With everyone on their feet, or alone, it is wasted.
+
+## [v29](versions/v29.md) - Abilities (2026-11-12)
+
+In commit [`733c53a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/733c53a700d06e20872f9427537169ac4ebd8c2d/plot_twist).
+
+- In a game for two each character has an ability. Space uses it, once in the whole game (it is saved); the corner of the screen says so while it is there. Alone, Space does nothing.
+- Wizard: a spell stuns the crab for 5 seconds, wherever it is: it stands still and harmless, with stars above its head.
+- Nurse: always on, she helps a player up in 1 second. For everyone else it now takes 4 seconds instead of 5.
+- Ghost: for 5 seconds the crab cannot see them (half transparent on both screens) and walks through them. It goes for the other player; if the other one is down or out, it runs as far from the ghost as its room allows, or stays put if the ghost is in another room.
+- Flash: a dash of 5 tiles the way they face. It stops against anything solid, goes through an open door or a portal on its way, passes the crab, and lights only the tile it lands on.
+- An ability used while the crab is still a statue is wasted.
+
+## [v28](versions/v28.md) - Four characters (2026-11-12)
+
+In commit [`218585d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/218585db726df071d1a5b1f64d354c2a3d2d09f1/plot_twist).
+
+- Four characters replace the green and the red one: the Wizard, the Nurse, the Ghost and Flash, each with its own pictures. The choice screen shows all four, with the name and the ability of the one highlighted.
+- In a game for two each player chooses on their own screen: the host before hosting, the player who joins right after joining, any character but the host's (shown dark). The host waits meanwhile; if the other player gives up, it goes back to waiting.
+- Player 2's character is saved with the game (a new flag, partner_character): a game for two that is resumed keeps both characters, with no new choice.
+- The abilities come in the next version: for now a character is only a look. Games saved with the old characters cannot be resumed.
+
+## [v27](versions/v27.md) - The third ending (2026-11-09)
+
+In commit [`bcb170d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/bcb170d196cc593eb61a9f40a18ffdb3f7bf90d1/plot_twist).
 
 - If the crab catches both players (the second while the first is down, or the last one left in the game), the game is over: the third ending, "Caught by the crab", with a giant crab rising behind the ship. It replaces the rule of the previous version (both down: they get up, and the crab goes back to its statue).
 - The ending is saved like the other two, and the ending screen counts three endings. It can only be reached in a game for two.

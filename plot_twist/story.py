@@ -10,16 +10,36 @@ START_ROOM = "deck"
 # The characters the player can choose from when a new game starts, in the order
 # the choice shows them. They look the same, except for the colour of the shirt:
 # "sprite" is the start of the names of their pictures in sprites.py.
+# "ability" is what the choice screen says. "power" is the ability used with Space,
+# once in a game for two ("label" names it in the corner of the screen, "text" is
+# what the banner says when it is used); None for an ability that is always on.
 CHARACTERS = {
-    "green": {"sprite": "player"},
-    "red": {"sprite": "player_red"},
+    "wizard": {"sprite": "wizard", "name": "Wizard",
+               "ability": "Spell: the crab stands stunned for 5 seconds.",
+               "power": {"label": "Spell", "text": "A spell! The crab is stunned"}},
+    "nurse": {"sprite": "nurse", "name": "Nurse",
+              "ability": "Always: helps a player up in 1 second.",
+              "power": None},
+    "ghost": {"sprite": "ghost", "name": "Ghost",
+              "ability": "Vanish: the crab cannot see you for 5 seconds.",
+              "power": {"label": "Vanish", "text": "You vanish: the crab cannot see you"}},
+    "flash": {"sprite": "flash", "name": "Flash",
+              "ability": "Dash: a lightning sprint of 5 tiles, through doors too.",
+              "power": {"label": "Dash", "text": "A lightning dash!"}},
 }
 
 # What the game remembers about the player's progress and choices, with the
 # value each flag has at the start of a new game.
 FLAGS = {
     # The character chosen for this game (one of CHARACTERS): player 1's, in a game for two.
-    "character": "green",
+    "character": "wizard",
+    # In a game for two, the character player 2 chose: never the same as player 1's.
+    "partner_character": "nurse",
+    # The heart of the mine has been picked up: it is used up, whether it helped anyone or not.
+    "heart_used": False,
+    # In a game for two, each player's ability (Space) works once: True once it is used.
+    "ability_used_1": False,
+    "ability_used_2": False,
     # A game for two players: player 2 is the other character.
     "two_players": False,
     # In a game for two, the room player 2 is in ("room" in the state is player 1's).
@@ -60,7 +80,7 @@ FLAGS = {
     # in the right order; then the remedy is ready (and the cauldron empty again).
     "potion_step": 0,
     "potion_solved": False,
-    # The doctor drank the remedy: his ghost is gone, and the anvil has appeared in the galley.
+    # The doctor drank the remedy: his ghost is gone, and the anvil has appeared in the empty room.
     "doctor_at_peace": False,
     # The rooms the player has been in, for the map in the corner of the screen.
     "visited_deck": True,
@@ -302,7 +322,13 @@ ITEMS = {
         "appears_if": None,
         "part_of": None,
         "free_if": None,
-        "pickup_text": "You pick up a heart of red crystal. It is warm, and it beats.",
+        # It is never carried: picking it up uses it at once, and it is gone for good.
+        "consumed": True,
+        "sets_flag": "heart_used",
+        "gone_if": "heart_used",
+        "pickup_text": "You pick up the heart of red crystal. It beats once in your hand, and crumbles to dust.",
+        # In a game for two: what it says when it brings the other player back into the game.
+        "revive_text": "The heart beats once in your hand, and crumbles to dust. Your partner is back, right next to you!",
     },
     # The two halves fused at the anvil: the key of the final doors.
     "fused_key": {
@@ -320,6 +346,9 @@ ITEMS = {
 # Who carries each item in a game for two: 1 or 2 ("holder_<item>"). Alone, it stays 1.
 for _item in ITEMS:
     FLAGS["holder_" + _item] = 1
+    # Where an item lies after a player dropped it: "room,column,row", or None while
+    # it is where the story put it (or in someone's hands).
+    FLAGS["dropped_" + _item] = None
 
 # Doors, one per direction: each door is in one room and leads to another, from the
 # middle of one wall ("side": N, S, E or W). The way back is on the opposite wall.
@@ -675,12 +704,13 @@ OBJECTS = {
         "done_text": None,
         "reactions": {},
     },
-    # The doctor's gift: it appears in the galley once he is at peace.
+    # The doctor's gift: it appears in the middle of the empty room, east of the
+    # cabin, once he is at peace. Red sparks fly around it until the key is fused.
     "anvil": {
         "kind": "anvil",
         "name": "Anvil",
-        "room": "galley",
-        "pos": (10, 8),
+        "room": "east_room",
+        "pos": (7, 5),
         "appears_if": "doctor_at_peace",
         "look_text": (
             "A black anvil, still warm, with a tag tied to it: \"For the one who finished my remedy.\" "
@@ -758,8 +788,8 @@ OBJECTS = {
                 "consumes": True,
                 "text": (
                     "The doctor drinks. The fever leaves his face, and for the first time he smiles. "
-                    "\"Thank you. I have left you a gift, in the galley.\" "
-                    "He fades like breath on a window. Far away, towards the galley, something heavy lands with a clang."
+                    "\"Thank you. I have left you a gift, in the empty room beside the captain's cabin.\" "
+                    "He fades like breath on a window. Far away, above deck, something heavy lands with a clang."
                 ),
             },
         },
@@ -1683,6 +1713,7 @@ MESSAGES = {
     "label_activate": "Activate: {name}",
     # The window title and the menus.
     "title": "Plot Twist",
+    "window_title": "Plot Twist · F11: full screen",
     "subtitle": "A mystery in the middle of the sea",
     "menu_new_game": "New game",
     "menu_resume": "Resume",
@@ -1697,6 +1728,14 @@ MESSAGES = {
     "menu_two_players": "Host game for 2",
     "choose_character": "Choose your character",
     "choose_character_p1": "Player 1: choose",
+    "choose_character_p2": "Player 2: choose",
+    "character_taken": "Taken by player 1",
+    "abilities_for_two": "Abilities only work in a game for two.",
+    "ability_used": "You have already used your ability.",
+    "hint_ability": "Space: {label}",
+    "hint_nurse": "Nurse: quick help",
+    "ability_wasted": "Nothing happens: the crab is still a statue",
+    "lobby_choosing": "Player 2 is choosing a character",
     # A game for two, on two computers on the same network: one hosts, the other joins.
     "menu_join_game": "Join game",
     "lobby_title": "Waiting for player 2",
@@ -1713,6 +1752,11 @@ MESSAGES = {
     "partner": "Partner",
     "label_hand": "Give to partner: {item}",
     "given": "You hand over: {item}.",
+    # Q drops the item picked up last, on the floor where the player stands.
+    "dropped": "You drop: {item}",
+    "nothing_to_drop": "You have nothing to drop.",
+    "heart_helps": "The heart helps your partner up!",
+    "back_in_game": "You are back in the game!",
     "no_partner": "Your partner is not here.",
     "partner_is_out": "Your partner is out of the game.",
     "you_are_out": "You are out of the game.",
@@ -1733,7 +1777,7 @@ MESSAGES = {
     "hint_inventory": "I: inventory",
     # The controls, at the bottom of the title screen: one line each.
     "controls_1": "Arrows or WASD: move · E: interact",
-    "controls_2": "I: inventory · Esc: menu",
+    "controls_2": "I: inventory · Q: drop · Esc: menu",
     "ending_number": "Ending {number} of {total}",
     # What E does here, shown in the bar at the top.
     "prompt": "E: {action}",

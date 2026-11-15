@@ -39,6 +39,8 @@ CRAB_TO_DECK = act("enter", "crab_to_deck")
 TO_INFIRMARY = act("enter", "hold_to_infirmary")
 INFIRMARY_TO_HOLD = act("enter", "infirmary_to_hold")
 CABIN_TO_GALLEY = act("enter", "cabin_to_galley")
+CABIN_TO_EAST = act("enter", "cabin_to_east_room")
+EAST_TO_CABIN = act("enter", "east_room_to_cabin")
 GALLEY_TO_CABIN = act("enter", "galley_to_cabin")
 CABIN_TO_HELM = act("enter", "cabin_to_helm")
 HELM_TO_CABIN = act("enter", "helm_to_cabin")
@@ -86,20 +88,20 @@ GATHER_TINCTURES = [TO_INFIRMARY, TAKE_GREEN, TO_CORRIDOR, TAKE_BLUE, CORRIDOR_T
 # The remedy: the tinctures poured into the cauldron in the right order, then the doctor drinks it.
 RECIPE = [act("use_item", "cauldron", item=tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
 CALM_THE_DOCTOR = GATHER_TINCTURES + [TO_INFIRMARY] + RECIPE + [TAKE_POTION, GIVE_TO_DOCTOR, INFIRMARY_TO_HOLD]
-# From the deck to the galley and back: the anvil is there once the doctor is at peace.
-FUSE_IN_THE_GALLEY = [TO_CABIN, CABIN_TO_GALLEY, FUSE, GALLEY_TO_CABIN, CABIN_TO_DECK]
+# From the deck to the empty room and back: the anvil is there once the doctor is at peace.
+FUSE_AT_THE_ANVIL = [TO_CABIN, CABIN_TO_EAST, FUSE, EAST_TO_CABIN, CABIN_TO_DECK]
 # Wand, cabin puzzle, the first half of the key, and back on the deck.
 GET_KEY = [TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK]
 # Then the hold, no longer barred: the tiles, the second half, the remedy for the
-# doctor, back on the deck, and the two halves fused on the anvil in the galley.
+# doctor, back on the deck, and the two halves fused on the anvil in the empty room.
 GET_FUSED_KEY = (GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR
-                 + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
+                 + [HOLD_TO_DECK] + FUSE_AT_THE_ANVIL)
 # The shortest way to each ending: the barrel of the hold is optional.
 CRAB_ENDING = GET_FUSED_KEY + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB]
 ANGEL_ENDING = GET_FUSED_KEY + [OPEN_ANGEL, TO_ANGEL, GIVE_TO_ANGEL]
 # The long way: read the clue on the barrel too.
 CLUE_THEN_CRAB = (GET_KEY + [TO_HOLD, WAND_ON_BARREL] + SOLVE_TILES
-                  + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY
+                  + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_AT_THE_ANVIL
                   + [OPEN_CRAB, TO_CRAB, GIVE_TO_CRAB])
 # Open both doors, go in one, come back and wander around without ending the game.
 CHOOSE_AND_WANDER = GET_FUSED_KEY + [OPEN_CRAB, OPEN_ANGEL, TO_CRAB, CRAB_TO_DECK, TO_CABIN]
@@ -456,7 +458,7 @@ def test_pt03_the_halves_do_not_open_the_doors(steps, half):
 def test_pt03_the_anvil_fuses_the_two_halves():
     """Either half on the anvil, with both in hand: the halves become the fused key, in the first half's place."""
     with_both = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR
-                     + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY])
+                     + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_EAST])
     assert with_both["inventory"] == ["wand", "key", "second_key"]
     for half in ("key", "second_key"):
         fused, outcome = engine.use_item(with_both, half, "anvil")
@@ -466,13 +468,13 @@ def test_pt03_the_anvil_fuses_the_two_halves():
     _, outcome = engine.use_item(with_both, "wand", "anvil")
     assert outcome["event"] == "nothing_happens"
     halves_first = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TAKE_WAND, TO_HOLD] + SOLVE_TILES
-                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
+                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_AT_THE_ANVIL)
     assert halves_first["inventory"] == ["fused_key", "wand"]  # the order things were found in is kept
 
 
 def test_pt03_one_half_alone_cannot_be_fused():
     """The anvil needs both halves: the refusal says the other one is missing, and nothing changes."""
-    state = play(GET_KEY + [TO_HOLD] + CALM_THE_DOCTOR + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY])
+    state = play(GET_KEY + [TO_HOLD] + CALM_THE_DOCTOR + [HOLD_TO_DECK, TO_CABIN, CABIN_TO_EAST])
     after, outcome = engine.use_item(state, "key", "anvil")
     assert outcome["event"] == "missing_item"
     assert outcome["text"] == story.MESSAGES["missing_item"]
@@ -494,7 +496,7 @@ def test_pt03_a_lock_needing_several_items_wants_them_all(monkeypatch):
     """The engine's rule for any lock: every item it requires must be carried, or it explains what is missing."""
     monkeypatch.setitem(story.DOORS["deck_to_crab"], "requires", ["fused_key", "wand"])
     without_wand = play([TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK, TO_HOLD] + SOLVE_TILES
-                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_IN_THE_GALLEY)
+                        + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK] + FUSE_AT_THE_ANVIL)
     after, outcome = engine.use_item(without_wand, "fused_key", "deck_to_crab")
     assert outcome["event"] == "missing_item"
     assert after == without_wand
@@ -1558,19 +1560,22 @@ def test_heart_waits_in_the_mine():
     state["room"] = "mine"
     assert "heart" in [thing["id"] for thing in engine.things_here(state)]
     after, outcome = engine.pick_up(state, "heart")
-    assert outcome["event"] == "picked_up" and after["inventory"] == ["heart"]
+    assert outcome["ok"] and outcome["event"] == "used_up" and outcome["text"] == story.ITEMS["heart"]["pickup_text"]
+    assert after["inventory"] == [] and after["flags"]["heart_used"] is True  # used at once, never carried
+    assert "heart" not in [thing["id"] for thing in engine.things_here(after)]  # and gone for good
+    assert reopen(after) == after
 
 
-def test_doctor_drinks_the_remedy_vanishes_and_the_anvil_appears_in_the_galley():
+def test_doctor_drinks_the_remedy_vanishes_and_the_anvil_appears_in_the_empty_room():
     before = play(WITH_THE_TINCTURES + RECIPE + [TAKE_POTION])
-    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY], before)
+    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_EAST], before)
     assert "anvil" not in [thing["id"] for thing in engine.things_here(in_galley)]
     after, outcome = engine.use_item(before, "potion", "doctor")
     assert outcome["event"] == "flag_set" and after["flags"]["doctor_at_peace"]
     here = [thing["id"] for thing in engine.things_here(after)]
     assert "doctor" not in here and "potion" not in here  # gone, and the cauldron gives no second remedy
     assert "potion" not in after["inventory"]  # drunk
-    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_GALLEY], after)
+    in_galley = play([INFIRMARY_TO_HOLD, HOLD_TO_DECK, TO_CABIN, CABIN_TO_EAST], after)
     assert "anvil" in [thing["id"] for thing in engine.things_here(in_galley)]
 
 
@@ -1613,13 +1618,16 @@ def test_entering_a_room_marks_it_on_the_map():
 
 
 def test_a_new_game_remembers_the_character_chosen():
-    assert engine.new_game()["flags"]["character"] == "green"
-    state, outcome = engine.start_new_game(None, character="red")
-    assert outcome["ok"] and state["flags"]["character"] == "red"
-    assert reopen(state)["flags"]["character"] == "red"
+    assert list(story.CHARACTERS) == ["wizard", "nurse", "ghost", "flash"]
+    assert engine.new_game()["flags"]["character"] == "wizard"
+    for character in story.CHARACTERS:
+        state, outcome = engine.start_new_game(None, character=character)
+        assert outcome["ok"] and state["flags"]["character"] == character
+        assert reopen(state)["flags"]["character"] == character
     with pytest.raises(ValueError):
         engine.new_game("blue")
     assert engine.restore_state(restorable(flags={"character": "blue"})) is None
+    assert engine.restore_state(restorable(flags={"character": "green"})) is None  # a character of older versions
 
 
 # --- Two players ----------------------------------------------------------------------
@@ -1630,19 +1638,42 @@ def test_partner_character_is_the_other_one():
         state = engine.new_game(character, two_players=True)
         partner = engine.partner_character(state)
         assert partner in story.CHARACTERS and partner != character
-    assert engine.partner_character(engine.new_game("green")) == "red"
-    assert engine.partner_character(engine.new_game("red")) == "green"
+        assert engine.character_of(state, 1) == character and engine.character_of(state, 2) == partner
+    assert engine.partner_character(engine.new_game("wizard", two_players=True)) == "nurse"
+    assert engine.partner_character(engine.new_game("nurse", two_players=True)) == "wizard"
+
+
+def test_player_two_chooses_any_character_but_player_ones():
+    state = engine.new_game("ghost", two_players=True)
+    before = copy.deepcopy(state)
+    for character in ("wizard", "nurse", "flash"):
+        chosen, outcome = engine.choose_partner_character(state, character)
+        assert outcome["ok"] and engine.partner_character(chosen) == character
+        assert reopen(chosen) == chosen  # saved with the game
+    assert state == before
+    for wrong in ("ghost", "blue", None):
+        same, outcome = engine.choose_partner_character(state, wrong)
+        assert not outcome["ok"] and same is state
+    alone = engine.new_game("ghost")
+    assert not engine.choose_partner_character(alone, "wizard")[1]["ok"]
+
+
+def test_two_players_with_the_same_character_is_not_a_valid_save():
+    same = restorable(flags={"two_players": True, "character": "flash", "partner_character": "flash"})
+    assert engine.restore_state(same) is None
+    alone = restorable(flags={"character": "nurse"})  # alone, the partner's character does not matter
+    assert engine.restore_state(alone)["flags"]["character"] == "nurse"
 
 
 def test_a_new_game_remembers_the_mode():
     assert engine.new_game()["flags"]["two_players"] is False
-    state, outcome = engine.start_new_game(None, character="red", two_players=True)
-    assert outcome["ok"] and state["flags"]["two_players"] is True and state["flags"]["character"] == "red"
+    state, outcome = engine.start_new_game(None, character="flash", two_players=True)
+    assert outcome["ok"] and state["flags"]["two_players"] is True and state["flags"]["character"] == "flash"
 
 
 def test_restore_state_of_a_game_for_two():
     """A game for two goes through the save file unchanged; a save made before the mode existed is for one."""
-    state = play(GET_KEY, engine.new_game("red", two_players=True))
+    state = play(GET_KEY, engine.new_game("flash", two_players=True))
     assert reopen(state) == state
     assert reopen(state)["flags"]["two_players"] is True
     old = restorable(flags={"cabin_solved": True})
@@ -1719,8 +1750,8 @@ def test_giving_an_item_to_the_partner():
 def test_the_halves_fuse_only_in_the_hands_of_one_player():
     state = play(GET_KEY + [TO_HOLD] + SOLVE_TILES + [TAKE_SECOND_KEY] + CALM_THE_DOCTOR + [HOLD_TO_DECK],
                  engine.new_game(two_players=True))
-    state = as_player(state, [TO_CABIN, CABIN_TO_GALLEY], 1)
-    state["flags"]["partner_room"] = "galley"
+    state = as_player(state, [TO_CABIN, CABIN_TO_EAST], 1)
+    state["flags"]["partner_room"] = "east_room"
     state, _ = engine.perform(state, act("give", "partner", item="second_key"), 1)
     _, outcome = engine.perform(state, FUSE, 2)
     assert outcome["event"] == "missing_item"  # player 2 has only one half
@@ -1759,11 +1790,11 @@ def test_the_crab_wakes_with_the_solved_cabin_and_sleeps_once_the_key_is_fused()
     assert not engine.crab_awake(two())
     assert not engine.crab_awake(two([TAKE_WAND, TO_CABIN]))
     assert engine.crab_awake(two([TAKE_WAND, TO_CABIN] + SOLVE_CABIN))  # the first puzzle is solved
-    halves = two(GET_FUSED_KEY[:-len(FUSE_IN_THE_GALLEY)] + [TO_CABIN, CABIN_TO_GALLEY])
+    halves = two(GET_FUSED_KEY[:-len(FUSE_AT_THE_ANVIL)] + [TO_CABIN, CABIN_TO_EAST])
     assert engine.crab_awake(halves) and not engine.key_fused(halves)
     fused = play([FUSE], halves)
     assert engine.key_fused(fused) and not engine.crab_awake(fused)
-    opened = play([GALLEY_TO_CABIN, CABIN_TO_DECK, OPEN_CRAB], fused)
+    opened = play([EAST_TO_CABIN, CABIN_TO_DECK, OPEN_CRAB], fused)
     assert engine.key_fused(opened) and not engine.crab_awake(opened)
 
 
@@ -1835,3 +1866,197 @@ def test_the_crab_cannot_end_a_game_while_it_sleeps():
     for state in (two([TAKE_WAND]), play(GET_KEY), two(GET_FUSED_KEY)):
         same, outcome = engine.crab_catches_everyone(state)
         assert not outcome["ok"] and same is state
+
+
+# --- The abilities of the characters ----------------------------------------------------------
+
+
+ABILITY = act("ability", None)
+
+
+def two_as(character, partner, steps=()):
+    state = engine.choose_partner_character(engine.new_game(character, two_players=True), partner)[0]
+    return play(steps, state)
+
+
+def test_an_ability_works_once_in_a_game_for_two_and_is_remembered():
+    state = two_as("wizard", "flash")
+    assert engine.can_use_ability(state, 1) and engine.can_use_ability(state, 2)
+    before = copy.deepcopy(state)
+    used, outcome = engine.perform(state, ABILITY, 2)
+    assert state == before
+    assert outcome == {"ok": True, "event": "ability", "text": story.CHARACTERS["flash"]["power"]["text"]}
+    assert not engine.can_use_ability(used, 2) and engine.can_use_ability(used, 1)  # each their own
+    assert reopen(used) == used  # used up for good, also after reopening the game
+    again, outcome = engine.perform(used, ABILITY, 2)
+    assert not outcome["ok"] and outcome["event"] == "ability_used" and again is used
+    assert engine.perform(used, ABILITY, 1)[1]["ok"]
+
+
+def test_alone_there_are_no_abilities():
+    for character in story.CHARACTERS:
+        state = engine.new_game(character)
+        assert not engine.can_use_ability(state)
+        same, outcome = engine.perform(state, ABILITY)
+        assert not outcome["ok"] and same is state and outcome["text"] == story.MESSAGES["abilities_for_two"]
+
+
+def test_the_nurse_has_nothing_to_use_her_ability_is_always_on():
+    state = two_as("nurse", "ghost")
+    assert story.CHARACTERS["nurse"]["power"] is None
+    assert not engine.can_use_ability(state, 1)
+    assert not engine.perform(state, ABILITY, 1)[1]["ok"]
+    assert engine.can_use_ability(state, 2)
+
+
+def test_no_ability_once_out_of_the_game_or_after_an_ending():
+    out = engine.knock_out(two_as("wizard", "ghost"), 2)[0]
+    assert not engine.can_use_ability(out, 2) and engine.can_use_ability(out, 1)
+    over = engine.crab_catches_everyone(two_as("wizard", "ghost", GET_KEY))[0]
+    assert not engine.can_use_ability(over, 1)
+    assert not engine.perform(over, ABILITY, 1)[1]["ok"]
+
+
+def test_every_character_says_what_its_ability_does():
+    for character, info in story.CHARACTERS.items():
+        assert info["ability"], character
+        if info["power"] is not None:
+            assert info["power"]["label"] and info["power"]["text"], character
+
+
+# --- The heart of the mine, in a game for two --------------------------------------------------
+
+
+def in_the_mine(state, player):
+    """Move a player to the mine (only a portal leads there: the tests put them in it)."""
+    state = copy.deepcopy(state)
+    if player == 1:
+        state["room"] = "mine"
+    else:
+        state["flags"]["partner_room"] = "mine"
+    return state
+
+
+def test_the_heart_brings_back_a_player_who_was_out_next_to_the_one_who_took_it():
+    state = engine.knock_out(two(GET_KEY), 2)[0]
+    state = in_the_mine(state, 1)
+    before = copy.deepcopy(state)
+    after, outcome = engine.perform(state, act("pick_up", "heart"), 1)
+    assert state == before
+    assert outcome["ok"] and outcome["event"] == "revived" and outcome["text"] == story.ITEMS["heart"]["revive_text"]
+    assert not engine.is_out(after, 2) and engine.player_room(after, 2) == "mine"
+    assert engine.carries(after, "key", 1) and not engine.carries(after, "key", 2)  # the items stay where they went
+    assert engine.perform(after, TAKE_WAND, 2)[1]["event"] != "out"  # they can act again
+    assert reopen(after) == after
+
+
+def test_the_heart_works_for_player_two_as_well():
+    state = in_the_mine(engine.knock_out(two(GET_KEY), 1)[0], 2)
+    after, outcome = engine.perform(state, act("pick_up", "heart"), 2)
+    assert outcome["event"] == "revived" and not engine.is_out(after, 1) and engine.player_room(after, 1) == "mine"
+
+
+def test_the_heart_is_wasted_when_nobody_is_out():
+    state = in_the_mine(two(GET_KEY), 1)
+    after, outcome = engine.perform(state, act("pick_up", "heart"), 1)
+    assert outcome["event"] == "used_up" and after["flags"]["heart_used"] is True
+    assert "heart" not in after["inventory"]
+    again, outcome = engine.perform(after, act("pick_up", "heart"), 1)
+    assert not outcome["ok"]  # one heart in a game
+    out = engine.knock_out(after, 2)[0]
+    assert not engine.perform(out, act("pick_up", "heart"), 1)[1]["ok"]  # too late
+
+
+def test_an_ability_already_used_does_not_come_back_with_the_heart():
+    state = engine.perform(two_as("wizard", "flash", GET_KEY), ABILITY, 2)[0]
+    state = in_the_mine(engine.knock_out(state, 2)[0], 1)
+    after = engine.perform(state, act("pick_up", "heart"), 1)[0]
+    assert not engine.is_out(after, 2) and not engine.can_use_ability(after, 2)
+
+
+# --- Dropping items ------------------------------------------------------------------------
+
+
+def drop_at(col, row):
+    return {"verb": "drop", "target": None, "item": None, "at": [col, row]}
+
+
+def test_drop_puts_the_last_item_on_the_floor_where_the_player_stands():
+    state = play([TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY])
+    before = copy.deepcopy(state)
+    after, outcome = engine.perform(state, drop_at(5, 6))
+    assert state == before
+    assert outcome == {"ok": True, "event": "dropped",
+                       "text": story.MESSAGES["dropped"].format(item=story.ITEMS["key"]["name"])}
+    assert after["inventory"] == ["wand"] and engine.item_place(after, "key") == ("cabin", (5, 6))
+    lying = [thing for thing in engine.things_here(after) if thing["id"] == "key"]
+    assert lying == [{"id": "key", "kind": "item", "status": "on_floor", "pos": (5, 6)}]
+    assert reopen(after) == after
+    back, outcome = engine.perform(after, TAKE_KEY)
+    assert outcome["ok"] and back["inventory"] == ["wand", "key"] and back["flags"]["dropped_key"] is None
+    assert engine.item_place(back, "key") == ("cabin", story.ITEMS["key"]["pos"])
+
+
+def test_drop_goes_on_until_the_hands_are_empty():
+    state = play([TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY, CABIN_TO_DECK])
+    state = play([drop_at(3, 3), drop_at(4, 3)], state)  # the key, then the wand
+    assert state["inventory"] == []
+    assert engine.item_place(state, "key") == ("deck", (3, 3)) and engine.item_place(state, "wand") == ("deck", (4, 3))
+    same, outcome = engine.perform(state, drop_at(5, 3))
+    assert not outcome["ok"] and outcome["event"] == "nothing_to_drop" and same is state
+
+
+def test_a_dropped_item_is_only_in_the_room_where_it_was_dropped():
+    state = play([TAKE_WAND, TO_CABIN, drop_at(4, 4), CABIN_TO_DECK])
+    assert "wand" not in [thing["id"] for thing in engine.things_here(state)]  # not back where the story put it
+    assert not engine.perform(state, TAKE_WAND)[1]["ok"]
+    assert "wand" in [thing["id"] for thing in engine.things_here(play([TO_CABIN], state))]
+
+
+def test_a_key_on_the_floor_opens_nothing_until_it_is_picked_up_again():
+    state = play(GET_KEY)
+    assert engine.door_status(state, "deck_to_hold") == "open"
+    dropped = play([drop_at(3, 3)], state)
+    assert engine.door_status(dropped, "deck_to_hold") == "barred"
+    assert "key" not in [thing["id"] for thing in engine.things_here(play([TO_CABIN], dropped))]  # not on its altar again
+    assert engine.door_status(play([TAKE_KEY], dropped), "deck_to_hold") == "open"
+
+
+def test_the_fused_key_on_the_floor_is_still_fused():
+    state = two(GET_FUSED_KEY)
+    dropped = play([drop_at(3, 3)], state)
+    assert engine.key_fused(dropped) and not engine.crab_awake(dropped)  # the crab does not wake again
+    for room, part in (("cabin", "key"), ("hold", "second_key")):
+        there = copy.deepcopy(dropped)
+        there["room"] = room
+        assert part not in [thing["id"] for thing in engine.things_here(there)]  # the halves are gone for good
+
+
+def test_in_a_game_for_two_q_drops_the_last_item_that_player_got():
+    state = two([TAKE_WAND, TO_CABIN] + SOLVE_CABIN + [TAKE_KEY])
+    state = as_player(state, [TO_CABIN], 2)
+    assert engine.last_item(state, 1) == "key" and engine.last_item(state, 2) is None
+    state = play([act("give", "partner", "wand")], state)  # player 2 gets the wand: their last one
+    assert engine.last_item(state, 2) == "wand" and engine.last_item(state, 1) == "key"
+    assert state["inventory"] == ["key", "wand"]
+    dropped, outcome = engine.perform(state, drop_at(6, 6), 2)
+    assert outcome["ok"] and dropped["inventory"] == ["key"]
+    taken = play([TAKE_WAND], dropped)  # anyone can pick it up: now it is player 1's
+    assert engine.carries(taken, "wand", 1)
+
+
+def test_dropping_needs_a_tile_and_a_game_still_on():
+    state = play([TAKE_WAND])
+    for wrong in (None, [1], [1, 2, 3], ["1", 2], [1.5, 2], [-1, 2], [1, 100], [True, 2]):
+        same, outcome = engine.perform(state, {"verb": "drop", "target": None, "item": None, "at": wrong})
+        assert not outcome["ok"] and same is state, wrong
+    over = play(CRAB_ENDING)
+    assert not engine.perform(over, drop_at(3, 3))[1]["ok"]
+
+
+def test_the_place_of_a_dropped_item_is_checked_on_restore():
+    assert engine.restore_state(restorable(flags={"dropped_wand": "hold,3,4"})) is not None
+    for wrong in ("attic,3,4", "hold,3", "hold,a,4", "hold,3,400", 5, ["hold", 3, 4]):
+        assert engine.restore_state(restorable(flags={"dropped_wand": wrong})) is None, wrong
+    both = restorable(inventory=["wand"], flags={"dropped_wand": "hold,3,4"})
+    assert engine.restore_state(both) is None  # in hand and on the floor

@@ -56,8 +56,8 @@ TO_THE_CRAB_DOOR = ([("pick_up", "wand", None), ("enter", "deck_to_cabin", None)
                        ("enter", "deck_to_hold", None), ("enter", "hold_to_infirmary", None)]
                     + [("use_item", "cauldron", tincture) for tincture in story.POTION_PUZZLES["remedy"]["recipe"]]
                     + [("pick_up", "potion", None), ("use_item", "doctor", "potion"), ("enter", "infirmary_to_hold", None),
-                       ("enter", "hold_to_deck", None), ("enter", "deck_to_cabin", None), ("enter", "cabin_to_galley", None),
-                       ("use_item", "anvil", "key"), ("enter", "galley_to_cabin", None), ("enter", "cabin_to_deck", None)])
+                       ("enter", "hold_to_deck", None), ("enter", "deck_to_cabin", None), ("enter", "cabin_to_east_room", None),
+                       ("use_item", "anvil", "key"), ("enter", "east_room_to_cabin", None), ("enter", "cabin_to_deck", None)])
 CRAB_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_crab", "fused_key"), ("enter", "deck_to_crab", None),
                                   ("use_item", "crab", "wand")]
 ANGEL_ENDING = TO_THE_CRAB_DOOR + [("use_item", "deck_to_angel", "fused_key"), ("enter", "deck_to_angel", None),
@@ -78,7 +78,7 @@ def test_every_sprite_is_a_proper_picture():
         sharing = [thing for thing, info in story.OBJECTS.items() if info.get("picture") == name]
         if name.startswith("door_") or name == "ship":
             assert size == (2 * main.TILE, main.TILE), name
-        elif name == "decor_crab_pedestal":  # the statue without its crab: drawn in its place
+        elif name == "decor_crab_rubble":  # what is left of the statue: drawn in its place
             assert size == main.thing_rect("deck_statue").size, name
         elif sharing:  # a shared picture is as big as every piece that uses it
             for thing in sharing:
@@ -111,9 +111,10 @@ def test_everything_on_screen_has_a_picture():
     assert sprites.image("zone") is not None
     for status in ("open", "barred", "locked", "sealed"):
         assert sprites.image("door_" + status) is not None, status
-    for direction in ("down", "up", "right"):
-        for step in range(3):
-            assert sprites.image(f"player_{direction}_{step}") is not None, (direction, step)
+    for character in story.CHARACTERS.values():
+        for direction in ("down", "up", "right"):
+            for step in range(3):
+                assert sprites.image(f"{character['sprite']}_{direction}_{step}") is not None, (character, direction, step)
     assert sprites.image("ship") is not None
 
 
@@ -128,8 +129,8 @@ def test_a_missing_picture_gives_none():
 
 
 def test_flipped_pictures_are_mirrored_pixel_by_pixel():
-    picture = sprites.image("player_right_1")
-    mirrored = sprites.image("player_right_1", flip=True)
+    picture = sprites.image("wizard_right_1")
+    mirrored = sprites.image("wizard_right_1", flip=True)
     width, height = picture.get_size()
     for x in range(width):
         for y in range(height):
@@ -223,16 +224,16 @@ def test_the_player_walks_in_two_steps_and_stands_still(app):
     for _ in range(4 * main.WALK_STEP_FRAMES):
         main.update(app, 1, 0)
         steps.add(main.player_picture(app, p1(app)))
-    assert steps == {sprites.image("player_right_1"), sprites.image("player_right_2")}
+    assert steps == {sprites.image("wizard_right_1"), sprites.image("wizard_right_2")}
     main.update(app, 0, 0)
     assert not p1(app)["moving"]
-    assert main.player_picture(app, p1(app)) is sprites.image("player_right_0")
+    assert main.player_picture(app, p1(app)) is sprites.image("wizard_right_0")
 
 
 def test_facing_left_mirrors_the_right_pictures(app):
     main.update(app, -1, 0)
     main.update(app, 0, 0)
-    assert main.player_picture(app, p1(app)) is sprites.image("player_right_0", flip=True)
+    assert main.player_picture(app, p1(app)) is sprites.image("wizard_right_0", flip=True)
 
 
 def test_a_room_comes_out_of_the_dark_after_a_door(app):
