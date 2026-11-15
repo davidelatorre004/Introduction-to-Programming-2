@@ -1680,24 +1680,6 @@ def _rubble():
 SPRITES["decor_crab_rubble"] = _rubble()
 
 
-# One jaw of the giant claw that breaks the screen when the crab has caught both players,
-# in the reds of the crab: the upper one, its tip at the bottom left. main.py draws it
-# three times bigger, and mirrors it for the lower jaw.
-SPRITES["giant_claw"] = [
-    "........kkkkkkkkkk......",
-    "......kkrrrrrrrrrrkk....",
-    "....kkrrrrrrrrrrrrrrkk..",
-    "...krrrrorrrrrrrrrrrrrk.",
-    "..krrrrrrorrrrrrrrrrrrrk",
-    ".krrrrrrrrrrrrrrrrrrrrrk",
-    "krrrrrkkkkkkrrrrrrrrrrrk",
-    "krrrkk......kkrrrrrrrrrk",
-    "krkk..........kkrrrrrrRk",
-    "kk..............kkRRRRRk",
-    "..................kkkkkk",
-]
-
-
 def image(name, turns=0, flip=False):
     """The picture called `name` as a Surface, or None if there is no such picture.
 

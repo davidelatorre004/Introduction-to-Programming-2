@@ -22,6 +22,7 @@ import random
 
 import pygame
 
+import claw
 import effects
 import engine
 import net
@@ -1804,9 +1805,9 @@ CLAW_IMPACT = 27       # the frame the cracked screen falls to pieces: until the
 SHATTER_FRAMES = 86    # how long the whole sequence lasts: then the ending screen
 CLAW_FLASH = 3         # frames of white flash when the claw hits
 CLAW_SHAKE = 6         # pixels of shake at the hit, dying down until the screen falls apart
-CLAW_OPEN = 18         # pixels each jaw is away from the middle while the claw comes in
-CLAW_ZOOM = 3          # the jaw's picture is drawn three times bigger
 CLAW_RETREAT = 12      # frames the claw takes to pull back out once the screen breaks
+CLAW_SHADOW = (12, 16)  # how far from the claw its shadow falls on the screen while it is still far above it
+CLAW_SPARKS = 20       # sparks and chips thrown from where the jaws shut
 SHATTER_SEED = 11      # the web of cracks is always the same one
 
 
@@ -1881,7 +1882,8 @@ def start_shatter(app):
     hit = (WIDTH // 2, HEIGHT // 2)
     pieces = effects.crack_web((WIDTH, HEIGHT), hit, SHATTER_SEED)
     app["shatter"] = {"age": 0, "frozen": frozen, "hit": hit, "pieces": pieces,
-                      "shards": effects.cut_shards(frozen, pieces, hit, SHATTER_SEED)}
+                      "shards": effects.cut_shards(frozen, pieces, hit, SHATTER_SEED),
+                      "sparks": [], "rng": random.Random(SHATTER_SEED)}  # thrown when the jaws shut
     app["dialog"] = []
     app["crumble"] = 0
     sounds.play("knocked")
@@ -1892,8 +1894,12 @@ def update_shatter(app):
     """One frame of the claw breaking the screen. Nothing can be done meanwhile; then the ending."""
     shatter = app["shatter"]
     shatter["age"] += 1
+    effects.update_particles(shatter["sparks"])
     if shatter["age"] == CLAW_ATTACK:
         sounds.play("snap")      # the claw snaps shut on the screen
+        x, y = claw_pose(shatter["age"])["tip"]
+        effects.spawn(shatter, x, y, CLAW_SPARKS, effects.SPARK + [claw.LIGHT, claw.BASE], speed=3.2, life=24,
+                      gravity=0.14, up=0.6, layer="sparks")  # sparks and chips of shell fly from the grip
     elif shatter["age"] == CLAW_IMPACT:
         sounds.play("shatter")   # and the screen falls to pieces
     if shatter["age"] >= SHATTER_FRAMES:
@@ -1901,60 +1907,25 @@ def update_shatter(app):
         set_scene(app, "ending")
 
 
-def claw_place(age):
-    """Where the giant claw is `age` frames into the sequence: (the point its two tips close on,
-    how far each jaw is open). It comes in from the top right corner, closes on the middle of the
-    screen, holds, and pulls back out once the screen breaks."""
-    outside = (WIDTH + 24, -70)
-    middle = (WIDTH // 2 - 22, HEIGHT // 2)  # the tips: so that the jaws close around the middle of the screen
+def claw_pose(age):
+    """Where the giant claw is `age` frames into the sequence (see claw.pose): it comes in from the
+    top right corner, shuts on the middle of the screen, kicks back at the hit, holds, and pulls
+    back out once the screen breaks."""
+    return claw.pose(age, (WIDTH, HEIGHT), CLAW_REACH, CLAW_ATTACK, CLAW_IMPACT, CLAW_RETREAT)
+
+
+def draw_giant_claw(screen, age, offset=(0, 0)):
+    """The crab's limb, giant, with the shadow it casts on the game while the screen is still whole.
+
+    The shadow lies down and to the right of the limb, far from it while the claw is high above
+    the screen and closer as it comes down: at the hit the two touch.
+    """
+    limb = claw_pose(age)
+    picture = claw.layer((WIDTH, HEIGHT), limb, offset)
     if age < CLAW_IMPACT:
-        way = min(age / CLAW_REACH, 1.0)
-        opening = CLAW_OPEN if age < CLAW_REACH else CLAW_OPEN * max(CLAW_ATTACK - 1 - age, 0) / (CLAW_ATTACK - 1 - CLAW_REACH)
-    else:
-        way = 1.0 - min((age - CLAW_IMPACT) / CLAW_RETREAT, 1.0)
-        opening = 0
-    way = way * way * (3 - 2 * way)  # fast in the middle of the way, soft at both ends
-    tip = (round(outside[0] + (middle[0] - outside[0]) * way), round(outside[1] + (middle[1] - outside[1]) * way))
-    return tip, round(opening)
-
-
-_claw_jaws = []  # the two jaws, enlarged: made the first time they are drawn
-
-
-def claw_jaws():
-    """The upper and the lower jaw of the giant claw, enlarged; (None, None) without the picture."""
-    if not _claw_jaws:
-        jaw = sprites.image("giant_claw")
-        if jaw is None:
-            return None, None
-        upper = pygame.transform.scale(jaw, (jaw.get_width() * CLAW_ZOOM, jaw.get_height() * CLAW_ZOOM))
-        _claw_jaws.extend([upper, pygame.transform.flip(upper, False, True)])
-    return _claw_jaws[0], _claw_jaws[1]
-
-
-def draw_giant_claw(screen, tip, opening, offset=(0, 0)):
-    """The crab's claw, giant: an arm from the top right corner, the hand, and the two jaws
-    `opening` pixels away from the point they close on."""
-    upper, lower = claw_jaws()
-    if upper is None:
-        return
-    x, y = tip[0] + offset[0], tip[1] + offset[1]
-    red, dark, black = sprites.PALETTE["r"], sprites.PALETTE["R"], sprites.PALETTE["k"]
-    hand = pygame.Rect(0, 0, 40, 56 + 2 * opening)
-    hand.midleft = (x + upper.get_width() - 22, y)
-    shoulder = (WIDTH + 60 + offset[0], -90 + offset[1])
-    along = pygame.Vector2(shoulder[0] - hand.centerx, shoulder[1] - hand.centery)
-    side = pygame.Vector2(-along.y, along.x)
-    if side.length() > 0:
-        side.scale_to_length(15)
-        arm = [(hand.centerx + side.x, hand.centery + side.y), (shoulder[0] + side.x, shoulder[1] + side.y),
-               (shoulder[0] - side.x, shoulder[1] - side.y), (hand.centerx - side.x, hand.centery - side.y)]
-        pygame.draw.polygon(screen, dark, arm)
-        pygame.draw.polygon(screen, black, arm, 3)
-    pygame.draw.ellipse(screen, red, hand)
-    pygame.draw.ellipse(screen, black, hand, 3)
-    screen.blit(upper, upper.get_rect(bottomleft=(x, y - opening + 4)))
-    screen.blit(lower, lower.get_rect(topleft=(x, y + opening - 4)))
+        fall = (round(CLAW_SHADOW[0] * limb["shadow"]), round(CLAW_SHADOW[1] * limb["shadow"]))
+        screen.blit(claw.shadow_of(picture), fall)
+    screen.blit(picture, (0, 0))
 
 
 def draw_shatter(app, screen):
@@ -1977,8 +1948,8 @@ def draw_shatter(app, screen):
             effects.draw_cracks(screen, shatter["pieces"], shatter["hit"], farthest * grown, shake)
     else:
         effects.draw_shards(screen, shatter["shards"], age - CLAW_IMPACT)
-    tip, opening = claw_place(age)
-    draw_giant_claw(screen, tip, opening, shake)
+    draw_giant_claw(screen, age, shake)
+    effects.draw_particles(screen, shatter["sparks"])
     if CLAW_ATTACK <= age < CLAW_ATTACK + CLAW_FLASH:
         veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         veil.fill((255, 255, 255, 255 - 70 * (age - CLAW_ATTACK)))  # the hit: everything stops in white

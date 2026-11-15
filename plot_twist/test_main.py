@@ -12,6 +12,7 @@ import time
 import pygame
 import pytest
 
+import claw
 import effects
 import engine
 import main
@@ -2729,27 +2730,68 @@ def test_the_three_parts_of_the_sequence_come_at_their_frames_with_their_sounds(
     assert app["scene"] == "ending" and app["shatter"] is None and app["scene_frames"] == 0
 
 
-def test_the_claw_comes_in_from_the_corner_closes_on_the_middle_and_pulls_back():
-    outside, opening = main.claw_place(0)
-    assert not pygame.Rect(0, 0, main.WIDTH, main.HEIGHT).collidepoint(outside) and opening == main.CLAW_OPEN
-    middle = (main.WIDTH // 2, main.HEIGHT // 2)
-    gaps = []
-    for age in range(main.CLAW_ATTACK):
-        tip, opening = main.claw_place(age)
-        gaps.append(abs(tip[0] - middle[0]) + abs(tip[1] - middle[1]))
-    assert gaps == sorted(gaps, reverse=True)  # closer and closer
-    arrived, opening = main.claw_place(main.CLAW_REACH)
-    assert abs(arrived[1] - middle[1]) <= 1 and opening == main.CLAW_OPEN  # there, still open
-    assert main.claw_place(main.CLAW_ATTACK - 1) == (arrived, 0)  # shut
-    assert main.claw_place(main.CLAW_IMPACT - 1) == (arrived, 0)  # and holding while the screen cracks
-    assert main.claw_place(main.CLAW_IMPACT + main.CLAW_RETREAT)[0] == outside  # gone again
-    upper, lower = main.claw_jaws()
-    jaw = sprites.image("giant_claw")
-    assert upper.get_size() == (jaw.get_width() * main.CLAW_ZOOM, jaw.get_height() * main.CLAW_ZOOM)
-    assert lower.get_at((0, 0)) == upper.get_at((0, upper.get_height() - 1))  # the lower jaw: the upper one, mirrored
-    reds = {sprites.PALETTE["r"], sprites.PALETTE["R"], sprites.PALETTE["o"], sprites.PALETTE["k"]}
-    assert {tuple(upper.get_at((x, y)))[:3] for x in range(upper.get_width()) for y in range(upper.get_height())
-            if upper.get_at((x, y))[3]} <= reds  # the colours of the crab
+def test_the_sequence_uses_the_limb_of_claw_with_its_own_frames():
+    for age in (0, main.CLAW_REACH, main.CLAW_ATTACK, main.CLAW_IMPACT, main.SHATTER_FRAMES):
+        assert main.claw_pose(age) == claw.pose(age, (main.WIDTH, main.HEIGHT), main.CLAW_REACH, main.CLAW_ATTACK,
+                                                main.CLAW_IMPACT, main.CLAW_RETREAT)
+    middle = (main.WIDTH / 2, main.HEIGHT / 2)
+    assert main.claw_pose(main.CLAW_ATTACK - 1)["tip"] == pytest.approx(middle)  # where the cracks start
+    assert not hasattr(main, "claw_jaws") and sprites.image("giant_claw") is None  # no picture enlarged any more
+
+
+def shadow_pixels(age):
+    """How many pixels of a white screen the claw's shadow darkens at this frame, where the limb is not."""
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    screen.fill((255, 255, 255))
+    main.draw_giant_claw(screen, age)
+    tones = {claw.OUTLINE, claw.SHADOW, claw.BASE, claw.LIGHT, claw.PLATE, claw.TOOTH, (255, 255, 255)}
+    grey = [tuple(screen.get_at((x, y)))[:3] for x in range(main.WIDTH) for y in range(main.HEIGHT)]
+    grey = [color for color in grey if color not in tones]
+    assert all(color[0] == color[1] == color[2] and 90 < color[0] < 200 for color in grey)  # see-through black
+    return len(grey)
+
+
+def test_the_shadow_of_the_claw_closes_in_on_it_and_touches_it_at_the_hit():
+    pygame.display.set_mode((1, 1))
+    seen = [shadow_pixels(age) for age in (6, 9, 12, main.CLAW_ATTACK - 1)]
+    assert seen[0] > 300 and seen[1] > seen[2] > seen[3] == 0  # less and less of it shows; then none: they touch
+    assert shadow_pixels(main.CLAW_ATTACK + 3) == 0  # and it stays under the claw while the screen cracks
+    assert shadow_pixels(main.CLAW_IMPACT + 3) == 0  # no shadow on a screen that is falling apart
+
+
+def test_sparks_fly_from_the_grip_when_the_jaws_shut(app):
+    caught_both(app)
+    while app["shatter"]["age"] < main.CLAW_ATTACK - 1:
+        main.update(app, 0, 0)
+    assert app["shatter"]["sparks"] == []
+    main.update(app, 0, 0)  # the snap
+    sparks = app["shatter"]["sparks"]
+    tip = main.claw_pose(main.CLAW_ATTACK)["tip"]
+    assert len(sparks) == main.CLAW_SPARKS >= 12
+    assert all(abs(one["x"] - tip[0]) < 1 and abs(one["y"] - tip[1]) < 1 for one in sparks)  # from where the jaws meet
+    assert len({(round(one["vx"], 2), round(one["vy"], 2)) for one in sparks}) > main.CLAW_SPARKS // 2  # every way
+    assert {one["color"] for one in sparks} <= set(effects.SPARK) | {claw.LIGHT, claw.BASE}
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.update(app, 0, 0)
+    main.update(app, 0, 0)
+    main.update(app, 0, 0)
+    assert max(abs(one["x"] - tip[0]) + abs(one["y"] - tip[1]) for one in sparks) > 6  # flying off
+    main.draw(app, screen)
+    while app["scene"] == "shatter" and app["shatter"]["age"] < main.CLAW_ATTACK + 26:
+        main.update(app, 0, 0)
+    assert app["shatter"]["sparks"] == []  # burnt out long before the screen has fallen apart
+
+
+def test_a_second_defeat_starts_the_claw_from_scratch(app):
+    caught_both(app)
+    for _ in range(main.CLAW_ATTACK + 2):
+        main.update(app, 0, 0)
+    assert app["shatter"]["sparks"]
+    main.open_main_menu(app)
+    assert app["shatter"] is None
+    caught_both(app)  # another game, lost again
+    assert app["shatter"]["age"] == 1 and app["shatter"]["sparks"] == []
+    assert main.claw_pose(app["shatter"]["age"])["shadow"] > 0.9  # the claw is high above the screen again
 
 
 def test_the_cracked_screen_shakes_hard_at_the_hit(app):

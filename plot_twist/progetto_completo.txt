@@ -3118,6 +3118,7 @@ import random
 
 import pygame
 
+import claw
 import effects
 import engine
 import net
@@ -4900,9 +4901,9 @@ CLAW_IMPACT = 27       # the frame the cracked screen falls to pieces: until the
 SHATTER_FRAMES = 86    # how long the whole sequence lasts: then the ending screen
 CLAW_FLASH = 3         # frames of white flash when the claw hits
 CLAW_SHAKE = 6         # pixels of shake at the hit, dying down until the screen falls apart
-CLAW_OPEN = 18         # pixels each jaw is away from the middle while the claw comes in
-CLAW_ZOOM = 3          # the jaw's picture is drawn three times bigger
 CLAW_RETREAT = 12      # frames the claw takes to pull back out once the screen breaks
+CLAW_SHADOW = (12, 16)  # how far from the claw its shadow falls on the screen while it is still far above it
+CLAW_SPARKS = 20       # sparks and chips thrown from where the jaws shut
 SHATTER_SEED = 11      # the web of cracks is always the same one
 
 
@@ -4977,7 +4978,8 @@ def start_shatter(app):
     hit = (WIDTH // 2, HEIGHT // 2)
     pieces = effects.crack_web((WIDTH, HEIGHT), hit, SHATTER_SEED)
     app["shatter"] = {"age": 0, "frozen": frozen, "hit": hit, "pieces": pieces,
-                      "shards": effects.cut_shards(frozen, pieces, hit, SHATTER_SEED)}
+                      "shards": effects.cut_shards(frozen, pieces, hit, SHATTER_SEED),
+                      "sparks": [], "rng": random.Random(SHATTER_SEED)}  # thrown when the jaws shut
     app["dialog"] = []
     app["crumble"] = 0
     sounds.play("knocked")
@@ -4988,8 +4990,12 @@ def update_shatter(app):
     """One frame of the claw breaking the screen. Nothing can be done meanwhile; then the ending."""
     shatter = app["shatter"]
     shatter["age"] += 1
+    effects.update_particles(shatter["sparks"])
     if shatter["age"] == CLAW_ATTACK:
         sounds.play("snap")      # the claw snaps shut on the screen
+        x, y = claw_pose(shatter["age"])["tip"]
+        effects.spawn(shatter, x, y, CLAW_SPARKS, effects.SPARK + [claw.LIGHT, claw.BASE], speed=3.2, life=24,
+                      gravity=0.14, up=0.6, layer="sparks")  # sparks and chips of shell fly from the grip
     elif shatter["age"] == CLAW_IMPACT:
         sounds.play("shatter")   # and the screen falls to pieces
     if shatter["age"] >= SHATTER_FRAMES:
@@ -4997,60 +5003,25 @@ def update_shatter(app):
         set_scene(app, "ending")
 
 
-def claw_place(age):
-    """Where the giant claw is `age` frames into the sequence: (the point its two tips close on,
-    how far each jaw is open). It comes in from the top right corner, closes on the middle of the
-    screen, holds, and pulls back out once the screen breaks."""
-    outside = (WIDTH + 24, -70)
-    middle = (WIDTH // 2 - 22, HEIGHT // 2)  # the tips: so that the jaws close around the middle of the screen
+def claw_pose(age):
+    """Where the giant claw is `age` frames into the sequence (see claw.pose): it comes in from the
+    top right corner, shuts on the middle of the screen, kicks back at the hit, holds, and pulls
+    back out once the screen breaks."""
+    return claw.pose(age, (WIDTH, HEIGHT), CLAW_REACH, CLAW_ATTACK, CLAW_IMPACT, CLAW_RETREAT)
+
+
+def draw_giant_claw(screen, age, offset=(0, 0)):
+    """The crab's limb, giant, with the shadow it casts on the game while the screen is still whole.
+
+    The shadow lies down and to the right of the limb, far from it while the claw is high above
+    the screen and closer as it comes down: at the hit the two touch.
+    """
+    limb = claw_pose(age)
+    picture = claw.layer((WIDTH, HEIGHT), limb, offset)
     if age < CLAW_IMPACT:
-        way = min(age / CLAW_REACH, 1.0)
-        opening = CLAW_OPEN if age < CLAW_REACH else CLAW_OPEN * max(CLAW_ATTACK - 1 - age, 0) / (CLAW_ATTACK - 1 - CLAW_REACH)
-    else:
-        way = 1.0 - min((age - CLAW_IMPACT) / CLAW_RETREAT, 1.0)
-        opening = 0
-    way = way * way * (3 - 2 * way)  # fast in the middle of the way, soft at both ends
-    tip = (round(outside[0] + (middle[0] - outside[0]) * way), round(outside[1] + (middle[1] - outside[1]) * way))
-    return tip, round(opening)
-
-
-_claw_jaws = []  # the two jaws, enlarged: made the first time they are drawn
-
-
-def claw_jaws():
-    """The upper and the lower jaw of the giant claw, enlarged; (None, None) without the picture."""
-    if not _claw_jaws:
-        jaw = sprites.image("giant_claw")
-        if jaw is None:
-            return None, None
-        upper = pygame.transform.scale(jaw, (jaw.get_width() * CLAW_ZOOM, jaw.get_height() * CLAW_ZOOM))
-        _claw_jaws.extend([upper, pygame.transform.flip(upper, False, True)])
-    return _claw_jaws[0], _claw_jaws[1]
-
-
-def draw_giant_claw(screen, tip, opening, offset=(0, 0)):
-    """The crab's claw, giant: an arm from the top right corner, the hand, and the two jaws
-    `opening` pixels away from the point they close on."""
-    upper, lower = claw_jaws()
-    if upper is None:
-        return
-    x, y = tip[0] + offset[0], tip[1] + offset[1]
-    red, dark, black = sprites.PALETTE["r"], sprites.PALETTE["R"], sprites.PALETTE["k"]
-    hand = pygame.Rect(0, 0, 40, 56 + 2 * opening)
-    hand.midleft = (x + upper.get_width() - 22, y)
-    shoulder = (WIDTH + 60 + offset[0], -90 + offset[1])
-    along = pygame.Vector2(shoulder[0] - hand.centerx, shoulder[1] - hand.centery)
-    side = pygame.Vector2(-along.y, along.x)
-    if side.length() > 0:
-        side.scale_to_length(15)
-        arm = [(hand.centerx + side.x, hand.centery + side.y), (shoulder[0] + side.x, shoulder[1] + side.y),
-               (shoulder[0] - side.x, shoulder[1] - side.y), (hand.centerx - side.x, hand.centery - side.y)]
-        pygame.draw.polygon(screen, dark, arm)
-        pygame.draw.polygon(screen, black, arm, 3)
-    pygame.draw.ellipse(screen, red, hand)
-    pygame.draw.ellipse(screen, black, hand, 3)
-    screen.blit(upper, upper.get_rect(bottomleft=(x, y - opening + 4)))
-    screen.blit(lower, lower.get_rect(topleft=(x, y + opening - 4)))
+        fall = (round(CLAW_SHADOW[0] * limb["shadow"]), round(CLAW_SHADOW[1] * limb["shadow"]))
+        screen.blit(claw.shadow_of(picture), fall)
+    screen.blit(picture, (0, 0))
 
 
 def draw_shatter(app, screen):
@@ -5073,8 +5044,8 @@ def draw_shatter(app, screen):
             effects.draw_cracks(screen, shatter["pieces"], shatter["hit"], farthest * grown, shake)
     else:
         effects.draw_shards(screen, shatter["shards"], age - CLAW_IMPACT)
-    tip, opening = claw_place(age)
-    draw_giant_claw(screen, tip, opening, shake)
+    draw_giant_claw(screen, age, shake)
+    effects.draw_particles(screen, shatter["sparks"])
     if CLAW_ATTACK <= age < CLAW_ATTACK + CLAW_FLASH:
         veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         veil.fill((255, 255, 255, 255 - 70 * (age - CLAW_ATTACK)))  # the hit: everything stops in white
@@ -7566,6 +7537,338 @@ def draw_cracks(surface, pieces, center, reach, offset=(0, 0)):
 
 
 ================================================================================
+# FILE: plot_twist/claw.py
+================================================================================
+
+"""The giant claw that breaks the screen when the crab has caught both players.
+
+A crab's limb in three segments (the upper arm from the corner of the screen,
+the thick forearm, the massive hand) and the two jaws of the claw, joined by
+dark plated joints. Nothing here is a picture: pose() works out where every
+joint is at a moment of the attack, and draw() paints the limb from that, with
+plain polygons on the pixel grid of the small screen. So it bends at its
+joints without ever being turned or enlarged, and every pixel stays sharp.
+
+The shell has four tones, for a round, armoured look: a dark outline, a deep
+shadow on the side away from the light, the red of the crab, and a pale
+highlight along the edge that faces the light, which comes from the top left.
+
+This module knows nothing about the game: main.py tells it the time and the
+size of the screen, and draws what it returns.
+"""
+
+import math
+
+import pygame
+
+# --- The shell: four tones, and what the details are made of ------------------------------
+
+OUTLINE = (44, 10, 18)     # almost black, with a little red in it
+SHADOW = (132, 30, 36)     # the side away from the light
+BASE = (214, 64, 52)       # the red of the crab
+LIGHT = (252, 156, 124)    # the edge that catches the light: salmon
+PLATE = (88, 20, 28)       # the dark plates of the joints
+TOOTH = (250, 228, 204)    # the small teeth inside the grip
+LIGHT_FROM = (-0.7071, -0.7071)  # the way to the light: up and to the left
+
+# --- The limb: lengths and widths, in pixels ------------------------------------------------
+
+UPPER_ARM = 88       # from the shoulder, beyond the corner of the screen, to the elbow
+FOREARM = 56         # from the elbow to the wrist: the thickest part
+HAND = 28            # the base of the claw, from the wrist to the hinge of the jaws
+JAW = 56             # each jaw, along its curve
+JAW_STEPS = 8        # the pieces a jaw's curve is made of
+JAW_SPREAD = 0.55    # radians a jaw leans outwards where it leaves the hand...
+JAW_CURL = 1.25      # ...and how much it curls back in by its tip
+JAW_GAP = 6          # how far from the middle of the hand each jaw starts
+
+UPPER_WIDTHS = (10, 11, 12)        # half the width of each segment along its length
+FOREARM_WIDTHS = (12, 16, 14)
+HAND_WIDTHS = (15, 19, 18)
+JAW_WIDTHS = (11, 11, 10, 9, 8, 6, 4, 2, 1)
+ELBOW, WRIST, HINGE = 11, 13, 9    # how big the plates of each joint are
+SHOULDER = (16, -42)               # where the shoulder is: right of the screen's right edge, above its top
+FOLDED = (-30, -36)                # where the wrist is, from the shoulder, while the arm waits folded out of sight
+
+SPIKES = 5           # the saw of chitin along the outer edge of the forearm
+TEETH = 5            # the small teeth along the inside of each jaw
+
+# --- The attack: how the limb moves ---------------------------------------------------------
+
+AIM = math.atan2(0.62, -0.78)   # where the hand points when it strikes: down and to the left
+WRIST_COCKED = 0.42             # radians the hand is bent back while the arm comes in...
+WRIST_STRUCK = -0.06            # ...and how far it snaps forward as the jaws shut
+JAW_OPEN = 0.62                 # radians each jaw is open while the claw comes in
+RECOIL = (-3, -3, -2, 1, -1, 1, 0, -1, 0)  # pixels along the arm, frame by frame from the hit: a kick, then a shiver
+
+
+def jaw_line(hinge, heading, side, opening):
+    """The middle line of one jaw: points from the hand to the tip.
+
+    `side` is 1 for the jaw on the left of the way the hand points, -1 for the
+    other. It leaves the hand leaning outwards and curls back in, so that the
+    two tips meet when `opening` is 0.
+    """
+    nx, ny = -math.sin(heading), math.cos(heading)  # the left of the way the hand points
+    x = hinge[0] - side * JAW_GAP * nx
+    y = hinge[1] - side * JAW_GAP * ny
+    points = [(x, y)]
+    step = JAW / JAW_STEPS
+    for index in range(JAW_STEPS):
+        along = (index + 0.5) / JAW_STEPS
+        turn = heading - side * (opening + JAW_SPREAD - JAW_CURL * along)
+        x += step * math.cos(turn)
+        y += step * math.sin(turn)
+        points.append((x, y))
+    return points
+
+
+def jaw_reach():
+    """How far in front of the hinge the tips of the shut jaws meet."""
+    tip = jaw_line((0.0, 0.0), 0.0, 1, 0.0)[-1]
+    return tip[0]
+
+
+def elbow_between(shoulder, wrist):
+    """Where the elbow is, for an arm of two bones from the shoulder to the wrist.
+
+    The two bones have fixed lengths, so the elbow is where two circles cross:
+    of the two places, the one on the outside of the screen (down and to the
+    right of the arm). The closer the wrist is to the shoulder, the more the arm
+    is bent; it straightens as the claw strikes.
+    """
+    dx, dy = wrist[0] - shoulder[0], wrist[1] - shoulder[1]
+    real = math.hypot(dx, dy) or 1.0
+    dx, dy = dx / real, dy / real
+    apart = min(max(real, abs(UPPER_ARM - FOREARM) + 0.01), UPPER_ARM + FOREARM - 0.01)
+    along = (UPPER_ARM ** 2 - FOREARM ** 2 + apart ** 2) / (2 * apart)
+    off = math.sqrt(max(UPPER_ARM ** 2 - along ** 2, 0.0))
+    return (shoulder[0] + dx * along + dy * off, shoulder[1] + dy * along - dx * off)
+
+
+def ease(way):
+    """From 0 to 1, fast in the middle and soft at both ends."""
+    way = min(max(way, 0.0), 1.0)
+    return way * way * (3 - 2 * way)
+
+
+def pose(age, size, reach_frames, attack_frames, impact_frame, retreat_frames):
+    """Where the whole limb is, `age` frames into the sequence, on a screen of this size.
+
+    The claw comes in from the top right corner with its jaws open and its wrist
+    cocked back (`reach_frames`), shuts on the middle of the screen as the wrist
+    snaps forward (until `attack_frames`), kicks back and shivers at the hit,
+    holds, and from `impact_frame` pulls back out in `retreat_frames`.
+
+    Returns a dict: the joints "shoulder", "elbow", "wrist", "hinge" and the point
+    "tip" the jaws close on, the "heading" of the hand, how far the jaws are open
+    ("opening", in radians), and "shadow": how far the limb is above the screen
+    (1 far away, 0 touching it).
+    """
+    width, height = size
+    shoulder = (width + float(SHOULDER[0]), float(SHOULDER[1]))
+    target = (width / 2.0, height / 2.0)
+    grip = HAND + jaw_reach()  # from the wrist to where the tips meet
+    # Before the attack the arm is folded beyond the corner, the whole claw out of sight: the wrist
+    # up and to the right of the shoulder, far enough for the two bones to reach it.
+    cocked = AIM + WRIST_COCKED  # the way the hand points then
+    folded = (shoulder[0] + FOLDED[0] + grip * math.cos(cocked), shoulder[1] + FOLDED[1] + grip * math.sin(cocked))
+    if age < impact_frame:
+        way = ease(age / reach_frames)
+        shutting = min(max((age - reach_frames) / max(attack_frames - 1 - reach_frames, 1), 0.0), 1.0)
+        opening = JAW_OPEN * (1.0 - shutting)
+        bend = WRIST_COCKED + (WRIST_STRUCK - WRIST_COCKED) * ease(0.35 * way + 0.65 * shutting)
+        shadow = 1.0 - min(age / max(attack_frames - 1, 1), 1.0)
+    else:
+        way = 1.0 - ease((age - impact_frame) / retreat_frames)
+        opening = 0.0
+        bend = WRIST_STRUCK
+        shadow = 0.0
+    heading = AIM + bend
+    since_hit = age - attack_frames
+    kick = RECOIL[since_hit] if 0 <= since_hit < len(RECOIL) and age < impact_frame else 0
+    tip = (folded[0] + (target[0] - folded[0]) * way + kick * math.cos(AIM),
+           folded[1] + (target[1] - folded[1]) * way + kick * math.sin(AIM))
+    hinge = (tip[0] - jaw_reach() * math.cos(heading), tip[1] - jaw_reach() * math.sin(heading))
+    wrist = (hinge[0] - HAND * math.cos(heading), hinge[1] - HAND * math.sin(heading))
+    return {"shoulder": shoulder, "elbow": elbow_between(shoulder, wrist), "wrist": wrist, "hinge": hinge,
+            "tip": tip, "heading": heading, "opening": opening, "shadow": shadow}
+
+
+# --- Drawing: ribbons of shell, joints, spikes and teeth -----------------------------------
+
+
+def normals(points):
+    """For each point of a line, the direction to its left: where the width of a ribbon goes."""
+    result = []
+    last = len(points) - 1
+    for index in range(len(points)):
+        ax, ay = points[max(index - 1, 0)]
+        bx, by = points[min(index + 1, last)]
+        length = math.hypot(bx - ax, by - ay) or 1.0
+        result.append((-(by - ay) / length, (bx - ax) / length))
+    return result
+
+
+def lit_side(sides):
+    """1 if the left of a ribbon faces the light, -1 if its right does."""
+    facing = sum(nx * LIGHT_FROM[0] + ny * LIGHT_FROM[1] for nx, ny in sides)
+    return 1 if facing > 0 else -1
+
+
+def edge(points, widths, sides, share, extra=0.0):
+    """The line that runs along a ribbon at `share` of its half width: 1 is its left edge, -1 its right."""
+    return [(x + nx * (width + extra) * share, y + ny * (width + extra) * share)
+            for (x, y), width, (nx, ny) in zip(points, widths, sides)]
+
+
+def strip(surface, color, points, widths, sides, start, end, extra=0.0):
+    """Fill a ribbon between two shares of its width."""
+    outline = edge(points, widths, sides, start, extra) + edge(points, widths, sides, end, extra)[::-1]
+    pygame.draw.polygon(surface, color, [(round(x), round(y)) for x, y in outline])
+
+
+def along(points, widths, sides, step):
+    """Walk along a ribbon every `step` pixels: yields ((x, y), (left x, left y), half width) there."""
+    left = 0.0
+    for index in range(len(points) - 1):
+        (ax, ay), (bx, by) = points[index], points[index + 1]
+        length = math.hypot(bx - ax, by - ay)
+        while left < length:
+            share = left / length
+            nx = sides[index][0] + (sides[index + 1][0] - sides[index][0]) * share
+            ny = sides[index][1] + (sides[index + 1][1] - sides[index][1]) * share
+            width = widths[index] + (widths[index + 1] - widths[index]) * share
+            yield (ax + (bx - ax) * share, ay + (by - ay) * share), (nx, ny), width
+            left += step
+        left -= length
+
+
+def spread(widths, count):
+    """The widths of a segment given for a few places, stretched over `count` points along it."""
+    result = []
+    for index in range(count):
+        place = index * (len(widths) - 1) / max(count - 1, 1)
+        low = min(int(place), len(widths) - 2)
+        result.append(widths[low] + (widths[low + 1] - widths[low]) * (place - low))
+    return result
+
+
+GRAINS = (0.08, 0.34, -0.5, 0.2, -0.72, 0.0, 0.28, -0.42)  # where across the shell each grain is: 1 is the lit edge
+
+
+def dot(surface, x, y, color):
+    """One pixel, if it is on the picture."""
+    x, y = round(x), round(y)
+    if 0 <= x < surface.get_width() and 0 <= y < surface.get_height():
+        surface.set_at((x, y), color)
+
+
+def ribbon(surface, points, widths):
+    """A piece of shell along a line of points, round like a tube: outline, red, shadow on the side
+    away from the light, a pale edge on the side towards it, a dither where shadow and red meet,
+    and a few grains so that the shell is not flat."""
+    sides = normals(points)
+    lit = lit_side(sides)
+    strip(surface, OUTLINE, points, widths, sides, -1, 1, extra=1.5)
+    strip(surface, BASE, points, widths, sides, -1, 1)
+    strip(surface, SHADOW, points, widths, sides, -lit, -lit * 0.25)
+    strip(surface, LIGHT, points, widths, sides, lit * 0.5, lit * 0.8)
+    for index, ((x, y), (nx, ny), width) in enumerate(along(points, widths, sides, 2)):
+        if index % 2 == 0:  # every other pixel just past the shadow: shadow and red mix
+            dot(surface, x - lit * nx * width * 0.13, y - lit * ny * width * 0.13, SHADOW)
+    for index, ((x, y), (nx, ny), width) in enumerate(along(points, widths, sides, 5)):
+        if width < 5:
+            continue  # too thin for grains: the tip of a jaw
+        share = GRAINS[index % len(GRAINS)]
+        dot(surface, x + lit * nx * width * share, y + lit * ny * width * share, SHADOW if share > -0.25 else OUTLINE)
+
+
+def joint(surface, center, radius, heading):
+    """A joint of the limb: two dark plates, one over the other, with a hard outline and a glint."""
+    x, y = round(center[0]), round(center[1])
+    pygame.draw.circle(surface, OUTLINE, (x, y), radius + 1)
+    pygame.draw.circle(surface, PLATE, (x, y), radius)
+    over = (round(x + 3 * math.cos(heading)), round(y + 3 * math.sin(heading)))  # the plate of the next segment
+    pygame.draw.circle(surface, OUTLINE, over, radius - 2)
+    pygame.draw.circle(surface, SHADOW, over, radius - 3)
+    glint = (over[0] - radius // 3, over[1] - radius // 3)
+    if surface.get_rect().collidepoint(glint):
+        pygame.draw.rect(surface, LIGHT, (glint[0], glint[1], 2, 1))
+        surface.set_at((glint[0], glint[1] + 1), BASE)
+
+
+def thorn(surface, base, direction, wide, tall, color):
+    """A small triangle standing on an edge: a spike of chitin, or a tooth."""
+    along = (-direction[1], direction[0])
+    corners = [(base[0] - along[0] * wide, base[1] - along[1] * wide),
+               (base[0] + direction[0] * tall, base[1] + direction[1] * tall),
+               (base[0] + along[0] * wide, base[1] + along[1] * wide)]
+    corners = [(round(x), round(y)) for x, y in corners]
+    pygame.draw.polygon(surface, color, corners)
+    pygame.draw.polygon(surface, OUTLINE, corners, 1)
+
+
+def segment(start, end, widths, count=5):
+    """The points and the widths of a straight segment of the limb."""
+    points = [(start[0] + (end[0] - start[0]) * index / (count - 1), start[1] + (end[1] - start[1]) * index / (count - 1))
+              for index in range(count)]
+    return points, spread(widths, count)
+
+
+def draw(surface, limb, offset=(0, 0)):
+    """Paint the whole limb of a pose() on the surface, from the shoulder to the tips of the jaws."""
+    def moved(point):
+        return (point[0] + offset[0], point[1] + offset[1])
+    shoulder, elbow, wrist, hinge = (moved(limb[name]) for name in ("shoulder", "elbow", "wrist", "hinge"))
+    heading, opening = limb["heading"], limb["opening"]
+    upper, upper_widths = segment(shoulder, elbow, UPPER_WIDTHS)
+    fore, fore_widths = segment(elbow, wrist, FOREARM_WIDTHS)
+    hand, hand_widths = segment(wrist, hinge, HAND_WIDTHS)
+    ribbon(surface, upper, upper_widths)
+    # The saw of chitin: spikes on the outer edge of the forearm, the side of the elbow's bend.
+    sides = normals(fore)
+    outer = -1 if lit_side(sides) == 1 else 1  # the bend is on the side away from the light
+    rim = edge(fore, fore_widths, sides, outer)
+    for index in range(SPIKES):
+        share = (index + 0.8) / (SPIKES + 0.6)
+        place = share * (len(rim) - 1)
+        low = min(int(place), len(rim) - 2)
+        base = (rim[low][0] + (rim[low + 1][0] - rim[low][0]) * (place - low),
+                rim[low][1] + (rim[low + 1][1] - rim[low][1]) * (place - low))
+        nx, ny = sides[low]
+        thorn(surface, base, (nx * outer, ny * outer), 3, 6 if index % 2 == 0 else 4, SHADOW)
+    ribbon(surface, fore, fore_widths)
+    joint(surface, elbow, ELBOW, math.atan2(wrist[1] - elbow[1], wrist[0] - elbow[0]))
+    # The jaws, each with its small teeth on the inside, under the hand that holds them.
+    for side in (1, -1):
+        line = jaw_line(hinge, heading, side, opening)
+        widths = list(JAW_WIDTHS)
+        sides = normals(line)
+        inner = edge(line, widths, sides, side)  # the edge that faces the other jaw
+        for index in range(TEETH):
+            place = 2 + index
+            nx, ny = sides[place]
+            thorn(surface, inner[place], (nx * side, ny * side), 2, 4 if index % 2 == 0 else 3, TOOTH)
+        ribbon(surface, line, widths)
+    ribbon(surface, hand, hand_widths)
+    joint(surface, wrist, WRIST, heading)
+    joint(surface, hinge, HINGE, heading)
+
+
+def layer(size, limb, offset=(0, 0)):
+    """The limb alone on a clear picture of this size: to draw it, and to cast its shadow."""
+    picture = pygame.Surface(size, pygame.SRCALPHA)
+    draw(picture, limb, offset)
+    return picture
+
+
+def shadow_of(picture, darkness=120):
+    """The dark shape a picture of the limb casts: the same outline, see-through black."""
+    return pygame.mask.from_surface(picture).to_surface(setcolor=(0, 0, 0, darkness), unsetcolor=(0, 0, 0, 0))
+
+
+================================================================================
 # FILE: plot_twist/net.py
 ================================================================================
 
@@ -9386,24 +9689,6 @@ def _rubble():
 
 
 SPRITES["decor_crab_rubble"] = _rubble()
-
-
-# One jaw of the giant claw that breaks the screen when the crab has caught both players,
-# in the reds of the crab: the upper one, its tip at the bottom left. main.py draws it
-# three times bigger, and mirrors it for the lower jaw.
-SPRITES["giant_claw"] = [
-    "........kkkkkkkkkk......",
-    "......kkrrrrrrrrrrkk....",
-    "....kkrrrrrrrrrrrrrrkk..",
-    "...krrrrorrrrrrrrrrrrrk.",
-    "..krrrrrrorrrrrrrrrrrrrk",
-    ".krrrrrrrrrrrrrrrrrrrrrk",
-    "krrrrrkkkkkkrrrrrrrrrrrk",
-    "krrrkk......kkrrrrrrrrrk",
-    "krkk..........kkrrrrrrRk",
-    "kk..............kkRRRRRk",
-    "..................kkkkkk",
-]
 
 
 def image(name, turns=0, flip=False):
@@ -11941,6 +12226,7 @@ import time
 import pygame
 import pytest
 
+import claw
 import effects
 import engine
 import main
@@ -14658,27 +14944,68 @@ def test_the_three_parts_of_the_sequence_come_at_their_frames_with_their_sounds(
     assert app["scene"] == "ending" and app["shatter"] is None and app["scene_frames"] == 0
 
 
-def test_the_claw_comes_in_from_the_corner_closes_on_the_middle_and_pulls_back():
-    outside, opening = main.claw_place(0)
-    assert not pygame.Rect(0, 0, main.WIDTH, main.HEIGHT).collidepoint(outside) and opening == main.CLAW_OPEN
-    middle = (main.WIDTH // 2, main.HEIGHT // 2)
-    gaps = []
-    for age in range(main.CLAW_ATTACK):
-        tip, opening = main.claw_place(age)
-        gaps.append(abs(tip[0] - middle[0]) + abs(tip[1] - middle[1]))
-    assert gaps == sorted(gaps, reverse=True)  # closer and closer
-    arrived, opening = main.claw_place(main.CLAW_REACH)
-    assert abs(arrived[1] - middle[1]) <= 1 and opening == main.CLAW_OPEN  # there, still open
-    assert main.claw_place(main.CLAW_ATTACK - 1) == (arrived, 0)  # shut
-    assert main.claw_place(main.CLAW_IMPACT - 1) == (arrived, 0)  # and holding while the screen cracks
-    assert main.claw_place(main.CLAW_IMPACT + main.CLAW_RETREAT)[0] == outside  # gone again
-    upper, lower = main.claw_jaws()
-    jaw = sprites.image("giant_claw")
-    assert upper.get_size() == (jaw.get_width() * main.CLAW_ZOOM, jaw.get_height() * main.CLAW_ZOOM)
-    assert lower.get_at((0, 0)) == upper.get_at((0, upper.get_height() - 1))  # the lower jaw: the upper one, mirrored
-    reds = {sprites.PALETTE["r"], sprites.PALETTE["R"], sprites.PALETTE["o"], sprites.PALETTE["k"]}
-    assert {tuple(upper.get_at((x, y)))[:3] for x in range(upper.get_width()) for y in range(upper.get_height())
-            if upper.get_at((x, y))[3]} <= reds  # the colours of the crab
+def test_the_sequence_uses_the_limb_of_claw_with_its_own_frames():
+    for age in (0, main.CLAW_REACH, main.CLAW_ATTACK, main.CLAW_IMPACT, main.SHATTER_FRAMES):
+        assert main.claw_pose(age) == claw.pose(age, (main.WIDTH, main.HEIGHT), main.CLAW_REACH, main.CLAW_ATTACK,
+                                                main.CLAW_IMPACT, main.CLAW_RETREAT)
+    middle = (main.WIDTH / 2, main.HEIGHT / 2)
+    assert main.claw_pose(main.CLAW_ATTACK - 1)["tip"] == pytest.approx(middle)  # where the cracks start
+    assert not hasattr(main, "claw_jaws") and sprites.image("giant_claw") is None  # no picture enlarged any more
+
+
+def shadow_pixels(age):
+    """How many pixels of a white screen the claw's shadow darkens at this frame, where the limb is not."""
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    screen.fill((255, 255, 255))
+    main.draw_giant_claw(screen, age)
+    tones = {claw.OUTLINE, claw.SHADOW, claw.BASE, claw.LIGHT, claw.PLATE, claw.TOOTH, (255, 255, 255)}
+    grey = [tuple(screen.get_at((x, y)))[:3] for x in range(main.WIDTH) for y in range(main.HEIGHT)]
+    grey = [color for color in grey if color not in tones]
+    assert all(color[0] == color[1] == color[2] and 90 < color[0] < 200 for color in grey)  # see-through black
+    return len(grey)
+
+
+def test_the_shadow_of_the_claw_closes_in_on_it_and_touches_it_at_the_hit():
+    pygame.display.set_mode((1, 1))
+    seen = [shadow_pixels(age) for age in (6, 9, 12, main.CLAW_ATTACK - 1)]
+    assert seen[0] > 300 and seen[1] > seen[2] > seen[3] == 0  # less and less of it shows; then none: they touch
+    assert shadow_pixels(main.CLAW_ATTACK + 3) == 0  # and it stays under the claw while the screen cracks
+    assert shadow_pixels(main.CLAW_IMPACT + 3) == 0  # no shadow on a screen that is falling apart
+
+
+def test_sparks_fly_from_the_grip_when_the_jaws_shut(app):
+    caught_both(app)
+    while app["shatter"]["age"] < main.CLAW_ATTACK - 1:
+        main.update(app, 0, 0)
+    assert app["shatter"]["sparks"] == []
+    main.update(app, 0, 0)  # the snap
+    sparks = app["shatter"]["sparks"]
+    tip = main.claw_pose(main.CLAW_ATTACK)["tip"]
+    assert len(sparks) == main.CLAW_SPARKS >= 12
+    assert all(abs(one["x"] - tip[0]) < 1 and abs(one["y"] - tip[1]) < 1 for one in sparks)  # from where the jaws meet
+    assert len({(round(one["vx"], 2), round(one["vy"], 2)) for one in sparks}) > main.CLAW_SPARKS // 2  # every way
+    assert {one["color"] for one in sparks} <= set(effects.SPARK) | {claw.LIGHT, claw.BASE}
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.update(app, 0, 0)
+    main.update(app, 0, 0)
+    main.update(app, 0, 0)
+    assert max(abs(one["x"] - tip[0]) + abs(one["y"] - tip[1]) for one in sparks) > 6  # flying off
+    main.draw(app, screen)
+    while app["scene"] == "shatter" and app["shatter"]["age"] < main.CLAW_ATTACK + 26:
+        main.update(app, 0, 0)
+    assert app["shatter"]["sparks"] == []  # burnt out long before the screen has fallen apart
+
+
+def test_a_second_defeat_starts_the_claw_from_scratch(app):
+    caught_both(app)
+    for _ in range(main.CLAW_ATTACK + 2):
+        main.update(app, 0, 0)
+    assert app["shatter"]["sparks"]
+    main.open_main_menu(app)
+    assert app["shatter"] is None
+    caught_both(app)  # another game, lost again
+    assert app["shatter"]["age"] == 1 and app["shatter"]["sparks"] == []
+    assert main.claw_pose(app["shatter"]["age"])["shadow"] > 0.9  # the claw is high above the screen again
 
 
 def test_the_cracked_screen_shakes_hard_at_the_hit(app):
@@ -15191,6 +15518,260 @@ def test_the_two_new_effects_have_their_switches():
 
 
 ================================================================================
+# FILE: plot_twist/test_claw.py
+================================================================================
+
+"""Tests for the giant claw: where its joints are at each moment of the attack, and how it is painted."""
+
+import math
+
+import pygame
+import pytest
+
+import claw
+
+SIZE = (256, 224)
+REACH, ATTACK, IMPACT, RETREAT = 10, 15, 27, 12
+TONES = {claw.OUTLINE, claw.SHADOW, claw.BASE, claw.LIGHT, claw.PLATE, claw.TOOTH}
+
+
+def pose(age):
+    return claw.pose(age, SIZE, REACH, ATTACK, IMPACT, RETREAT)
+
+
+def gap(a, b):
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def angle(a, b):
+    return math.atan2(b[1] - a[1], b[0] - a[0])
+
+
+def turn(first, second):
+    """The angle between two directions, in degrees, from 0 to 180."""
+    return abs(math.degrees(math.atan2(math.sin(first - second), math.cos(first - second))))
+
+
+def painted(age):
+    pygame.display.set_mode((1, 1))
+    return claw.layer(SIZE, pose(age))
+
+
+def pixels(picture):
+    return [(x, y, tuple(picture.get_at((x, y)))) for x in range(SIZE[0]) for y in range(SIZE[1])]
+
+
+# --- The pose ---------------------------------------------------------------------------------
+
+
+def test_the_claw_comes_in_from_outside_and_closes_on_the_middle_of_the_screen():
+    screen = pygame.Rect(0, 0, *SIZE)
+    middle = (SIZE[0] / 2, SIZE[1] / 2)
+    assert not screen.collidepoint(pose(0)["tip"])
+    assert all(color[3] == 0 for x, y, color in pixels(painted(0)))  # nothing of it in sight before it strikes
+    gaps = [gap(pose(age)["tip"], middle) for age in range(ATTACK)]
+    assert gaps == sorted(gaps, reverse=True) and gaps[0] > 150  # closer and closer
+    assert gap(pose(REACH)["tip"], middle) < 0.01 and pose(REACH)["opening"] == claw.JAW_OPEN  # there, still open
+    openings = [pose(age)["opening"] for age in range(REACH, ATTACK)]
+    assert openings == sorted(openings, reverse=True) and openings[-1] == 0.0  # the jaws shut
+    assert gap(pose(ATTACK - 1)["tip"], middle) < 0.01
+
+
+def test_the_limb_has_three_segments_that_keep_their_length_and_stand_at_an_angle():
+    for age in range(0, IMPACT + RETREAT + 2):
+        limb = pose(age)
+        assert gap(limb["shoulder"], limb["elbow"]) == pytest.approx(claw.UPPER_ARM, abs=0.01), age
+        assert gap(limb["elbow"], limb["wrist"]) == pytest.approx(claw.FOREARM, abs=0.01), age
+        assert gap(limb["wrist"], limb["hinge"]) == pytest.approx(claw.HAND, abs=0.01), age
+    limb = pose(ATTACK - 1)
+    upper = angle(limb["shoulder"], limb["elbow"])
+    fore = angle(limb["elbow"], limb["wrist"])
+    hand = angle(limb["wrist"], limb["hinge"])
+    assert turn(upper, fore) > 15 and turn(fore, hand) > 8 and turn(upper, hand) > 15  # none in line with another
+    screen = pygame.Rect(0, 0, *SIZE)
+    for name in ("elbow", "wrist", "hinge", "tip"):
+        assert screen.collidepoint(limb[name]), name  # all three segments are on screen at the hit
+    assert not screen.collidepoint(limb["shoulder"])  # the limb comes from beyond the corner
+    assert limb["shoulder"][0] > SIZE[0] and limb["shoulder"][1] < 0
+
+
+def test_the_joints_flex_during_the_lunge_and_as_the_jaws_shut():
+    def elbow_bend(age):
+        limb = pose(age)
+        return turn(angle(limb["shoulder"], limb["elbow"]), angle(limb["elbow"], limb["wrist"]))
+
+    def wrist_bend(age):
+        limb = pose(age)
+        return turn(angle(limb["elbow"], limb["wrist"]), limb["heading"])
+    assert elbow_bend(4) > elbow_bend(REACH) + 20   # folded at first, the arm stretches out as it strikes
+    assert abs(elbow_bend(REACH) - elbow_bend(ATTACK - 1)) > 3   # and gives a little as the jaws shut
+    assert abs(wrist_bend(REACH) - wrist_bend(ATTACK - 1)) > 2   # the wrist gives too
+    assert turn(pose(REACH)["heading"], pose(ATTACK - 1)["heading"]) > 12  # as the hand snaps forward on the grip
+    headings = [pose(age)["heading"] for age in range(ATTACK)]
+    assert headings[0] == pytest.approx(claw.AIM + claw.WRIST_COCKED) and headings[-1] == pytest.approx(claw.AIM + claw.WRIST_STRUCK)
+
+
+def test_at_the_hit_the_arm_kicks_back_along_its_axis_then_shivers_and_holds():
+    rest = pose(ATTACK - 1)["tip"]
+    back = (-math.cos(claw.AIM), -math.sin(claw.AIM))  # away from the screen, along the hand
+    moves = []
+    for age in range(ATTACK, IMPACT):
+        tip = pose(age)["tip"]
+        along = (tip[0] - rest[0]) * back[0] + (tip[1] - rest[1]) * back[1]
+        across = (tip[0] - rest[0]) * back[1] - (tip[1] - rest[1]) * back[0]
+        assert abs(across) < 0.01, age  # only along the arm
+        moves.append(round(along))
+    assert moves[0] in (2, 3) and moves[1] in (2, 3)             # the kick: two or three pixels back
+    assert set(moves[3:7]) <= {-1, 0, 1} and len(set(moves[3:7])) >= 2  # then a shiver of a pixel
+    assert moves[len(claw.RECOIL):] == [0] * (IMPACT - ATTACK - len(claw.RECOIL))  # and it holds still
+    assert pose(ATTACK + 1)["opening"] == 0.0
+
+
+def test_after_the_screen_breaks_the_claw_pulls_back_out():
+    gaps = [gap(pose(age)["tip"], pose(ATTACK - 1)["tip"]) for age in range(IMPACT, IMPACT + RETREAT + 1)]
+    assert gaps == sorted(gaps)
+    assert pose(IMPACT + RETREAT)["tip"] == pytest.approx(pose(0)["tip"])
+    assert not pygame.Rect(0, 0, *SIZE).collidepoint(pose(IMPACT + RETREAT + 5)["tip"])
+
+
+def test_the_shadow_is_far_while_the_claw_is_high_and_touches_it_at_the_hit():
+    heights = [pose(age)["shadow"] for age in range(ATTACK)]
+    assert heights[0] == 1.0 and heights == sorted(heights, reverse=True) and len(set(heights)) == ATTACK
+    assert heights[-1] == 0.0  # the frame before the snap: nothing between the claw and the screen
+    assert all(pose(age)["shadow"] == 0.0 for age in range(ATTACK, IMPACT + RETREAT))
+
+
+def test_the_two_jaws_meet_at_their_tips_when_shut_and_gape_when_open():
+    for heading in (0.0, claw.AIM, 2.0):
+        hinge = (100.0, 100.0)
+        shut = [claw.jaw_line(hinge, heading, side, 0.0) for side in (1, -1)]
+        assert gap(shut[0][-1], shut[1][-1]) < 5  # tip to tip
+        reach = claw.jaw_reach()
+        meet = (hinge[0] + reach * math.cos(heading), hinge[1] + reach * math.sin(heading))
+        assert gap(shut[0][-1], meet) < 3 and gap(shut[1][-1], meet) < 3
+        wide = [claw.jaw_line(hinge, heading, side, claw.JAW_OPEN) for side in (1, -1)]
+        assert gap(wide[0][-1], wide[1][-1]) > 40
+        middle = len(shut[0]) // 2
+        assert gap(shut[0][middle], shut[1][middle]) > gap(shut[0][-1], shut[1][-1]) + 10  # curved: a grip, not a beak
+        assert len(shut[0]) == claw.JAW_STEPS + 1 == len(claw.JAW_WIDTHS)
+
+
+def test_the_elbow_is_where_the_two_bones_meet_on_the_outside_of_the_arm():
+    shoulder = (272.0, -42.0)
+    for wrist in ((190.0, 62.0), (230.0, 20.0), (265.0, -30.0)):
+        elbow = claw.elbow_between(shoulder, wrist)
+        assert gap(shoulder, elbow) == pytest.approx(claw.UPPER_ARM, abs=0.01)
+        if gap(shoulder, wrist) > abs(claw.UPPER_ARM - claw.FOREARM):
+            assert gap(elbow, wrist) == pytest.approx(claw.FOREARM, abs=0.01)
+        straight = (wrist[0] - shoulder[0], wrist[1] - shoulder[1])
+        side = straight[0] * (elbow[1] - shoulder[1]) - straight[1] * (elbow[0] - shoulder[0])
+        assert side < 0  # always the same side: the elbow never flips over
+    assert claw.elbow_between(shoulder, (1000.0, 1000.0))  # out of reach: no error, the arm is straight
+
+
+# --- The painting -----------------------------------------------------------------------------
+
+
+def test_the_limb_is_painted_in_its_four_tones_with_hard_pixels():
+    for age in (6, REACH, ATTACK - 1, ATTACK + 1):
+        picture = painted(age)
+        assert picture.get_size() == SIZE  # the small screen: nothing enlarged
+        seen = {}
+        for x, y, (r, g, b, a) in pixels(picture):
+            assert a in (0, 255), (age, x, y)  # no soft edges
+            if a:
+                assert (r, g, b) in TONES, (age, x, y, (r, g, b))  # no colour in between: nothing blurred
+                seen[(r, g, b)] = seen.get((r, g, b), 0) + 1
+        for tone in (claw.OUTLINE, claw.SHADOW, claw.BASE, claw.LIGHT):
+            assert seen.get(tone, 0) > 150, (age, tone)
+        assert seen[claw.BASE] > seen[claw.LIGHT] and seen[claw.BASE] > seen[claw.OUTLINE]  # red, mostly
+        assert seen.get(claw.PLATE, 0) > 100  # the dark plates of the joints
+
+
+def test_the_light_comes_from_the_top_left():
+    picture = painted(ATTACK - 1)
+    lit = [(x, y) for x, y, color in pixels(picture) if color[:3] == claw.LIGHT and color[3]]
+    dark = [(x, y) for x, y, color in pixels(picture) if color[:3] == claw.SHADOW and color[3]]
+    def middle(points):
+        return sum(x + y for x, y in points) / len(points)
+    assert middle(lit) < middle(dark) - 6  # the pale edge is up and to the left of the shadow
+
+
+def test_the_shell_is_not_flat_dither_and_grains():
+    picture = painted(ATTACK - 1)
+    area = picture.get_rect()
+
+    def color(x, y):
+        return tuple(picture.get_at((x, y)))[:3] if area.collidepoint(x, y) and picture.get_at((x, y))[3] else None
+    lone = 0
+    for x, y, (r, g, b, a) in pixels(picture):
+        if a and (r, g, b) in (claw.SHADOW, claw.OUTLINE):
+            around = [color(x + dx, y + dy) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
+            lone += all(other == claw.BASE for other in around)  # a dark pixel alone in the red
+    assert lone >= 25
+
+
+def test_spikes_stand_on_the_outer_edge_of_the_forearm_and_teeth_inside_the_grip(monkeypatch):
+    thorns = []
+    real = claw.thorn
+
+    def spy(surface, base, direction, wide, tall, color):
+        thorns.append((base, direction, tall, color))
+        real(surface, base, direction, wide, tall, color)
+    monkeypatch.setattr(claw, "thorn", spy)
+    limb = pose(REACH)
+    pygame.display.set_mode((1, 1))
+    picture = claw.layer(SIZE, limb)
+    spikes = [one for one in thorns if one[3] != claw.TOOTH]
+    teeth = [one for one in thorns if one[3] == claw.TOOTH]
+    assert len(spikes) == claw.SPIKES >= 4 and len(teeth) == 2 * claw.TEETH
+    assert len({one[2] for one in spikes}) >= 2  # a saw: not all the same height
+    elbow, wrist = limb["elbow"], limb["wrist"]
+    bend = (elbow[0] - (limb["shoulder"][0] + wrist[0]) / 2, elbow[1] - (limb["shoulder"][1] + wrist[1]) / 2)
+    for base, direction, tall, color in spikes:
+        assert direction[0] * bend[0] + direction[1] * bend[1] > 0  # on the outside of the elbow's bend
+        assert min(gap(base, elbow), gap(base, wrist)) < claw.FOREARM  # along the forearm
+    axis = (math.cos(limb["heading"]), math.sin(limb["heading"]))
+    for base, direction, tall, color in teeth:
+        off = (base[0] - limb["hinge"][0]) * -axis[1] + (base[1] - limb["hinge"][1]) * axis[0]
+        towards = direction[0] * -axis[1] + direction[1] * axis[0]
+        assert off * towards < 0  # each tooth points across the grip, at the other jaw
+    assert any(tuple(picture.get_at((x, y)))[:3] == claw.TOOTH for x in range(SIZE[0]) for y in range(SIZE[1]))
+
+
+def test_the_joints_are_dark_plates_one_over_the_other():
+    picture = painted(ATTACK - 1)
+    limb = pose(ATTACK - 1)
+    for name, radius in (("elbow", claw.ELBOW), ("wrist", claw.WRIST), ("hinge", claw.HINGE)):
+        x, y = round(limb[name][0]), round(limb[name][1])
+        near = {tuple(picture.get_at((x + dx, y + dy)))[:3] for dx in range(-radius, radius + 1)
+                for dy in range(-radius, radius + 1) if 0 <= x + dx < SIZE[0] and 0 <= y + dy < SIZE[1]}
+        assert {claw.PLATE, claw.OUTLINE, claw.SHADOW} <= near, name  # the plate, its outline, the plate over it
+
+
+def test_the_shadow_has_the_shape_of_the_limb_in_see_through_black():
+    picture = painted(8)
+    shadow = claw.shadow_of(picture)
+    assert shadow.get_size() == SIZE
+    for x in range(0, SIZE[0], 3):
+        for y in range(0, SIZE[1], 3):
+            r, g, b, a = shadow.get_at((x, y))
+            assert (a > 0) == (picture.get_at((x, y))[3] > 0), (x, y)
+            if a:
+                assert (r, g, b) == (0, 0, 0) and 60 < a < 200  # dark, but the game shows through
+
+
+def test_the_limb_can_be_painted_pushed_aside_and_off_the_screen():
+    pygame.display.set_mode((1, 1))
+    still = claw.layer(SIZE, pose(ATTACK - 1))
+    pushed = claw.layer(SIZE, pose(ATTACK - 1), offset=(4, -3))
+    x, y = round(pose(ATTACK - 1)["wrist"][0]), round(pose(ATTACK - 1)["wrist"][1])
+    assert pushed.get_at((x + 4, y - 3)) == still.get_at((x, y))
+    for age in range(0, IMPACT + RETREAT + 3):
+        claw.layer(SIZE, pose(age))  # every frame of the sequence, even with the limb outside
+
+
+================================================================================
 # FILE: plot_twist/test_graphics.py
 ================================================================================
 
@@ -15274,8 +15855,6 @@ def test_every_sprite_is_a_proper_picture():
         sharing = [thing for thing, info in story.OBJECTS.items() if info.get("picture") == name]
         if name.startswith("door_") or name == "ship":
             assert size == (2 * main.TILE, main.TILE), name
-        elif name == "giant_claw":  # a jaw of the claw that breaks the screen: its own size
-            assert size == (24, 11), name
         elif name == "decor_crab_rubble":  # what is left of the statue: drawn in its place
             assert size == main.thing_rect("deck_statue").size, name
         elif sharing:  # a shared picture is as big as every piece that uses it
