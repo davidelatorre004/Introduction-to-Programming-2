@@ -22,6 +22,7 @@ import random
 
 import pygame
 
+import claw
 import effects
 import engine
 import net
@@ -1804,9 +1805,9 @@ CLAW_IMPACT = 27       # the frame the cracked screen falls to pieces: until the
 SHATTER_FRAMES = 86    # how long the whole sequence lasts: then the ending screen
 CLAW_FLASH = 3         # frames of white flash when the claw hits
 CLAW_SHAKE = 6         # pixels of shake at the hit, dying down until the screen falls apart
-CLAW_OPEN = 18         # pixels each jaw is away from the middle while the claw comes in
-CLAW_ZOOM = 3          # the jaw's picture is drawn three times bigger
 CLAW_RETREAT = 12      # frames the claw takes to pull back out once the screen breaks
+CLAW_SHADOW = (12, 16)  # how far from the claw its shadow falls on the screen while it is still far above it
+CLAW_SPARKS = 20       # sparks and chips thrown from where the jaws shut
 SHATTER_SEED = 11      # the web of cracks is always the same one
 
 
@@ -1881,7 +1882,8 @@ def start_shatter(app):
     hit = (WIDTH // 2, HEIGHT // 2)
     pieces = effects.crack_web((WIDTH, HEIGHT), hit, SHATTER_SEED)
     app["shatter"] = {"age": 0, "frozen": frozen, "hit": hit, "pieces": pieces,
-                      "shards": effects.cut_shards(frozen, pieces, hit, SHATTER_SEED)}
+                      "shards": effects.cut_shards(frozen, pieces, hit, SHATTER_SEED),
+                      "sparks": [], "rng": random.Random(SHATTER_SEED)}  # thrown when the jaws shut
     app["dialog"] = []
     app["crumble"] = 0
     sounds.play("knocked")
@@ -1892,8 +1894,12 @@ def update_shatter(app):
     """One frame of the claw breaking the screen. Nothing can be done meanwhile; then the ending."""
     shatter = app["shatter"]
     shatter["age"] += 1
+    effects.update_particles(shatter["sparks"])
     if shatter["age"] == CLAW_ATTACK:
         sounds.play("snap")      # the claw snaps shut on the screen
+        x, y = claw_pose(shatter["age"])["tip"]
+        effects.spawn(shatter, x, y, CLAW_SPARKS, effects.SPARK + [claw.LIGHT, claw.BASE], speed=3.2, life=24,
+                      gravity=0.14, up=0.6, layer="sparks")  # sparks and chips of shell fly from the grip
     elif shatter["age"] == CLAW_IMPACT:
         sounds.play("shatter")   # and the screen falls to pieces
     if shatter["age"] >= SHATTER_FRAMES:
@@ -1901,60 +1907,25 @@ def update_shatter(app):
         set_scene(app, "ending")
 
 
-def claw_place(age):
-    """Where the giant claw is `age` frames into the sequence: (the point its two tips close on,
-    how far each jaw is open). It comes in from the top right corner, closes on the middle of the
-    screen, holds, and pulls back out once the screen breaks."""
-    outside = (WIDTH + 24, -70)
-    middle = (WIDTH // 2 - 22, HEIGHT // 2)  # the tips: so that the jaws close around the middle of the screen
+def claw_pose(age):
+    """Where the giant claw is `age` frames into the sequence (see claw.pose): it comes in from the
+    top right corner, shuts on the middle of the screen, kicks back at the hit, holds, and pulls
+    back out once the screen breaks."""
+    return claw.pose(age, (WIDTH, HEIGHT), CLAW_REACH, CLAW_ATTACK, CLAW_IMPACT, CLAW_RETREAT)
+
+
+def draw_giant_claw(screen, age, offset=(0, 0)):
+    """The crab's limb, giant, with the shadow it casts on the game while the screen is still whole.
+
+    The shadow lies down and to the right of the limb, far from it while the claw is high above
+    the screen and closer as it comes down: at the hit the two touch.
+    """
+    limb = claw_pose(age)
+    picture = claw.layer((WIDTH, HEIGHT), limb, offset)
     if age < CLAW_IMPACT:
-        way = min(age / CLAW_REACH, 1.0)
-        opening = CLAW_OPEN if age < CLAW_REACH else CLAW_OPEN * max(CLAW_ATTACK - 1 - age, 0) / (CLAW_ATTACK - 1 - CLAW_REACH)
-    else:
-        way = 1.0 - min((age - CLAW_IMPACT) / CLAW_RETREAT, 1.0)
-        opening = 0
-    way = way * way * (3 - 2 * way)  # fast in the middle of the way, soft at both ends
-    tip = (round(outside[0] + (middle[0] - outside[0]) * way), round(outside[1] + (middle[1] - outside[1]) * way))
-    return tip, round(opening)
-
-
-_claw_jaws = []  # the two jaws, enlarged: made the first time they are drawn
-
-
-def claw_jaws():
-    """The upper and the lower jaw of the giant claw, enlarged; (None, None) without the picture."""
-    if not _claw_jaws:
-        jaw = sprites.image("giant_claw")
-        if jaw is None:
-            return None, None
-        upper = pygame.transform.scale(jaw, (jaw.get_width() * CLAW_ZOOM, jaw.get_height() * CLAW_ZOOM))
-        _claw_jaws.extend([upper, pygame.transform.flip(upper, False, True)])
-    return _claw_jaws[0], _claw_jaws[1]
-
-
-def draw_giant_claw(screen, tip, opening, offset=(0, 0)):
-    """The crab's claw, giant: an arm from the top right corner, the hand, and the two jaws
-    `opening` pixels away from the point they close on."""
-    upper, lower = claw_jaws()
-    if upper is None:
-        return
-    x, y = tip[0] + offset[0], tip[1] + offset[1]
-    red, dark, black = sprites.PALETTE["r"], sprites.PALETTE["R"], sprites.PALETTE["k"]
-    hand = pygame.Rect(0, 0, 40, 56 + 2 * opening)
-    hand.midleft = (x + upper.get_width() - 22, y)
-    shoulder = (WIDTH + 60 + offset[0], -90 + offset[1])
-    along = pygame.Vector2(shoulder[0] - hand.centerx, shoulder[1] - hand.centery)
-    side = pygame.Vector2(-along.y, along.x)
-    if side.length() > 0:
-        side.scale_to_length(15)
-        arm = [(hand.centerx + side.x, hand.centery + side.y), (shoulder[0] + side.x, shoulder[1] + side.y),
-               (shoulder[0] - side.x, shoulder[1] - side.y), (hand.centerx - side.x, hand.centery - side.y)]
-        pygame.draw.polygon(screen, dark, arm)
-        pygame.draw.polygon(screen, black, arm, 3)
-    pygame.draw.ellipse(screen, red, hand)
-    pygame.draw.ellipse(screen, black, hand, 3)
-    screen.blit(upper, upper.get_rect(bottomleft=(x, y - opening + 4)))
-    screen.blit(lower, lower.get_rect(topleft=(x, y + opening - 4)))
+        fall = (round(CLAW_SHADOW[0] * limb["shadow"]), round(CLAW_SHADOW[1] * limb["shadow"]))
+        screen.blit(claw.shadow_of(picture), fall)
+    screen.blit(picture, (0, 0))
 
 
 def draw_shatter(app, screen):
@@ -1977,8 +1948,8 @@ def draw_shatter(app, screen):
             effects.draw_cracks(screen, shatter["pieces"], shatter["hit"], farthest * grown, shake)
     else:
         effects.draw_shards(screen, shatter["shards"], age - CLAW_IMPACT)
-    tip, opening = claw_place(age)
-    draw_giant_claw(screen, tip, opening, shake)
+    draw_giant_claw(screen, age, shake)
+    effects.draw_particles(screen, shatter["sparks"])
     if CLAW_ATTACK <= age < CLAW_ATTACK + CLAW_FLASH:
         veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         veil.fill((255, 255, 255, 255 - 70 * (age - CLAW_ATTACK)))  # the hit: everything stops in white
@@ -2685,6 +2656,86 @@ def draw_fusing_key(app, surface):
         effects.glow(surface, (x, y), 10, (120, 90, 30), 1 - (age - FUSE_MEET) / (effects.FUSE_FRAMES - FUSE_MEET))
 
 
+# --- Dark rooms: where the light is ----------------------------------------------------------
+#
+# effects.py has the tools (a layer of darkness, and holes of light stamped on it).
+# Here is what gives light in the game, and how much: lanterns (a glow, and a cone
+# down onto the floor that sways with them), crystals, portals, the heart of the mine,
+# and the players, each with a glow around them and a cone the way they face.
+
+LANTERN_LIGHT = 30          # radius of the glow of a lantern in a dark room, in pixels
+LANTERN_CONE = (48, 34)     # the cone it throws down: how long, and half its angle in degrees
+CRYSTAL_LIGHT = (14, 22)    # a crystal's glow, from its dimmest to its brightest
+PORTAL_LIGHT = 26
+HEART_LIGHT = (9, 12)       # the heart of the mine beats
+PLAYER_LIGHT = 22           # the glow around a player...
+PLAYER_CONE = (62, 27)      # ...and the cone in front of them: how long, and half its angle
+DOWNED_LIGHT = 11           # a player on the floor gives only a little light
+
+
+def room_darkness(room):
+    """How dark a room is, from 0 (fully lit) to 255: story.py says it, and the switch can turn it off."""
+    if not effects.FX["darkness"]:
+        return 0
+    return story.ROOMS[room].get("dark", 0)
+
+
+def room_lights(app, state, things):
+    """Every light in the room shown, as tuples: ("glow", centre, radius) for a round light and
+    ("cone", point, angle in degrees, length, half angle) for a cone. In room pixels."""
+    frame = app["frame"]
+    lights = []
+    for thing in things:
+        info = story.OBJECTS.get(thing["id"])
+        if thing["kind"] == "item":
+            if thing["id"] == "heart":  # it beats, and glows a little with each beat
+                beat = effects.pulse(frame, 0.12)
+                lights.append(("glow", place_rect(thing).center, HEART_LIGHT[0] + round((HEART_LIGHT[1] - HEART_LIGHT[0]) * beat)))
+            continue
+        if info is None:
+            continue
+        rect = thing_rect(thing["id"])
+        picture = info.get("picture")
+        if picture == "decor_lantern":
+            angle, sway = lantern_swing(app, thing["id"])
+            flame = (rect.centerx + sway, rect.top + 7)
+            flicker = 2 if (frame // 5 + rect.top) % 3 == 0 else 0  # the flame jumps now and then
+            lights.append(("glow", flame, LANTERN_LIGHT + flicker))
+            lights.append(("cone", flame, 90 + round(angle), LANTERN_CONE[0], LANTERN_CONE[1]))
+        elif picture == "decor_crystal":
+            glow = effects.pulse(frame, 0.045, 0.0, 1.0, rect.left * 0.3 + rect.top)  # in step with its colour
+            lights.append(("glow", rect.center, CRYSTAL_LIGHT[0] + round((CRYSTAL_LIGHT[1] - CRYSTAL_LIGHT[0]) * glow)))
+        elif info["kind"] == "portal":
+            lights.append(("glow", rect.center, PORTAL_LIGHT + ((frame // 20) % 2)))
+        elif info["kind"] == "cauldron":
+            lights.append(("glow", (rect.centerx, rect.top + 13), effects.FIRE_GLOW + 6))
+    for number, player in enumerate(app["players"], start=1):
+        if not same_room(app, player) or engine.is_out(app["state"], number):
+            continue
+        middle = player_rect(player["pos"]).center
+        if number in app["downed"]:
+            lights.append(("glow", middle, DOWNED_LIGHT))
+            continue
+        lights.append(("glow", middle, PLAYER_LIGHT))
+        fx, fy = player["facing"]
+        lights.append(("cone", middle, round(math.degrees(math.atan2(fy, fx))), PLAYER_CONE[0], PLAYER_CONE[1]))
+    return lights
+
+
+def draw_darkness(app, surface, state, things):
+    """In a dark room, lay the darkness over the room, with a hole for every light in it."""
+    dark = room_darkness(state["room"])
+    if dark <= 0:
+        return
+    layer = effects.darkness(surface.get_size(), dark)
+    for light in room_lights(app, state, things):
+        if light[0] == "glow":
+            effects.punch(layer, effects.light_hole(light[2], dark), light[1])
+        else:
+            effects.punch(layer, effects.light_cone(light[3], light[4], light[2], dark), light[1])
+    surface.blit(layer, (0, 0))
+
+
 def draw_lights(app, surface, things):
     """The light of the room, added on top: lanterns, crystals, the blue fire of the cauldron."""
     if not effects.FX["lights"] and not effects.FX["cauldron"]:
@@ -3154,6 +3205,7 @@ def draw_room(app, screen):
     effects.draw_clue_glow(screen, app["fx"])
     effects.draw_particles(screen, app["fx"]["particles"])
     effects.draw_dust(screen, app["fx"], app["frame"])
+    draw_darkness(app, screen, state, things)  # a dark room: dark, but for the holes of light
     draw_lights(app, screen, things)
     # The letter of each generator, on the floor above it.
     for thing in things:

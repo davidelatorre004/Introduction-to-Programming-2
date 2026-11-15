@@ -12,6 +12,7 @@ import time
 import pygame
 import pytest
 
+import claw
 import effects
 import engine
 import main
@@ -2729,27 +2730,68 @@ def test_the_three_parts_of_the_sequence_come_at_their_frames_with_their_sounds(
     assert app["scene"] == "ending" and app["shatter"] is None and app["scene_frames"] == 0
 
 
-def test_the_claw_comes_in_from_the_corner_closes_on_the_middle_and_pulls_back():
-    outside, opening = main.claw_place(0)
-    assert not pygame.Rect(0, 0, main.WIDTH, main.HEIGHT).collidepoint(outside) and opening == main.CLAW_OPEN
-    middle = (main.WIDTH // 2, main.HEIGHT // 2)
-    gaps = []
-    for age in range(main.CLAW_ATTACK):
-        tip, opening = main.claw_place(age)
-        gaps.append(abs(tip[0] - middle[0]) + abs(tip[1] - middle[1]))
-    assert gaps == sorted(gaps, reverse=True)  # closer and closer
-    arrived, opening = main.claw_place(main.CLAW_REACH)
-    assert abs(arrived[1] - middle[1]) <= 1 and opening == main.CLAW_OPEN  # there, still open
-    assert main.claw_place(main.CLAW_ATTACK - 1) == (arrived, 0)  # shut
-    assert main.claw_place(main.CLAW_IMPACT - 1) == (arrived, 0)  # and holding while the screen cracks
-    assert main.claw_place(main.CLAW_IMPACT + main.CLAW_RETREAT)[0] == outside  # gone again
-    upper, lower = main.claw_jaws()
-    jaw = sprites.image("giant_claw")
-    assert upper.get_size() == (jaw.get_width() * main.CLAW_ZOOM, jaw.get_height() * main.CLAW_ZOOM)
-    assert lower.get_at((0, 0)) == upper.get_at((0, upper.get_height() - 1))  # the lower jaw: the upper one, mirrored
-    reds = {sprites.PALETTE["r"], sprites.PALETTE["R"], sprites.PALETTE["o"], sprites.PALETTE["k"]}
-    assert {tuple(upper.get_at((x, y)))[:3] for x in range(upper.get_width()) for y in range(upper.get_height())
-            if upper.get_at((x, y))[3]} <= reds  # the colours of the crab
+def test_the_sequence_uses_the_limb_of_claw_with_its_own_frames():
+    for age in (0, main.CLAW_REACH, main.CLAW_ATTACK, main.CLAW_IMPACT, main.SHATTER_FRAMES):
+        assert main.claw_pose(age) == claw.pose(age, (main.WIDTH, main.HEIGHT), main.CLAW_REACH, main.CLAW_ATTACK,
+                                                main.CLAW_IMPACT, main.CLAW_RETREAT)
+    middle = (main.WIDTH / 2, main.HEIGHT / 2)
+    assert main.claw_pose(main.CLAW_ATTACK - 1)["tip"] == pytest.approx(middle)  # where the cracks start
+    assert not hasattr(main, "claw_jaws") and sprites.image("giant_claw") is None  # no picture enlarged any more
+
+
+def shadow_pixels(age):
+    """How many pixels of a white screen the claw's shadow darkens at this frame, where the limb is not."""
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    screen.fill((255, 255, 255))
+    main.draw_giant_claw(screen, age)
+    tones = {claw.OUTLINE, claw.SHADOW, claw.BASE, claw.LIGHT, claw.PLATE, claw.TOOTH, (255, 255, 255)}
+    grey = [tuple(screen.get_at((x, y)))[:3] for x in range(main.WIDTH) for y in range(main.HEIGHT)]
+    grey = [color for color in grey if color not in tones]
+    assert all(color[0] == color[1] == color[2] and 90 < color[0] < 200 for color in grey)  # see-through black
+    return len(grey)
+
+
+def test_the_shadow_of_the_claw_closes_in_on_it_and_touches_it_at_the_hit():
+    pygame.display.set_mode((1, 1))
+    seen = [shadow_pixels(age) for age in (6, 9, 12, main.CLAW_ATTACK - 1)]
+    assert seen[0] > 300 and seen[1] > seen[2] > seen[3] == 0  # less and less of it shows; then none: they touch
+    assert shadow_pixels(main.CLAW_ATTACK + 3) == 0  # and it stays under the claw while the screen cracks
+    assert shadow_pixels(main.CLAW_IMPACT + 3) == 0  # no shadow on a screen that is falling apart
+
+
+def test_sparks_fly_from_the_grip_when_the_jaws_shut(app):
+    caught_both(app)
+    while app["shatter"]["age"] < main.CLAW_ATTACK - 1:
+        main.update(app, 0, 0)
+    assert app["shatter"]["sparks"] == []
+    main.update(app, 0, 0)  # the snap
+    sparks = app["shatter"]["sparks"]
+    tip = main.claw_pose(main.CLAW_ATTACK)["tip"]
+    assert len(sparks) == main.CLAW_SPARKS >= 12
+    assert all(abs(one["x"] - tip[0]) < 1 and abs(one["y"] - tip[1]) < 1 for one in sparks)  # from where the jaws meet
+    assert len({(round(one["vx"], 2), round(one["vy"], 2)) for one in sparks}) > main.CLAW_SPARKS // 2  # every way
+    assert {one["color"] for one in sparks} <= set(effects.SPARK) | {claw.LIGHT, claw.BASE}
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.update(app, 0, 0)
+    main.update(app, 0, 0)
+    main.update(app, 0, 0)
+    assert max(abs(one["x"] - tip[0]) + abs(one["y"] - tip[1]) for one in sparks) > 6  # flying off
+    main.draw(app, screen)
+    while app["scene"] == "shatter" and app["shatter"]["age"] < main.CLAW_ATTACK + 26:
+        main.update(app, 0, 0)
+    assert app["shatter"]["sparks"] == []  # burnt out long before the screen has fallen apart
+
+
+def test_a_second_defeat_starts_the_claw_from_scratch(app):
+    caught_both(app)
+    for _ in range(main.CLAW_ATTACK + 2):
+        main.update(app, 0, 0)
+    assert app["shatter"]["sparks"]
+    main.open_main_menu(app)
+    assert app["shatter"] is None
+    caught_both(app)  # another game, lost again
+    assert app["shatter"]["age"] == 1 and app["shatter"]["sparks"] == []
+    assert main.claw_pose(app["shatter"]["age"])["shadow"] > 0.9  # the claw is high above the screen again
 
 
 def test_the_cracked_screen_shakes_hard_at_the_hit(app):
@@ -2858,3 +2900,178 @@ def test_both_computers_see_the_claw_and_then_the_ending(two_computers, heard):
     main.draw(guest, pygame.Surface((main.WIDTH, main.HEIGHT)))
     pump(host, guest, lambda: host["scene"] == "ending" and guest["scene"] == "ending")
     assert guest["state"]["ending"] == "caught" and guest["shatter"] is None and host["shatter"] is None
+
+
+# --- Dark rooms, and the light in them --------------------------------------------------------
+
+
+DARK_ROOMS = {"corridor", "corridor_end", "mine"}
+
+
+def in_the_dark(app, room, tile=None, facing=(0, 1)):
+    """A game alone, moved to a room, the player on a free tile, looking one way. A few frames have passed."""
+    start_new_game(app)
+    state = play(BOTH_HALVES)
+    state["room"] = room
+    app["state"] = state
+    p1(app)["pos"] = free_spot(app, *tile) if tile else main.spawn_at_entry(room)
+    p1(app)["facing"] = facing
+    for _ in range(3):
+        main.update(app, 0, 0)
+    app["fade"] = 0
+    app["banner_frames"] = 0
+
+
+def lights(app):
+    state = main.view(app)
+    return main.room_lights(app, state, engine.things_here(state))
+
+
+def room_picture(app):
+    """The whole room as it is drawn now, in room pixels."""
+    surface = pygame.Surface(main.room_surface(main.view(app)["room"]).get_size())
+    main.draw_room(app, surface)
+    return surface
+
+
+def brightness(color):
+    return sum(tuple(color)[:3])
+
+
+def test_the_rooms_under_the_hold_are_dark_and_the_others_are_not():
+    assert {room for room, info in story.ROOMS.items() if info.get("dark")} == DARK_ROOMS
+    for room in DARK_ROOMS:
+        assert 100 <= story.ROOMS[room]["dark"] < 255 and main.room_darkness(room) == story.ROOMS[room]["dark"]
+    assert story.ROOMS["mine"]["dark"] > story.ROOMS["corridor"]["dark"]  # the deepest, the darkest
+    assert main.room_darkness("deck") == 0 and main.room_darkness("cabin") == 0
+
+
+def test_a_dark_room_is_dark_but_for_the_light_around_the_player(app, monkeypatch):
+    in_the_dark(app, "mine", (7, 12), (1, 0))
+    dark = room_picture(app)
+    monkeypatch.setitem(effects.FX, "darkness", False)
+    lit = room_picture(app)
+    monkeypatch.setitem(effects.FX, "darkness", True)
+    x, y = main.player_rect(p1(app)["pos"]).center
+    floor = main.floor_rect("mine")
+    spots = [(fx, fy) for fx in range(floor.left + 4, floor.right - 4, 6) for fy in range(floor.top + 4, floor.bottom - 4, 6)]
+    far = max(spots, key=lambda spot: min(pygame.Vector2(spot).distance_to(light[1]) for light in lights(app)))
+    assert min(pygame.Vector2(far).distance_to(light[1]) for light in lights(app)) > 50  # nothing gives light there
+    assert brightness(dark.get_at(far)) < brightness(lit.get_at(far)) * 0.6  # much darker
+    assert brightness(dark.get_at((x, y + 9))) >= brightness(lit.get_at((x, y + 9)))  # at the player's feet: as lit
+    ahead, behind = (x + 34, y + 3), (x - 34, y + 3)
+    assert brightness(dark.get_at(ahead)) > brightness(dark.get_at(behind))  # the cone in front, the dark behind
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+
+
+def test_the_cone_of_a_player_points_the_way_they_face(app):
+    in_the_dark(app, "mine", (7, 12))
+    middle = main.player_rect(p1(app)["pos"]).center
+    for facing, angle in (((1, 0), 0), ((0, 1), 90), ((-1, 0), 180), ((0, -1), -90)):
+        p1(app)["facing"] = facing
+        mine_lights = [light for light in lights(app) if light[1] == middle]
+        assert ("glow", middle, main.PLAYER_LIGHT) in mine_lights
+        assert ("cone", middle, angle, main.PLAYER_CONE[0], main.PLAYER_CONE[1]) in mine_lights
+    start = p1(app)["pos"]
+    main.update(app, -1, 0)  # walking left: the light goes with the player, and turns
+    moved = main.player_rect(p1(app)["pos"]).center
+    assert moved != middle and ("cone", moved, 180, main.PLAYER_CONE[0], main.PLAYER_CONE[1]) in lights(app)
+
+
+def test_lanterns_throw_a_glow_and_a_cone_down_that_sways_with_them(app):
+    in_the_dark(app, "mine")
+    lanterns = [name for name, info in story.OBJECTS.items() if info["room"] == "mine" and info.get("picture") == "decor_lantern"]
+    assert len(lanterns) == 3
+    cones = [light for light in lights(app) if light[0] == "cone" and light[3] == main.LANTERN_CONE[0]]
+    glows = [light for light in lights(app) if light[0] == "glow" and light[2] >= main.LANTERN_LIGHT]
+    assert len(cones) == 3 and len(glows) == 3
+    for cone in cones:
+        assert abs(cone[2] - 90) <= effects.LANTERN_SWING  # downwards, a little to one side or the other
+        assert any(glow[1] == cone[1] for glow in glows)   # from the flame
+    angles, sizes = set(), set()
+    for _ in range(200):
+        main.update(app, 0, 0)
+        angles |= {light[2] for light in lights(app) if light[0] == "cone" and light[3] == main.LANTERN_CONE[0]}
+        sizes |= {light[2] for light in lights(app) if light[0] == "glow" and light[2] >= main.LANTERN_LIGHT}
+    assert len(angles) >= 5 and min(angles) < 90 < max(angles)  # it sways
+    assert sizes == {main.LANTERN_LIGHT, main.LANTERN_LIGHT + 2}  # and the flame jumps
+
+
+def test_crystals_portals_and_the_heart_glow(app):
+    in_the_dark(app, "mine")
+    centers = {light[1]: light[2] for light in lights(app) if light[0] == "glow"}
+    crystals = [name for name, info in story.OBJECTS.items() if info["room"] == "mine" and info.get("picture") == "decor_crystal"]
+    portals = [name for name, info in story.OBJECTS.items() if info["room"] == "mine" and info["kind"] == "portal"]
+    assert len(crystals) == 4 and len(portals) == 2
+    for crystal in crystals:
+        assert main.CRYSTAL_LIGHT[0] <= centers[main.thing_rect(crystal).center] <= main.CRYSTAL_LIGHT[1]
+    for portal in portals:
+        assert centers[main.thing_rect(portal).center] in (main.PORTAL_LIGHT, main.PORTAL_LIGHT + 1)
+    heart = main.thing_rect("heart").center
+    assert main.HEART_LIGHT[0] <= centers[heart] <= main.HEART_LIGHT[1]
+    seen = {name: set() for name in crystals + ["heart"]}
+    for _ in range(160):
+        main.update(app, 0, 0)
+        now = {light[1]: light[2] for light in lights(app) if light[0] == "glow"}
+        for name in seen:
+            seen[name].add(now[main.thing_rect(name).center])
+    assert all(len(sizes) >= 3 for sizes in seen.values())  # they pulse
+    stand_next_to(app, "heart")
+    press(app, pygame.K_e)  # picked up: used, gone, and its light with it
+    read_all(app)
+    p1(app)["pos"] = main.spawn_at_entry("mine")  # away from where it was
+    assert heart not in {light[1] for light in lights(app)}
+
+
+def test_only_players_in_the_room_and_in_the_game_give_light(app):
+    two_playing(app, FIRST_HALF)
+    app["state"]["room"] = "mine"
+    app["state"]["flags"]["partner_room"] = "mine"
+    main.place_at_entry(app)
+    main.update(app, 0, 0)
+
+    def cones():
+        return [light for light in lights(app) if light[0] == "cone" and light[3] == main.PLAYER_CONE[0]]
+    assert len(cones()) == 2  # each with their own
+    partner = main.player_rect(app["players"][1]["pos"]).center
+    app["downed"] = {2: main.DOWN_FRAMES}
+    assert len(cones()) == 1 and ("glow", partner, main.DOWNED_LIGHT) in lights(app)  # down: a small glow only
+    app["downed"] = {}
+    app["state"]["flags"]["partner_room"] = "deck"
+    assert len(cones()) == 1 and partner not in {light[1] for light in lights(app)}  # elsewhere: no light here
+    app["state"]["flags"]["partner_room"] = "mine"
+    app["state"] = engine.knock_out(app["state"], 2)[0]
+    assert len(cones()) == 1  # out of the game: gone
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+
+
+def test_a_lit_room_is_drawn_exactly_as_before(app, monkeypatch):
+    start_new_game(app)
+    playing(app, IN_THE_CABIN)
+    main.update(app, 0, 0)
+    with_it = room_picture(app)
+    monkeypatch.setitem(effects.FX, "darkness", False)
+    without = room_picture(app)
+    size = with_it.get_size()
+    assert all(with_it.get_at((x, y)) == without.get_at((x, y)) for x in range(0, size[0], 3) for y in range(0, size[1], 3))
+
+
+def test_without_the_effect_the_dark_rooms_are_lit_as_before(app, monkeypatch):
+    monkeypatch.setitem(effects.FX, "darkness", False)
+    in_the_dark(app, "corridor")
+    assert main.room_darkness("corridor") == 0
+    calls = []
+    monkeypatch.setattr(effects, "darkness", lambda size, dark: calls.append(size))
+    room_picture(app)
+    assert calls == []
+
+
+def test_every_dark_room_can_be_walked_and_drawn(app):
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for room in sorted(DARK_ROOMS):
+        in_the_dark(app, room)
+        for direction in ((1, 0), (0, 1), (-1, 0), (0, -1)):
+            for _ in range(12):
+                main.update(app, *direction)
+                main.draw(app, screen)
+        assert len(lights(app)) >= 4, room  # never left in the dark: lanterns and the player at least

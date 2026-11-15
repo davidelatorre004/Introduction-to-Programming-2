@@ -97,6 +97,8 @@ FLAGS = {
     "visited_mine": False,
 }
 
+# "dark" (optional) makes a room dark, from 1 to 255: only lanterns, crystals, portals
+# and the players light it. Without it the room is fully lit.
 # "outdoor" tells the screen to draw the sea around the room. "entry" is the tile
 # (column, row) where the player appears when a game starts or resumes in the room.
 # A room is 16 x 12 tiles, walls included: the floor goes from (1, 1) to (14, 10).
@@ -182,12 +184,14 @@ ROOMS = {
         "outdoor": False,
         "entry": (12, 3),
         "size": (48, 6),  # long and cramped: the view scrolls sideways
+        "dark": 150,
     },
     "corridor_end": {
         "name": "End of the corridor",
         "description": "The corridor ends here, in front of a ring of purple light that hums softly.",
         "outdoor": False,
         "entry": (7, 8),
+        "dark": 160,
     },
     "mine": {
         "name": "Mine",
@@ -198,6 +202,7 @@ ROOMS = {
         "outdoor": False,
         "entry": (7, 7),
         "size": (16, 24),
+        "dark": 185,  # deep in the rock: the darkest place of all
         # Only a portal leads here: no door says where it lies, so the map is told.
         "map_pos": (34, 20),
     },

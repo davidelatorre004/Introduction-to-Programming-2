@@ -5,6 +5,8 @@ should, end when they should, and that their tools (particles, glows, dissolves,
 ripples) do what they promise. conftest.py keeps the save file in a temporary folder.
 """
 
+import math
+
 import pygame
 import pytest
 
@@ -393,3 +395,80 @@ def test_the_cracks_run_outwards_from_the_hit():
 
 def test_the_two_new_effects_have_their_switches():
     assert effects.FX["crumble"] is True and effects.FX["shatter"] is True
+
+
+# --- Dark rooms: a layer of darkness with holes of light ----------------------------------
+
+
+def alpha(picture, x, y):
+    return picture.get_at((x, y))[3]
+
+
+def test_a_layer_of_darkness_is_dark_everywhere_and_made_once_for_a_size():
+    layer = effects.darkness((64, 48), 150)
+    assert layer.get_size() == (64, 48)
+    assert all(tuple(layer.get_at((x, y))) == effects.DARK_COLOR + (150,) for x in range(0, 64, 7) for y in range(0, 48, 5))
+    effects.punch(layer, effects.light_hole(10, 150), (30, 20))
+    again = effects.darkness((64, 48), 90)
+    assert again is layer  # the same picture, wiped: no new one every frame
+    assert all(alpha(again, x, y) == 90 for x in range(0, 64, 7) for y in range(0, 48, 5))
+
+
+def test_a_light_is_clear_in_the_middle_and_darker_ring_by_ring_in_hard_steps():
+    radius, dark = 20, 160
+    hole = effects.light_hole(radius, dark)
+    assert hole.get_size() == (2 * radius + 1, 2 * radius + 1)
+    assert alpha(hole, radius, radius) == 0  # clear where the light is
+    assert alpha(hole, 0, 0) == dark and alpha(hole, 2 * radius, 0) == dark  # the corners: outside the light
+    along = [alpha(hole, radius + step, radius) for step in range(radius - 1)]  # from the middle to just inside its edge
+    assert along == sorted(along)  # never brighter further out
+    steps = sorted(set(along))
+    assert len(steps) == effects.LIGHT_BANDS and steps[0] == 0 and steps[-1] < dark  # bands, not a smooth fade
+    assert steps == [effects.band_alpha(dark, band, effects.LIGHT_BANDS) for band in reversed(range(effects.LIGHT_BANDS))]
+    seen = {alpha(hole, x, y) for x in range(2 * radius + 1) for y in range(2 * radius + 1)}
+    assert seen == set(steps) | {dark}  # no value in between anywhere: nothing blurred
+    assert effects.light_hole(radius, dark) is hole  # drawn once, then kept
+    assert all(tuple(hole.get_at((x, radius)))[:3] == effects.DARK_COLOR for x in range(2 * radius + 1))
+
+
+def test_two_lights_join_and_one_never_darkens_what_the_other_lit():
+    dark = 200
+    layer = effects.darkness((120, 60), dark)
+    hole = effects.light_hole(20, dark)
+    effects.punch(layer, hole, (40, 30))
+    before = [[alpha(layer, x, y) for x in range(120)] for y in range(60)]
+    assert before[30][40] == 0 and before[30][110] == dark
+    effects.punch(layer, hole, (70, 30))  # a second light, overlapping the first
+    after = [[alpha(layer, x, y) for x in range(120)] for y in range(60)]
+    assert all(after[y][x] <= before[y][x] for x in range(120) for y in range(60))  # never darker than before
+    assert after[30][40] == 0 and after[30][70] == 0  # both middles clear
+    assert after[30][55] < dark and after[30][55] == min(alpha(hole, 20 + 15, 20), alpha(hole, 20 - 15, 20))
+    assert after[5][5] == dark  # far from both: still dark
+
+
+def test_a_cone_of_light_is_clear_at_its_point_and_fades_along_its_length():
+    length, half, dark = 40, 30, 180
+    cone = effects.light_cone(length, half, 0, dark)  # pointing right
+    assert cone.get_size() == (2 * length + 1, 2 * length + 1)
+    middle = length
+    assert alpha(cone, middle + 3, middle) == 0  # just in front of its point
+    along = [alpha(cone, middle + step, middle) for step in range(1, length)]
+    assert along == sorted(along) and len(set(along)) == effects.CONE_BANDS
+    assert alpha(cone, middle - 10, middle) == dark  # nothing behind it
+    assert alpha(cone, middle + 20, middle - 30) == dark and alpha(cone, middle + 20, middle + 30) == dark  # nor beside
+    assert alpha(cone, middle + 20, middle + 8) < dark and alpha(cone, middle + 20, middle - 8) < dark  # inside its angle
+    down = effects.light_cone(length, half, 90, dark)
+    assert alpha(down, middle, middle + 12) == alpha(cone, middle + 12, middle)  # the same cone, turned
+    assert alpha(down, middle + 12, middle) == dark
+    assert effects.light_cone(length, half, 0, dark) is cone
+
+
+def test_the_corners_of_a_cone():
+    points = effects.cone_points((50, 50), 90, 30, 45, steps=4)
+    assert points[0] == (50, 50) and len(points) == 6
+    assert points[1] == (71, 71) and points[-1] == (29, 71) and points[3] == (50, 80)  # opening downwards
+    assert all(abs(math.hypot(x - 50, y - 50) - 30) < 1 for x, y in points[1:])  # a round far end
+
+
+def test_darkness_has_its_switch():
+    assert effects.FX["darkness"] is True

@@ -2,9 +2,28 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v34](versions/v34.md) - The ship shakes, the screen breaks (2026-11-15)
+## [v36](versions/v36.md) - Dark rooms and light (2026-11-15)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- Three rooms are dark now: the corridor under the hold, its far end, and the mine, the darkest (a new optional "dark" in story.ROOMS, from 1 to 255). The other rooms are drawn exactly as before.
+- What gives light: lanterns (a glow, and a cone thrown down on the floor that sways with them, with a flame that jumps), crystals and the heart of the mine (pulsing), portals, and the players: a glow around each and a cone the way they face. A player who is down gives only a little light; one in another room or out of the game gives none.
+- How: a layer of darkness as big as the room goes over it, with a hole for every light. A hole is clear in the middle and darker ring by ring, in four hard steps, never a smooth fade; a cone does the same along its length. Holes are stamped keeping the clearer of the two for every pixel, so lights next to each other join and none darkens what another lit. The coloured glows that were already there are added on top.
+- The idea of a dark layer with a stepped hole comes from the punch_a_hole sample of Mekire's pygame-samples; it had one light and one hole, so joining several lights and the cones are new here. The tools are in effects.py with a new switch, "darkness": off, the rooms are lit as before. About 3 ms a frame.
+
+## [v35](versions/v35.md) - A real crab's limb (2026-11-15)
+
+In commit [`3a6e8fc`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/3a6e8fc39c47d83b53ee28eb4c503a0bca45e0ef/plot_twist).
+
+- The giant claw that breaks the screen is no longer a plain red arm: it is a crab's limb in three segments, each at an angle to the next: the upper arm from beyond the top right corner, the thick forearm, and the massive hand that holds the two jaws. Dark plated joints, one plate over the other, join them.
+- It moves like a limb. The shoulder stays put and the elbow bends by itself (an arm of two bones): folded out of sight at first, it stretches out as it strikes, and the wrist, cocked back on the way in, snaps forward as the jaws shut.
+- The shell has four tones for a round, armoured look: an almost black outline, a deep shadow on the side away from the light, the crab's red, and a salmon highlight on the edge that faces the light (top left). A dither where shadow and red meet and small grains keep it from looking flat. A saw of chitin spikes runs along the outer edge of the forearm, and small teeth line the inside of each jaw.
+- While the screen is still whole the limb casts a see-through shadow on the game, far from it while the claw is high above and closer as it comes down: at the hit they touch. Then the arm kicks back three pixels along its axis and shivers, and sparks and chips fly from where the jaws shut.
+- Everything is painted with plain polygons straight on the 256x224 screen (new module claw.py): nothing is enlarged or turned, so every pixel stays sharp. The old enlarged jaw picture is gone. Starting or leaving a game clears the sequence as before.
+
+## [v34](versions/v34.md) - The ship shakes, the screen breaks (2026-11-15)
+
+In commit [`1ec60e2`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/1ec60e2aa874ea8d6e4edc3f744df10db01faac3/plot_twist).
 
 - When the crab comes alive the ship shakes for 40 frames, hard at first and then less and less: the room is pushed around on screen, wherever the players are. On the deck the statue trembles and flashes pale, with stones and dust falling around it, for 18 frames; then it bursts into rubble and only then the crab is out. A low, jagged rumble plays with it.
 - When the crab catches both players, the game stops on its last picture and a giant claw, in the crab's reds, comes in from the corner and snaps shut on the middle of the screen (frames 0 to 14). A white flash, a hard shake and a web of cracks follow (15 to 26). Then the picture falls apart along the cracks (27 to 85): each piece drops with gravity, pushed away from the hit, turning, with light on its edges, and the black behind shows. Then the ending screen, as before. No key does anything meanwhile.
