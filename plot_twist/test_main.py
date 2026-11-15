@@ -556,7 +556,7 @@ def test_new_game_over_a_save_asks_first(app):
     walk_into(app, "deck_to_cabin")
     again = relaunch()
     saved = save.load_game()
-    press(again, pygame.K_RETURN)  # "Nuova partita"
+    press(again, pygame.K_RETURN)  # "New game"
     assert again["scene"] == "confirm"
     assert main.menu_entries(again)[again["menu_index"]] == "no"  # the safe answer is highlighted
     press(again, pygame.K_RETURN)  # "No"
@@ -591,7 +591,7 @@ def test_finished_game_resumes_on_its_ending(app):
     again = relaunch()
     press(again, pygame.K_DOWN, pygame.K_RETURN)  # "Riprendi"
     assert again["scene"] == "ending"
-    press(again, pygame.K_RETURN)  # "Nuova partita"
+    press(again, pygame.K_RETURN)  # "New game"
     assert again["scene"] == "confirm"
 
 

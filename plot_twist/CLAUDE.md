@@ -1,29 +1,30 @@
-# Plot Twist: regole per ogni modifica
+# Plot Twist: rules for every change
 
-Queste regole valgono per tutte le modifiche future al gioco in questa cartella.
+These rules apply to every future change to the game in this folder.
 
-## Architettura
+## Architecture
 
-- `story.py` contiene solo dati: stanze, oggetti, porte, flag, testi.
-- `engine.py` contiene funzioni pure: ricevono uno stato e restituiscono `(nuovo_stato, outcome)`, senza mai modificare lo stato ricevuto.
-- `main.py` contiene solo pygame: input, movimento, disegno, suoni.
+- `story.py` contains only data: rooms, items, doors, flags, texts.
+- `engine.py` contains pure functions: they take a state and return `(new_state, outcome)`, without ever changing the state they received.
+- `main.py` contains only pygame: input, movement, drawing, sounds.
 
-## Lo stato di gioco
+## The game state
 
-- `STATE_KEYS` non cambia (`room`, `inventory`, `flags`, `ending`).
-- Le novità della storia diventano nuovi flag in `story.FLAGS`, validati da `engine._allowed_values` e da `engine.restore_state`.
+- `STATE_KEYS` does not change (`room`, `inventory`, `flags`, `ending`).
+- New things in the story become new flags in `story.FLAGS`, validated by `engine._allowed_values` and by `engine.restore_state`.
 
-## Testi e stile
+## Texts and style
 
-- I testi del gioco sono in inglese.
-- Commenti e docstring seguono lo stile del codice esistente.
+- The game's texts are in English.
+- The documentation on GitHub (README, DESIGN, CHANGELOG, versions, this file) is in English too: the people who open it do not speak Italian.
+- Comments and docstrings follow the style of the existing code.
 
-## Compatibilità
+## Compatibility
 
-- In modalità 1 giocatore il gioco deve comportarsi esattamente come prima.
+- In 1-player mode the game must behave exactly as before.
 
-## Test e modo di lavorare
+## Tests and way of working
 
-- Ogni modifica ha i suoi test.
-- Dopo ogni passo lancia `uv run pytest`. Se qualcosa fallisce, fermati e spiega perché prima di correggere.
-- Alla fine di ogni passo riassumi in breve cosa è cambiato e perché.
+- Every change has its own tests.
+- After every step run `uv run pytest`. If something fails, stop and explain why before fixing it.
+- At the end of every step, sum up briefly what changed and why.

@@ -2,9 +2,17 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v32](versions/v32.md) - Full screen (2026-11-12)
+## [v33](versions/v33.md) - Documentation in English (2026-11-15)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- The README (how to install and play, controls, playing on two computers, the characters, the crab, the solution), the design document and the rules for changes (CLAUDE.md) are now in English, like the game. The game itself does not change.
+- The README is also brought up to date: there are three endings, and the solution says how the third one happens.
+- The design document is the original one, from before the code: a note at its top says so, and points to this changelog for how the game is today.
+
+## [v32](versions/v32.md) - Full screen (2026-11-12)
+
+In commit [`0d753b1`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/0d753b11b30c30fd61819c69d9ca1d4e2c885ed9/plot_twist).
 
 - F11 switches between the window and the whole screen. On the whole screen the game is as big as fits in whole multiples of its size, so every pixel stays a sharp square, in the middle, with black around it. The title of the window says so.
 
