@@ -472,3 +472,59 @@ def test_the_corners_of_a_cone():
 
 def test_darkness_has_its_switch():
     assert effects.FX["darkness"] is True
+
+
+# --- Atmosphere: lightmaps, tints and soft lights ---
+
+
+def test_a_light_fades_in_hard_steps_with_a_dither_between_them():
+    assert effects.stepped(0, 4, 0, 0) == 1.0
+    assert effects.stepped(1, 4, 0, 0) == 0.0 and effects.stepped(1.5, 4, 3, 3) == 0.0
+    values = {effects.stepped(d / 100, 4, 0, 1) for d in range(100)}
+    assert values <= {0.0, 0.25, 0.5, 0.75, 1.0}
+    # just inside a step, every other pixel takes the next step down
+    assert effects.stepped(0.42, 4, 0, 0) != effects.stepped(0.42, 4, 0, 1)
+    assert effects.stepped(0.42, 4, 0, 0) == effects.stepped(0.42, 4, 1, 1)
+    assert effects.stepped(0.30, 4, 0, 0) == effects.stepped(0.30, 4, 0, 1)  # inside a step: no dither
+
+
+def test_a_lightmap_is_made_once_for_each_size_and_filled_again():
+    first = effects.lightmap((40, 30), (200, 210, 220))
+    second = effects.lightmap((40, 30), (250, 240, 230))
+    assert first is second
+    assert tuple(second.get_at((5, 5)))[:3] == (250, 240, 230)
+
+
+def test_a_tint_is_its_colour_in_the_middle_and_nothing_at_its_edge():
+    disc = effects.tint_disc(10, (200, 180, 255))
+    assert tuple(disc.get_at((10, 10)))[:3] == (200, 180, 255)
+    assert tuple(disc.get_at((0, 0)))[:3] == (255, 255, 255)
+    assert tuple(disc.get_at((10, 0)))[:3] == (255, 255, 255)
+    layer = effects.lightmap((60, 60), (240, 240, 240))
+    effects.tint(layer, (30, 30), 10, (200, 180, 255))
+    middle = layer.get_at((30, 30))
+    assert middle.g < middle.b and tuple(layer.get_at((2, 2)))[:3] == (240, 240, 240)
+
+
+def test_a_soft_light_is_brightest_in_the_middle_and_dithered_at_its_edge():
+    picture = effects.soft_light_picture(12, (80, 60, 20))
+    row = [picture.get_at((x, 12)).r for x in range(12, 25)]
+    assert row[0] == 80 and row[-1] == 0
+    assert all(a >= b for a, b in zip(row, row[1:]))
+    edge = {tuple(picture.get_at((x, y)))[:3] for x in range(25) for y in range(25) if 0.6 < math.hypot(x - 12, y - 12) / 12 < 0.7}
+    assert len(edge) >= 2  # two steps, pixel by pixel
+    surface = pygame.Surface((40, 40))
+    surface.fill((100, 100, 100))
+    effects.soft_light(surface, (20, 20), 12, (80, 60, 20))
+    assert tuple(surface.get_at((20, 20)))[:3] == (180, 160, 120)
+    assert tuple(surface.get_at((1, 1)))[:3] == (100, 100, 100)
+
+
+def test_a_soft_light_has_only_a_few_strengths_to_keep():
+    effects._soft.clear()
+    surface = pygame.Surface((30, 30))
+    for step in range(100):
+        effects.soft_light(surface, (15, 15), 6, (64, 64, 64), step / 100)
+    assert len(effects._soft) <= effects.SOFT_LEVELS
+    effects.soft_light(surface, (15, 15), 6, (64, 64, 64), 0)
+    assert len(effects._soft) <= effects.SOFT_LEVELS

@@ -3419,3 +3419,150 @@ def test_every_room_is_drawn_with_the_scenery_in_its_usual_time(app):
     for room in story.ROOMS:
         scenery_room(app, room)
         main.draw(app, screen)
+
+
+# --- Atmosphere: the colour of the light in each room, and soft lights ---
+
+
+def light_of(app, monkeypatch, frame=1):
+    """The lightmap of the room the player is in, as it multiplies a white room (the storm flash aside)."""
+    monkeypatch.setitem(effects.FX, "atmosphere", True)
+    app["frame"] = frame
+    state = main.view(app)
+    surface = main.room_surface(state["room"]).copy()
+    surface.fill((255, 255, 255))
+    main.draw_atmosphere(app, surface, state, engine.things_here(state))
+    return surface
+
+
+def average(surface, area=None):
+    area = area or surface.get_rect()
+    picture = pygame.transform.average_color(surface, area)
+    return picture[:3]
+
+
+@pytest.mark.parametrize("room", list(story.ROOMS))
+def test_the_light_of_a_room_never_hides_anything(app, monkeypatch, room):
+    scenery_room(app, room)
+    light = light_of(app, monkeypatch)
+    darkest = min(
+        scenery.brightness(light.get_at((x, y)))
+        for x in range(light.get_width())
+        for y in range(main.HUD_HEIGHT, light.get_height())
+    )
+    assert darkest >= main.READABLE
+
+
+def test_every_room_has_the_colour_of_its_light(app, monkeypatch):
+    for room in story.ROOMS:
+        scenery_room(app, room)
+        assert average(light_of(app, monkeypatch)) != (255, 255, 255)
+    r, g, b = main.ambient_of("deck")
+    assert b > g > r  # a storm: cold
+    r, g, b = main.ambient_of("galley")
+    assert r > g > b  # amber, from the stoves
+    r, g, b = main.ambient_of("infirmary")
+    assert b > r > g  # violet
+
+
+def test_the_light_turns_warm_by_the_stoves_and_violet_by_the_portal(app, monkeypatch):
+    scenery_room(app, "galley")
+    light = light_of(app, monkeypatch)
+    stove = next(name for name, info in story.OBJECTS.items() if info["room"] == "galley" and info.get("picture") == "decor_stove")
+    near = light.get_at(main.thing_rect(stove).center)
+    far = light.get_at((light.get_width() - 20, light.get_height() - 20))
+    assert near.b < far.b and near.r >= far.r - 4  # warmer: less blue
+    scenery_room(app, "corridor_end")
+    light = light_of(app, monkeypatch)
+    portal = next(name for name, info in story.OBJECTS.items() if info["room"] == "corridor_end" and info["kind"] == "portal")
+    near = light.get_at(main.thing_rect(portal).center)
+    far = light.get_at((light.get_width() - 12, light.get_height() - 12))
+    assert near.g < far.g and near.b >= far.b  # more violet: less green, as much blue
+
+
+def test_now_and_then_distant_lightning_brightens_the_deck(app, monkeypatch):
+    scenery_room(app, "deck")
+    calm = average(light_of(app, monkeypatch, frame=main.STORM_EVERY * 3 + 2))
+    flash = average(light_of(app, monkeypatch, frame=main.STORM_EVERY * 3))
+    assert all(f > c for f, c in zip(flash, calm))
+    scenery_room(app, "cabin")
+    assert average(light_of(app, monkeypatch, frame=main.STORM_EVERY * 3)) == average(light_of(app, monkeypatch, frame=main.STORM_EVERY * 3 + 2))
+
+
+def soft_lights_of(app, monkeypatch, frame=1):
+    """Only the soft lights of the room, on black."""
+    monkeypatch.setitem(effects.FX, "atmosphere", True)
+    app["frame"] = frame
+    state = main.view(app)
+    surface = main.room_surface(state["room"]).copy()
+    surface.fill((0, 0, 0))
+    main.draw_soft_lights(app, surface, state, engine.things_here(state))
+    return surface
+
+
+def test_lanterns_candles_crystals_and_stoves_shine_softly(app, monkeypatch):
+    for picture in ("decor_lantern", "decor_candle", "decor_crystal", "decor_stove"):
+        thing = next(name for name, info in story.OBJECTS.items() if info.get("picture") == picture)
+        scenery_room(app, story.OBJECTS[thing]["room"])
+        light = soft_lights_of(app, monkeypatch)
+        x, y = main.light_center(app, {"id": thing, "kind": "decor", "status": "present"})
+        radius = main.SOFT_LIGHTS[picture][0]
+        middle = scenery.brightness(light.get_at((x, y + 3)))
+        assert middle > 0, picture
+        assert scenery.brightness(light.get_at((x, y + radius - 2))) < middle, picture  # fainter towards its edge
+
+
+def test_the_soft_lights_are_pale_so_nothing_is_washed_out(app, monkeypatch):
+    for room in story.ROOMS:
+        scenery_room(app, room)
+        light = soft_lights_of(app, monkeypatch)
+        brightest = max(
+            max(light.get_at((x, y))[:3]) for x in range(0, light.get_width(), 2) for y in range(0, light.get_height(), 2)
+        )
+        assert brightest <= 120, room
+
+
+def test_flames_flicker_and_crystals_pulse(app, monkeypatch):
+    for picture in ("decor_candle", "decor_crystal"):
+        thing = next(name for name, info in story.OBJECTS.items() if info.get("picture") == picture)
+        scenery_room(app, story.OBJECTS[thing]["room"])
+        change = main.SOFT_LIGHTS[picture][2]
+        strengths = {round(main.light_strength(app | {"frame": frame}, {"id": thing}, change), 2) for frame in range(0, 200, 5)}
+        assert len(strengths) >= 3, picture
+        assert all(0.5 <= s <= 1.0 for s in strengths)
+
+
+def test_light_comes_in_through_an_open_door_and_not_a_closed_one(app, monkeypatch):
+    scenery_room(app, "cabin")
+    light = soft_lights_of(app, monkeypatch)
+    door = "cabin_to_deck"
+    assert engine.door_status(main.view(app), door) == "open"
+    center, color = main.door_light(main.view(app), door)
+    assert color == main.DOOR_LIGHT_OUTSIDE  # the deck is outside: a cold light
+    assert scenery.brightness(light.get_at(center)) > 0
+    assert not main.door_rect(door).collidepoint(center)  # just inside the room, not in the doorway
+    scenery_room(app, "deck", actions=[])
+    light = soft_lights_of(app, monkeypatch)
+    locked = "deck_to_crab"
+    assert engine.door_status(main.view(app), locked) != "open"
+    center, _ = main.door_light(main.view(app), locked)
+    assert light.get_at(center)[:3] == (0, 0, 0)
+
+
+def test_without_the_atmosphere_the_room_is_drawn_as_before(app, monkeypatch):
+    scenery_room(app, "galley")
+    before = pygame.image.tobytes(drawn_room(app), "RGB")
+    monkeypatch.setitem(effects.FX, "atmosphere", True)
+    assert pygame.image.tobytes(drawn_room(app), "RGB") != before
+    monkeypatch.setitem(effects.FX, "atmosphere", False)
+    assert pygame.image.tobytes(drawn_room(app), "RGB") == before
+
+
+def test_the_atmosphere_keeps_the_room_almost_as_bright(app, monkeypatch):
+    for room in ("deck", "galley", "infirmary", "cabin"):
+        scenery_room(app, room)
+        plain = scenery.brightness(average(drawn_room(app)))
+        monkeypatch.setitem(effects.FX, "atmosphere", True)
+        lit = scenery.brightness(average(drawn_room(app)))
+        monkeypatch.setitem(effects.FX, "atmosphere", False)
+        assert lit >= 0.85 * plain, room

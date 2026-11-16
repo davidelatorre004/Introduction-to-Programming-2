@@ -2772,6 +2772,133 @@ def draw_darkness(app, surface, state, things):
     surface.blit(layer, (0, 0))
 
 
+# --- Atmosphere: the colour of the light, and soft lights -----------------------------------
+#
+# Every room has the colour of its light, multiplied into it (effects.lightmap): cold and
+# stormy on the deck, warm wood in the cabin, amber in the galley, violet in the infirmary
+# and wherever a portal is. Around a fire or a lit generator the light turns warmer, around
+# a portal or a crystal more violet. Then soft lights are added around what shines: lanterns,
+# candles, crystals, stoves, portals, lit generators, and the light coming in through an
+# open door. All of it stays pale: a room is never darker than READABLE, so every detail can
+# still be seen (the dark rooms have their darkness for that).
+
+READABLE = 200   # the darkest the light of a room may make anything, in brightness (0 to 255)
+ROOM_AMBIENT = {
+    "deck": (214, 224, 246),          # a storm: cold and grey-blue
+    "cabin": (250, 240, 222),         # warm wood
+    "galley": (252, 236, 212),        # amber, from the stoves
+    "helm": (236, 232, 248),          # fog, and the violet of the ring
+    "east_room": (238, 238, 244),
+    "hold": (220, 226, 240),          # cool and damp
+    "infirmary": (236, 226, 250),     # pale, a little spectral
+    "crab_room": (216, 236, 236),     # the green of the sea
+    "angel_room": (246, 242, 252),    # a pale, holy light
+    "corridor": (222, 226, 240),
+    "corridor_end": (236, 228, 248),  # the portal
+    "mine": (244, 234, 220),          # earth
+}
+DEFAULT_AMBIENT = (240, 240, 240)
+# What changes the colour of the light around it: (radius, tint), found by its picture or kind.
+LOCAL_TINTS = {
+    "decor_stove": (44, (255, 232, 198)),
+    "decor_lantern": (34, (255, 234, 200)),
+    "decor_candle": (22, (255, 232, 194)),
+    "decor_crystal": (30, (238, 218, 255)),
+    "portal": (52, (234, 214, 255)),
+    "cauldron": (36, (204, 228, 255)),
+    "switch_on": (30, (255, 232, 190)),
+}
+# What shines, softly: (radius, colour, how it changes: "flame", "pulse" or "steady").
+SOFT_LIGHTS = {
+    "decor_stove": (18, (60, 34, 10), "flame"),
+    "decor_lantern": (22, (40, 30, 12), "flame"),
+    "decor_candle": (12, (46, 34, 14), "flame"),
+    "decor_crystal": (16, (54, 26, 78), "pulse"),
+    "portal": (26, (38, 18, 58), "pulse"),
+    "switch_on": (10, (40, 32, 8), "steady"),
+}
+DOOR_LIGHT = 18                  # the light that comes in through an open door: its radius...
+DOOR_LIGHT_OUTSIDE = (24, 30, 44)  # ...cold from the storm outside
+DOOR_LIGHT_INSIDE = (36, 28, 14)   # ...warm from another room
+STORM_EVERY = 470                # frames between two flashes of distant lightning on the deck
+STORM_FLASH = (12, 16, 26)       # added to the deck while it lasts
+STORM_FRAMES = (0, 1, 4, 5)      # a flash in two flickers
+
+
+def light_kind(thing):
+    """What a thing is, for the light: its picture, "portal", "cauldron" or "switch_on" (a lit generator)."""
+    if thing["kind"] == "switch":
+        return "switch_on" if thing["status"] == "on" else None
+    if thing["kind"] in ("portal", "cauldron"):
+        return thing["kind"]
+    return story.OBJECTS.get(thing["id"], {}).get("picture")
+
+
+def light_center(app, thing):
+    """Where the light of a thing comes from: the flame of a lantern (which swings), else its middle."""
+    rect = thing_rect(thing["id"])
+    if light_kind(thing) == "decor_lantern":
+        return (rect.centerx + lantern_swing(app, thing["id"])[1], rect.top + 7)
+    if light_kind(thing) == "decor_candle":
+        return (rect.left + 7, rect.top + 2)
+    return rect.center
+
+
+def ambient_of(room):
+    return ROOM_AMBIENT.get(room, DEFAULT_AMBIENT)
+
+
+def draw_atmosphere(app, surface, state, things):
+    """Multiply the room by the colour of its light, warmer or more violet around some things;
+    on the deck, now and then, distant lightning brightens everything for an instant."""
+    if not effects.FX["atmosphere"]:
+        return
+    room = state["room"]
+    layer = effects.lightmap(surface.get_size(), ambient_of(room))
+    for thing in things:
+        tint = LOCAL_TINTS.get(light_kind(thing))
+        if tint is not None:
+            effects.tint(layer, light_center(app, thing), tint[0], tint[1])
+    surface.blit(layer, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
+    if story.ROOMS[room]["outdoor"] and app["frame"] % STORM_EVERY in STORM_FRAMES:
+        surface.fill(STORM_FLASH, special_flags=pygame.BLEND_RGB_ADD)
+
+
+def light_strength(app, thing, change):
+    """How bright a light is in this frame: a flame jumps, a crystal or a portal pulses slowly."""
+    rect = thing_rect(thing["id"])
+    if change == "flame":
+        return 0.75 + 0.25 * scenery.hash01(app["frame"] // 4, rect.left * 31 + rect.top, 9)
+    if change == "pulse":
+        return effects.pulse(app["frame"], 0.05, 0.55, 1.0, rect.left * 0.3 + rect.top)
+    return 1.0
+
+
+def door_light(state, door):
+    """Where the light of an open door falls, just inside the room, and its colour (cold from the deck)."""
+    opening = door_rect(door)
+    dx, dy = TOWARD[story.DOORS[door]["side"]]
+    center = (opening.centerx - dx * (opening.width // 2 + 6), opening.centery - dy * (opening.height // 2 + 6))
+    outside = story.ROOMS[story.DOORS[door]["to"]]["outdoor"]
+    return center, DOOR_LIGHT_OUTSIDE if outside else DOOR_LIGHT_INSIDE
+
+
+def draw_soft_lights(app, surface, state, things):
+    """The soft lights of the room, added on top: around what shines, and through the open doors."""
+    if not effects.FX["atmosphere"]:
+        return
+    for thing in things:
+        if thing["kind"] == "door":
+            if thing["status"] == "open" and not story.ROOMS[state["room"]]["outdoor"]:
+                center, color = door_light(state, thing["id"])
+                effects.soft_light(surface, center, DOOR_LIGHT, color)
+            continue
+        light = SOFT_LIGHTS.get(light_kind(thing))
+        if light is not None:
+            radius, color, change = light
+            effects.soft_light(surface, light_center(app, thing), radius, color, light_strength(app, thing, change))
+
+
 def draw_lights(app, surface, things):
     """The light of the room, added on top: lanterns, crystals, the blue fire of the cauldron."""
     if not effects.FX["lights"] and not effects.FX["cauldron"]:
@@ -3365,8 +3492,10 @@ def draw_room(app, screen):
     effects.draw_particles(screen, app["fx"]["particles"])
     effects.draw_drips(screen, app["fx"])
     effects.draw_dust(screen, app["fx"], app["frame"])
+    draw_atmosphere(app, screen, state, things)  # the colour of the light in this room
     draw_darkness(app, screen, state, things)  # a dark room: dark, but for the holes of light
     draw_lights(app, screen, things)
+    draw_soft_lights(app, screen, state, things)
     # The letter of each generator, on the floor above it.
     for thing in things:
         if thing["kind"] == "switch":

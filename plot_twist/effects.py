@@ -43,6 +43,7 @@ FX = {
     "darkness": True,       # the dark rooms, lit only around lanterns, crystals, portals and the players
     "scenery": True,        # floors and walls with details, walls with depth, shading and shadows of the furniture
     "ambient": True,        # small things that move: steam, drops from the ceiling, flames, a glint on puddles
+    "atmosphere": True,     # the colour of the light in each room, and soft lights around what shines
 }
 
 # --- Timing and sizes (frames are 1/60 of a second) --------------------------------------
@@ -673,3 +674,87 @@ def draw_drips(surface, fx):
     """Each falling drop is a streak of two pixels."""
     for drip in fx["drips"]:
         surface.fill(DRIP_COLOR, (int(drip["x"]), int(drip["y"]) - 1, 1, 2))
+
+
+# --- Atmosphere: the colour of the light in a room, and soft lights -----------------------------
+#
+# Two layers over a room, the way old consoles did it with few colours:
+# - a lightmap, multiplied into the room (BLEND_RGB_MULT): one colour for the whole room
+#   (white changes nothing, a pale blue makes it cold), and around some things a disc
+#   of another colour (warmer near a fire, violet near a portal);
+# - soft lights, added on top (BLEND_RGB_ADD): bright in the middle, then fainter in
+#   hard steps, with a dither between the steps so the edge is pixelated, not blurred.
+
+_lightmaps = {}   # size -> the lightmap for rooms of that size, made once and filled every frame
+_tints = {}       # (radius, colour) -> a disc of tint, fading to white at its edge
+_soft = {}        # (radius, colour) -> a soft light
+SOFT_LEVELS = 8   # how many strengths a soft light can have, as it flickers or pulses
+
+
+def lightmap(size, color):
+    """A lightmap of this size, all of one colour: tint discs go on it, then it is multiplied into the room."""
+    if size not in _lightmaps:
+        _lightmaps[size] = pygame.Surface(size)
+    layer = _lightmaps[size]
+    layer.fill(color)
+    return layer
+
+
+def stepped(distance, steps, x, y):
+    """How much of a light (or a tint) there is at `distance` from its middle (0 to 1, past 1 nothing),
+    in `steps` hard steps, with every other pixel taking the next step down where two steps meet."""
+    if distance >= 1:
+        return 0.0
+    level = (1 - distance) * steps
+    band = math.ceil(level)
+    if band - level > 0.5 and (x + y) % 2 == 0:
+        band -= 1  # half way between two steps: a dither
+    return max(band, 0) / steps
+
+
+def tint_disc(radius, color, steps=4):
+    """A disc of a tint, for a lightmap: `color` in the middle, white (no change) at its edge."""
+    key = (radius, color)
+    if key not in _tints:
+        size = radius * 2 + 1
+        picture = pygame.Surface((size, size))
+        picture.fill((255, 255, 255))
+        for x in range(size):
+            for y in range(size):
+                share = stepped(math.hypot(x - radius, y - radius) / max(radius, 1), steps, x, y)
+                if share:
+                    picture.set_at((x, y), tuple(int(255 + (c - 255) * share) for c in color))
+        _tints[key] = picture
+    return _tints[key]
+
+
+def tint(layer, center, radius, color):
+    """Lay a disc of a tint on a lightmap: where it falls, the lightmap is multiplied by it."""
+    disc = tint_disc(radius, color)
+    layer.blit(disc, (round(center[0]) - radius, round(center[1]) - radius), special_flags=pygame.BLEND_RGB_MULT)
+
+
+def soft_light_picture(radius, color):
+    """A soft light: `color` in the middle, fainter in four hard steps out to its edge, dithered between them."""
+    key = (radius, color)
+    if key not in _soft:
+        size = radius * 2 + 1
+        picture = pygame.Surface((size, size))
+        picture.fill((0, 0, 0))
+        for x in range(size):
+            for y in range(size):
+                share = stepped(math.hypot(x - radius, y - radius) / max(radius, 1), 4, x, y)
+                if share:
+                    picture.set_at((x, y), tuple(int(c * share * share) for c in color))
+        _soft[key] = picture
+    return _soft[key]
+
+
+def soft_light(surface, center, radius, color, strength=1.0):
+    """Add a soft light to the surface. `strength` from 0 to 1 dims it (for flickering and pulsing)."""
+    strength = round(max(0.0, min(1.0, strength)) * SOFT_LEVELS) / SOFT_LEVELS  # a few levels: few pictures to keep
+    if strength <= 0 or radius < 1:
+        return
+    dimmed = tuple(int(c * strength) for c in color)
+    picture = soft_light_picture(radius, dimmed)
+    surface.blit(picture, (round(center[0]) - radius, round(center[1]) - radius), special_flags=pygame.BLEND_RGB_ADD)
