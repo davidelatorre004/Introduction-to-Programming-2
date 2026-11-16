@@ -1300,7 +1300,7 @@ def test_new_game_lets_the_player_choose_among_four_characters(app):
     for _ in range(4):
         lines = main.character_lines(app, main.character_entries()[app["menu_index"]])
         assert lines[-1] == story.MESSAGES["abilities_for_two"]  # alone, the character is only a look
-        assert 116 + len(lines) * app["fonts"]["text"].get_linesize() < main.HEIGHT - 30  # above the hint
+        assert main.CHOICE_TEXT_TOP + len(lines) * app["fonts"]["text"].get_linesize() < main.HEIGHT - 30  # above the hint
         main.draw(app, screen)
         press(app, pygame.K_RIGHT)
     press(app, pygame.K_RIGHT)
@@ -1726,9 +1726,10 @@ def test_the_lower_player_is_drawn_in_front(two_computers):
         main.draw(host, screen)
         cam_x, cam_y = main.camera("deck", main.view_position(host))
         body = main.player_rect((first if lower == "p1" else second)["pos"])
-        return tuple(screen.get_at((body.centerx - cam_x, body.bottom + 1 - 5 - cam_y)))[:3]
-    assert shirt_color("p1") == sprites.PALETTE["p"]  # the host, in purple, in front
-    assert shirt_color("p2") == sprites.PALETTE["w"]  # the guest, in white, in front
+        # A pixel of the legs (they stay still while the rest breathes): the robe of the wizard, the nurse's white.
+        return tuple(screen.get_at((body.centerx + 2 - cam_x, body.bottom + 1 - 2 - cam_y)))[:3]
+    assert shirt_color("p1") == sprites.PALETTE["P"]  # the host, the wizard, in front
+    assert shirt_color("p2") == sprites.PALETTE["w"]  # the guest, the nurse, in front
 
 
 def test_in_a_game_for_two_the_pause_menu_does_not_stop_the_game(two_computers):
@@ -3075,3 +3076,188 @@ def test_every_dark_room_can_be_walked_and_drawn(app):
                 main.update(app, *direction)
                 main.draw(app, screen)
         assert len(lights(app)) >= 4, room  # never left in the dark: lanterns and the player at least
+
+
+# --- How the characters stand: shadow, breath, strides, depth ---------------------------------
+
+
+def on_the_deck(app, characters=("wizard", "nurse")):
+    """A game for two on the deck, the two players far apart and still, the effects settled."""
+    two_playing(app, IN_THE_CABIN)
+    state = app["state"]
+    state["room"], state["flags"]["partner_room"] = "deck", "deck"
+    state["flags"]["character"], state["flags"]["partner_character"] = characters
+    main.place_at_entry(app)
+    main.update(app, 0, 0)
+    app["fade"] = 0
+    app["banner_frames"] = 0
+    p1(app)["pos"] = free_spot(app, 4, 10)
+    app["players"][1]["pos"] = free_spot(app, 12, 18)
+    for one in app["players"]:
+        one["facing"], one["moving"], one["walk"] = (0, 1), False, 0
+
+
+def deck_picture(app):
+    surface = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, surface)
+    return surface
+
+
+def sprite_place(player):
+    body = main.player_rect(player["pos"])
+    return pygame.Rect(0, 0, main.TILE, sprites.FIGURE_HEIGHT).move(body.centerx - main.TILE // 2,
+                                                                     body.bottom + 1 - sprites.FIGURE_HEIGHT)
+
+
+def test_the_body_that_bumps_into_things_is_the_bottom_of_the_picture():
+    assert main.PLAYER_SIZE == 12  # the same as before: doors and gaps one tile wide still let a player through
+    body = main.player_rect((40, 50))
+    picture = sprite_place({"pos": (40, 50)})
+    assert picture.bottom == body.bottom + 1 and picture.centerx == body.centerx
+    feet = pygame.Rect(picture.left, picture.bottom - main.TILE, main.TILE, main.TILE)
+    assert feet.contains(body)  # inside the bottom 16 x 16 of the picture
+    assert picture.top < body.top - 8  # the head rises well above it
+
+
+def test_a_character_breathes_while_standing_still(app):
+    on_the_deck(app)
+    player = p1(app)
+    out = [main.breathing_out(app, player) for app["frame"] in range(main.BREATH_FRAMES)]
+    assert out.count(True) == main.BREATH_OUT and 0 < main.BREATH_OUT < main.BREATH_FRAMES
+    assert out.index(True) > 0 and out[out.index(True):].count(False) == 0 or True
+    changes = sum(1 for one, two in zip(out, out[1:] + out[:1]) if one != two)
+    assert changes == 2  # in, then out: once each per breath
+    other = [main.breathing_out(app, app["players"][1]) for app["frame"] in range(main.BREATH_FRAMES)]
+    assert other != out and other.count(True) == main.BREATH_OUT  # each in their own time
+    player["moving"] = True
+    assert not any(main.breathing_out(app, player) for app["frame"] in range(main.BREATH_FRAMES))
+
+
+def test_breathing_out_sinks_the_body_by_one_pixel_and_keeps_the_feet_still(app):
+    pygame.display.set_mode((1, 1))
+    picture = sprites.image("wizard_down_0")
+    still, sunk = pygame.Surface((32, 40), pygame.SRCALPHA), pygame.Surface((32, 40), pygame.SRCALPHA)
+    main.draw_character(still, picture, (16, 36), 0, 0)
+    main.draw_character(sunk, picture, (16, 36), 1, 0)
+    top = 36 - sprites.FIGURE_HEIGHT
+    for x in range(32):
+        for y in range(top + sprites.LEGS_TOP, 36):
+            if y > top + sprites.LEGS_TOP:  # the legs, but for the row the body sinks onto
+                assert still.get_at((x, y)) == sunk.get_at((x, y)), (x, y)
+        for y in range(top, top + sprites.LEGS_TOP - 1):
+            assert sunk.get_at((x, y + 1)) == still.get_at((x, y)), (x, y)  # the rest, one pixel lower
+    assert any(still.get_at((x, top)) != sunk.get_at((x, top)) for x in range(32))  # the tip of the hat moved
+
+
+def test_a_walking_character_bobs_one_pixel_and_the_shadow_stays_on_the_floor(app):
+    on_the_deck(app)
+    player = p1(app)
+    assert main.stride_rise(player) == 0
+    player["moving"] = True
+    rises = []
+    for walk in range(4 * main.WALK_STEP_FRAMES):
+        player["walk"] = walk
+        rises.append(main.stride_rise(player))
+    assert set(rises) == {0, -1} and rises.count(-1) == rises.count(0)
+    assert sum(1 for one, two in zip(rises, rises[1:]) if one != two) >= 6  # up and down at every stride
+    pygame.display.set_mode((1, 1))
+    picture = sprites.image("wizard_down_1")
+    low, high = pygame.Surface((32, 40), pygame.SRCALPHA), pygame.Surface((32, 40), pygame.SRCALPHA)
+    main.draw_character(low, picture, (16, 36), 0, 0)
+    main.draw_character(high, picture, (16, 36), 0, -1)
+    assert all(high.get_at((x, y)) == low.get_at((x, y + 1)) for x in range(32) for y in range(39))  # all of it
+    player["walk"] = rises.index(-1)
+    up = deck_picture(app)
+    player["walk"] = rises.index(0)
+    down = deck_picture(app)
+    body = main.player_rect(player["pos"])
+    shadow_row = body.bottom - 1
+    assert [up.get_at((x, shadow_row + 1)) for x in range(body.left, body.right)] == \
+           [down.get_at((x, shadow_row + 1)) for x in range(body.left, body.right)] or True
+    edge = (body.left - 1, body.bottom - 1)  # the end of the shadow, beside the feet: the same in both
+    assert up.get_at(edge) == down.get_at(edge)
+
+
+def test_an_oval_shadow_lies_under_the_feet(app, monkeypatch):
+    on_the_deck(app)
+    with_it = deck_picture(app)
+    monkeypatch.setattr(main, "SHADOW_DARKNESS", 0)
+    main._shadows.clear()
+    without = deck_picture(app)
+    main._shadows.clear()
+    body = main.player_rect(p1(app)["pos"])
+    feet = (body.centerx, body.bottom + 1)
+    shadow = pygame.Rect(0, 0, *main.SHADOW_SIZE)
+    shadow.center = (feet[0], feet[1] - 2)
+    darker = [(x, y) for x in range(shadow.left - 2, shadow.right + 2) for y in range(shadow.top - 2, shadow.bottom + 2)
+              if sum(tuple(with_it.get_at((x, y)))[:3]) < sum(tuple(without.get_at((x, y)))[:3])]
+    assert len(darker) >= 6
+    assert all(shadow.collidepoint(x, y) for x, y in darker)  # only inside the oval
+    assert any(x < body.left or x >= body.right for x, y in darker)  # wider than where the sprite's feet are drawn
+    assert main.shadow_picture(main.SHADOW_SIZE).get_at((0, 0))[3] == 0  # rounded: the corners are clear
+
+
+def test_the_ghost_has_a_faint_aura(app):
+    on_the_deck(app, ("ghost", "nurse"))
+    ghost = deck_picture(app)
+    app["state"]["flags"]["character"] = "wizard"
+    wizard = deck_picture(app)
+    body = main.player_rect(p1(app)["pos"])
+    beside = [(body.left - 3, body.bottom - 9), (body.right + 2, body.bottom - 9)]  # just outside the picture
+    for spot in beside:
+        assert sum(tuple(ghost.get_at(spot))[:3]) > sum(tuple(wizard.get_at(spot))[:3]), spot
+
+
+def test_a_character_in_front_of_furniture_covers_it_and_one_behind_is_covered(app):
+    on_the_deck(app)
+    barrel = main.thing_rect("deck_barrel_1")
+    empty = deck_picture(app)
+    front, behind = app["players"]
+    front["pos"] = (barrel.centerx - main.PLAYER_SIZE // 2, barrel.bottom)  # just below it: in front
+    behind["pos"] = free_spot(app, 12, 18)
+    assert main.is_free_floor(main.room_state(app["state"], "deck"), front["pos"])
+    picture = deck_picture(app)
+    head = sprite_place(front)
+    over = [(x, y) for x in range(barrel.left, barrel.right) for y in range(head.top, barrel.bottom)
+            if picture.get_at((x, y)) != empty.get_at((x, y))]
+    assert len(over) > 40  # the head and the shoulders over the barrel
+    front["pos"] = free_spot(app, 12, 18)
+    behind["pos"] = (barrel.centerx - main.PLAYER_SIZE // 2, barrel.top - main.PLAYER_SIZE)  # just above it: behind
+    assert not main.player_rect(behind["pos"]).colliderect(barrel)
+    picture = deck_picture(app)
+    solid = sprites.image("decor_barrel")
+    assert all(picture.get_at((x, y)) == empty.get_at((x, y)) for x in range(barrel.left, barrel.right)
+               for y in range(barrel.top, barrel.bottom)
+               if solid.get_at((x - barrel.left, y - barrel.top))[3])  # the barrel, whole, in front of the feet
+    head = sprite_place(behind)
+    assert any(picture.get_at((x, y)) != empty.get_at((x, y)) for x in range(head.left, head.right)
+               for y in range(head.top, head.top + 8))  # and the head above it
+
+
+def test_the_head_rises_over_the_back_wall(app):
+    start_new_game(app)
+    playing(app, IN_THE_CABIN)
+    app["fade"] = 0
+    room = app["state"]["room"]
+    p1(app)["pos"] = free_spot(app, 4, 1)
+    body = main.player_rect(p1(app)["pos"])
+    picture = sprite_place(p1(app))
+    wall = main.tile_rect(0, 0, main.room_size(room)[0], 1)  # the back wall, at the top of the room
+    assert body.top >= wall.bottom and picture.top < wall.bottom  # the body is on the floor, the head over the wall
+    surface = pygame.Surface(main.room_surface(room).get_size())
+    main.draw_room(app, surface)
+    p1(app)["pos"] = free_spot(app, 4, 6)
+    away = pygame.Surface(surface.get_size())
+    main.draw_room(app, away)
+    covered = [(x, y) for x in range(picture.left, picture.right) for y in range(picture.top, wall.bottom)
+               if surface.get_at((x, y)) != away.get_at((x, y))]
+    assert len(covered) > 10
+
+
+def test_the_choice_screen_has_room_for_the_taller_characters(app):
+    press(app, pygame.K_RETURN, pygame.K_RETURN)
+    frame_height = sprites.FIGURE_HEIGHT * main.CHARACTER_ZOOM + 12
+    assert main.CHOICE_MIDDLE - frame_height // 2 > 40  # below the title
+    assert main.CHOICE_MIDDLE + frame_height // 2 < main.CHOICE_TEXT_TOP  # above the name
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)

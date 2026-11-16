@@ -78,6 +78,8 @@ def test_every_sprite_is_a_proper_picture():
         sharing = [thing for thing, info in story.OBJECTS.items() if info.get("picture") == name]
         if name.startswith("door_") or name == "ship":
             assert size == (2 * main.TILE, main.TILE), name
+        elif any(name.startswith(info["sprite"] + "_") for info in story.CHARACTERS.values()):
+            assert size == (main.TILE, sprites.FIGURE_HEIGHT), name  # the characters: taller than a tile
         elif name == "decor_crab_rubble":  # what is left of the statue: drawn in its place
             assert size == main.thing_rect("deck_statue").size, name
         elif sharing:  # a shared picture is as big as every piece that uses it
@@ -270,3 +272,68 @@ def test_the_endings_play_their_animation(app, ending_path):
     assert pictures[0] != pictures[2 * main.FPS]
 
 
+
+
+# --- The characters, 16 x 24 ---------------------------------------------------------------
+
+
+def character_pictures():
+    for info in story.CHARACTERS.values():
+        for direction in ("down", "up", "right"):
+            for step in range(3):
+                yield info["sprite"], direction, step, sprites.SPRITES[f"{info['sprite']}_{direction}_{step}"]
+
+
+def letters(rows, first, last):
+    return {letter for row in rows[first:last + 1] for letter in row} - {"."}
+
+
+def test_every_character_is_16_by_24_with_its_feet_on_the_bottom_row():
+    assert sprites.FIGURE_HEIGHT == 24 and sprites.LEGS_TOP == 21
+    for name, direction, step, rows in character_pictures():
+        assert len(rows) == 24 and all(len(row) == 16 for row in rows), (name, direction, step)
+        assert rows[-1].strip("."), (name, direction, step)  # something stands on the last row
+        assert sum(1 for row in rows if row.strip(".")) >= 19, (name, direction, step)  # taller than a tile
+    assert sprites.image("wizard_down_0").get_size() == (main.TILE, sprites.FIGURE_HEIGHT)
+
+
+def test_only_the_legs_change_while_walking():
+    for name, direction, step, rows in character_pictures():
+        standing = sprites.SPRITES[f"{name}_{direction}_0"]
+        if name == "flash" and direction == "right":
+            continue  # its scarf flies: checked on its own
+        assert rows[:sprites.LEGS_TOP] == standing[:sprites.LEGS_TOP], (name, direction, step)
+    for name in ("wizard", "nurse", "ghost", "flash"):
+        legs = {tuple(sprites.SPRITES[f"{name}_down_{step}"][sprites.LEGS_TOP:]) for step in range(3)}
+        assert len(legs) == 3, name
+
+
+def test_each_character_has_its_own_head_and_accessories():
+    hat = sprites.SPRITES["wizard_down_0"]
+    assert hat[0].strip(".") and "y" in letters(hat, 0, 4) and "P" in letters(hat, 0, 4)  # a tall hat with a star
+    assert "w" in letters(hat, 13, 16)  # a white beard
+    assert sprites.SPRITES["wizard_right_0"][1].index("P") < 8  # the tip of the hat bends back
+    cap = sprites.SPRITES["nurse_down_0"]
+    assert "r" in letters(cap, 3, 8) and "w" in letters(cap, 3, 8)  # a white cap with a red cross
+    assert "r" in letters(cap, 16, 20)  # and another on her uniform
+    assert "r" not in letters(sprites.SPRITES["nurse_up_0"], 0, 20)  # not on her back
+    ghost = sprites.SPRITES["ghost_down_0"]
+    assert letters(ghost, 0, 23) <= {"k", "w", "f"}  # white and pale blue, nothing else
+    assert "j" not in letters(ghost, 21, 23) and "." in ghost[-1]  # a wavy hem, no legs
+    flash = sprites.SPRITES["flash_down_0"]
+    assert "y" in letters(flash, 8, 12) and flash[10][0] == "y" and flash[10][15] == "y"  # lightning at the ears
+    assert "o" in letters(flash, 15, 16) and "y" in letters(flash, 17, 19)  # a scarf, a bolt on the chest
+    for name in ("wizard", "nurse", "ghost", "flash"):
+        front = sprites.SPRITES[f"{name}_down_0"]
+        back = sprites.SPRITES[f"{name}_up_0"]
+        assert front[11] != back[11] and "k" in front[11][3:13], name  # eyes in front, none at the back
+    heads = {tuple(sprites.SPRITES[f"{name}_down_0"][:16]) for name in ("wizard", "nurse", "ghost", "flash")}
+    assert len(heads) == 4
+
+
+def test_the_scarf_of_flash_flies_behind_while_running():
+    still, *running = (sprites.SPRITES[f"flash_right_{step}"] for step in range(3))
+    assert "o" in letters(still, 16, 18) and still[16].index("o") < 5  # hanging behind
+    for rows in running:
+        assert rows[15].index("o") <= 1  # out behind, almost horizontal
+    assert running[0][15:17] != running[1][15:17]  # and it flutters
