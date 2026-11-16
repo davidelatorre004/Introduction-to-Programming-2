@@ -101,6 +101,9 @@ FLAGS = {
     "visited_mine": False,
 }
 
+# "floor" is what the floor is made of, for the details drawn on it: "wood", "stone",
+# "tiles" or "earth". "damp" (optional) stains a room with damp, and water drips from
+# its ceiling.
 # "dark" (optional) makes a room dark, from 1 to 255: only lanterns, crystals, portals
 # and the players light it. Without it the room is fully lit.
 # "outdoor" tells the screen to draw the sea around the room. "entry" is the tile
@@ -108,6 +111,7 @@ FLAGS = {
 # A room is 16 x 12 tiles, walls included: the floor goes from (1, 1) to (14, 10).
 ROOMS = {
     "deck": {
+        "floor": "wood",
         "name": "Deck",
         "description": (
             "The deck of a ship adrift. All around, nothing but ocean. "
@@ -119,6 +123,7 @@ ROOMS = {
         "size": (16, 24),  # twice as tall as the screen: the view scrolls with the player
     },
     "cabin": {
+        "floor": "wood",
         "name": "Captain's cabin",
         "description": (
             "A wide cabin. Sea charts scattered on the floor, and eight generators humming around a square, "
@@ -130,6 +135,8 @@ ROOMS = {
         "size": (24, 18),  # half as wide and half as long again as the screen: the view scrolls
     },
     "hold": {
+        "floor": "stone",
+        "damp": True,
         "name": "Hold",
         "description": (
             "Dark, overturned crates and the smell of brine. Five numbered tiles shine in the floor, "
@@ -140,18 +147,21 @@ ROOMS = {
         "entry": (7, 2),
     },
     "crab_room": {
+        "floor": "tiles",
         "name": "Crab's room",
         "description": "A damp room full of shells. A huge crab watches you in silence.",
         "outdoor": False,
         "entry": (2, 5),
     },
     "angel_room": {
+        "floor": "tiles",
         "name": "Angel's room",
         "description": "A room flooded with white light. In the middle, an angel smiles at you.",
         "outdoor": False,
         "entry": (13, 5),
     },
     "infirmary": {
+        "floor": "tiles",
         "name": "Infirmary",
         "description": (
             "Empty beds with grey sheets, a cabinet full of bottles. "
@@ -162,12 +172,14 @@ ROOMS = {
         "entry": (13, 5),
     },
     "galley": {
+        "floor": "wood",
         "name": "Galley",
         "description": "Pots hanging from the ceiling, a cold stove and a table laid for a meal nobody ate.",
         "outdoor": False,
         "entry": (13, 5),
     },
     "helm": {
+        "floor": "wood",
         "name": "Helm",
         "description": (
             "The ship's wheel turns slowly on its own. Through the windows, only fog. "
@@ -177,12 +189,15 @@ ROOMS = {
         "entry": (11, 8),
     },
     "east_room": {
+        "floor": "wood",
         "name": "Empty room",
         "description": "An empty room. Marks on the floor show where furniture used to stand.",
         "outdoor": False,
         "entry": (2, 5),
     },
     "corridor": {
+        "floor": "stone",
+        "damp": True,
         "name": "Corridor",
         "description": "A long, cramped corridor under the hold. Water drips from the low ceiling.",
         "outdoor": False,
@@ -191,6 +206,8 @@ ROOMS = {
         "dark": 150,
     },
     "corridor_end": {
+        "floor": "stone",
+        "damp": True,
         "name": "End of the corridor",
         "description": "The corridor ends here, in front of a ring of purple light that hums softly.",
         "outdoor": False,
@@ -198,6 +215,8 @@ ROOMS = {
         "dark": 160,
     },
     "mine": {
+        "floor": "earth",
+        "damp": True,
         "name": "Mine",
         "description": (
             "A mine dug deep into the rock, far from the sea. Rails lead into the dark, "
@@ -3128,6 +3147,7 @@ import effects
 import engine
 import net
 import save
+import scenery
 import sounds
 import sprites
 import story
@@ -3152,6 +3172,9 @@ DIALOG_LINES = 4           # lines of text per page of the text box
 DIALOG_PADDING = 8
 DIALOG_TEXT_WIDTH = WIDTH - 4 * DIALOG_PADDING  # margin and padding on both sides of the box
 LIGHTNING_FRAMES = FPS     # the bolt that tears the screen when a new game starts: one second
+STEAM_EVERY = 9            # frames between two puffs of steam from a pot on a stove
+STEAM = [(196, 196, 208), (160, 162, 178), (220, 220, 228)]
+DRIP_EVERY = 45            # frames between two drops from the ceiling of a damp room (on average)
 ANVIL_SPARK_EVERY = 2      # frames between two red sparks around the anvil that waits for the key
 FADE_FRAMES = FPS // 4     # how long a room takes to come out of the dark after a door
 WALK_STEP_FRAMES = 8       # frames per step of the walking animation
@@ -3769,7 +3792,30 @@ def new_app(fonts):
     }
     open_main_menu(app)
     reset_crab(app)
+    prepare_rooms()
     return app
+
+
+def room_backdrop(room, wave=0):
+    """The floor and walls of a room with their details and depth (scenery.py), or None without pictures."""
+    floor = sprites.image("floor_" + room)
+    wall = sprites.image("wall_" + room + "_" + str(wave)) or sprites.image("wall_" + room)
+    if floor is None or wall is None:
+        return None
+    info = story.ROOMS[room]
+    columns, rows = room_size(room)
+    key = (room, wave if info["outdoor"] else 0)
+    return scenery.background(key, columns, rows, floor, wall, info["floor"], info["outdoor"], scenery.seed_of(room),
+                              stained=info.get("damp", False))
+
+
+def prepare_rooms():
+    """Build the floor and walls of every room now (a third of a second, once), not when a player
+    first walks in: entering a room never stutters."""
+    if effects.FX["scenery"]:
+        for room in story.ROOMS:
+            for wave in range(SEA_PICTURES if story.ROOMS[room]["outdoor"] else 1):  # each picture of the sea
+                room_backdrop(room, wave)
 
 
 def set_scene(app, scene, menu_index=0):
@@ -5612,12 +5658,20 @@ def update_effects(app):
                 if frame % ANVIL_SPARK_EVERY == 0:  # red sparks: this is where the key is made whole
                     effects.spawn(fx, rng.uniform(rect.left - 8, rect.right + 8), rng.uniform(rect.top - 4, rect.bottom + 4),
                                   1, effects.RED, speed=0.7, life=40, up=0.6)
+            elif story.OBJECTS.get(thing["id"], {}).get("picture") == "decor_stove" and effects.FX["ambient"]:
+                if (frame + rect.left) % STEAM_EVERY == 0:  # steam rising from the pot on the stove
+                    effects.spawn(fx, rect.centerx + rng.randint(-3, 3), rect.top + 1, 1, STEAM, speed=0.12,
+                                  life=55, up=0.32, spread=math.pi / 3, angle=-math.pi / 2)
             elif thing["kind"] == "cauldron" and effects.FX["cauldron"]:
                 flags = state["flags"]
                 if (flags["potion_step"] or flags["potion_solved"]) and frame % effects.CAULDRON_BUBBLE_EVERY == 0:
                     color = cauldron_color(state)
                     x, y = liquid_center(thing["id"])
                     effects.spawn(fx, x + rng.randint(-4, 4), y, 1, [lighter(color)], speed=0.1, life=36, up=0.35)
+        if effects.FX["ambient"] and story.ROOMS[room].get("damp") and rng.random() < 1 / DRIP_EVERY:
+            ceiling = floor_rect(room)  # a drop from the foot of the back wall, falling onto the floor
+            x = rng.randint(ceiling.left + 2, ceiling.right - 3)
+            effects.add_drip(fx, x, ceiling.top, ceiling.top + rng.randint(10, 46))
         for fading in fx["fading"]:
             area = fading["rect"]
             for _ in range(effects.BARRIER_SPARKS):
@@ -5639,6 +5693,7 @@ def update_effects(app):
             x, y = fx["fuse"]["center"]
             effects.spawn(fx, x, y, effects.FUSE_SPARKS, effects.WELD, speed=2.6, life=36, gravity=0.08, up=0.6)
             fx["flash"] = effects.FLASH_FRAMES
+    effects.update_drips(fx)
     effects.update(fx)
 
 
@@ -6055,8 +6110,20 @@ def thing_picture(thing):
     for name in names:
         picture = sprites.image(name)
         if picture is not None:
+            if effects.FX["scenery"] and is_furniture(thing, name):
+                return scenery.shaded(name, picture)  # light on the top left, a coloured outline
             return picture
     return None
+
+
+UNSHADED = ("decor_puddle", "decor_rails", "decor_notes", "portal")  # flat on the floor or on a wall: no volume
+
+
+def is_furniture(thing, name):
+    """True for the furniture and the machines of the rooms: what gets shaded like a solid thing."""
+    if name in UNSHADED:
+        return False
+    return thing["kind"] in ("decor", "altar", "anvil", "cauldron", "puzzle")
 
 
 def draw_thing(screen, thing, lift=0):
@@ -6189,6 +6256,17 @@ def draw_player(app, screen, player):
         pygame.draw.rect(screen, COLORS["black"], eye)
 
 
+def draw_railing_shadow(screen, room):
+    """The shadow the railing casts on the deck, under its top rail and beside its left one."""
+    columns, rows = room_size(room)
+    rail = tile_rect(1, 1, columns - 2, rows - 2).inflate(4, 4)
+    inside = rail.inflate(-4, -4)
+    reach = scenery.WALL_SHADOW
+    scenery.contact_shadow(screen, pygame.Rect(inside.left, inside.top, inside.width, reach[1]), "top", reach[1])
+    scenery.contact_shadow(screen, pygame.Rect(inside.left, inside.top, reach[1] - 1, inside.height), "left",
+                           reach[1] - 1)
+
+
 def draw_railing(screen, room):
     """The ship's wooden railing around the deck, with a post on every tile."""
     columns, rows = room_size(room)
@@ -6287,6 +6365,35 @@ def on_an_altar(state, item):
     return False
 
 
+# What casts a shadow on the floor: whatever stands on it. Not what hangs on a wall
+# (lanterns, notes), lies flat (rope, puddles, rails, portals), nor energy (barriers).
+HANGING = ("decor_lantern", "decor_notes")
+
+
+def casts_shadow(thing):
+    """True for a thing that stands on the floor of its room."""
+    if thing["kind"] in ("door", "tile", "barrier", "portal", "item") or is_flat(thing["id"]):
+        return False
+    return story.OBJECTS.get(thing["id"], {}).get("picture") not in HANGING
+
+
+def draw_ground_shadows(screen, things):
+    """An oval shadow under each thing standing on the floor, a little to the right (the light
+    comes from the top left), drawn before any of them so that none shades another."""
+    if not effects.FX["scenery"]:
+        return
+    for thing in things:
+        if casts_shadow(thing):
+            rect = thing_rect(thing["id"])
+            width = max(rect.width - 2, 6)
+            shadow = scenery.ground_shadow(width, 5 if rect.width <= TILE else 7)
+            screen.blit(shadow, shadow.get_rect(center=(rect.centerx + 2, rect.bottom - 1)))
+        elif thing["kind"] == "item" and thing["status"] == "on_floor":
+            rect = place_rect(thing)
+            shadow = scenery.ground_shadow(10, 3)
+            screen.blit(shadow, shadow.get_rect(center=(rect.centerx + 1, rect.bottom - 2)))
+
+
 def draw_room(app, screen):
     """The room of the player on this computer, with everything in it, the players who are there and the effects."""
     state = view(app)
@@ -6298,14 +6405,21 @@ def draw_room(app, screen):
         wall = sprites.image("wall_" + room)
     screen.fill(COLORS["black"])
     columns, rows = room_size(room)
-    for col in range(columns):
-        for row in range(rows):
-            inside = 1 <= col <= columns - 2 and 1 <= row <= rows - 2
-            picture = floor if inside else wall
-            if picture is None:
-                pygame.draw.rect(screen, floor_color if inside else wall_color, tile_rect(col, row))
-            else:
-                screen.blit(picture, tile_rect(col, row))
+    if effects.FX["scenery"] and floor is not None and wall is not None:
+        # The floor and the walls with their details and depth: built once for each room (see scenery.py).
+        outdoor = story.ROOMS[room]["outdoor"]
+        screen.blit(room_backdrop(room, wave_frame(app) if outdoor else 0), tile_rect(0, 0))
+        if outdoor:
+            draw_railing_shadow(screen, room)
+    else:
+        for col in range(columns):
+            for row in range(rows):
+                inside = 1 <= col <= columns - 2 and 1 <= row <= rows - 2
+                picture = floor if inside else wall
+                if picture is None:
+                    pygame.draw.rect(screen, floor_color if inside else wall_color, tile_rect(col, row))
+                else:
+                    screen.blit(picture, tile_rect(col, row))
     if story.ROOMS[room]["outdoor"]:
         draw_railing(screen, room)
     things = engine.things_here(state)
@@ -6316,6 +6430,7 @@ def draw_room(app, screen):
     draw_floor_puzzles(app, screen, things)
     draw_tile_effects(app, screen, things)
     draw_cables(screen, state, app["frame"])
+    draw_ground_shadows(screen, things)
     standing = []
     for thing in things:
         if thing["kind"] == "door":
@@ -6328,6 +6443,8 @@ def draw_room(app, screen):
                 draw_portal_light(app, screen, thing)
         elif thing["kind"] not in ("item", "tile"):
             standing.append(thing)
+    if effects.FX["ambient"]:
+        draw_puddle_glint(app, screen, things)
     for thing in things:
         if thing["kind"] == "item":
             draw_thing(screen, thing, ALTAR_LIFT if on_an_altar(state, thing["id"]) else 0)
@@ -6366,6 +6483,7 @@ def draw_room(app, screen):
     draw_fusing_key(app, screen)
     effects.draw_clue_glow(screen, app["fx"])
     effects.draw_particles(screen, app["fx"]["particles"])
+    effects.draw_drips(screen, app["fx"])
     effects.draw_dust(screen, app["fx"], app["frame"])
     draw_darkness(app, screen, state, things)  # a dark room: dark, but for the holes of light
     draw_lights(app, screen, things)
@@ -6375,6 +6493,42 @@ def draw_room(app, screen):
             rect = thing_rect(thing["id"])
             label = story.OBJECTS[thing["id"]]["label"]
             draw_text(screen, app["fonts"]["text"], label, COLORS["text"], (rect.centerx, rect.top - 10), "center", True)
+
+
+FLAME_COLORS = ((252, 214, 80), (240, 140, 50), (244, 240, 228))  # yellow, orange, white: a flame
+
+
+def flicker(app, thing, salt=0):
+    """A number from 0 to 1 that jumps every few frames: different for every flame, never random."""
+    rect = thing_rect(thing["id"])
+    return scenery.hash01(app["frame"] // 4 + salt, rect.left * 31 + rect.top, 5)
+
+
+def draw_flame(app, surface, thing):
+    """The flame of a candle leaps a pixel up and changes colour; the fire in a stove flickers."""
+    rect = thing_rect(thing["id"])
+    if story.OBJECTS[thing["id"]]["picture"] == "decor_candle":
+        tip = (rect.left + 7 + (1 if flicker(app, thing) > 0.5 else 0), rect.top - (1 if flicker(app, thing, 1) > 0.6 else 0))
+        surface.fill(FLAME_COLORS[int(flicker(app, thing, 2) * 3) % 3], (tip[0], tip[1], 1, 1))
+        return
+    for spark in range(3):  # the stove: three pixels of its fire change colour
+        x = rect.left + 4 + int(flicker(app, thing, spark) * 8)
+        y = rect.top + 9 + int(flicker(app, thing, spark + 7) * 2)
+        surface.fill(FLAME_COLORS[int(flicker(app, thing, spark + 3) * 2)], (x, y, 1, 1))
+
+
+def draw_puddle_glint(app, surface, things):
+    """A glint of light runs across each puddle now and then, as if a drop had just fallen in it."""
+    for thing in things:
+        if story.OBJECTS.get(thing["id"], {}).get("picture") != "decor_puddle":
+            continue
+        rect = thing_rect(thing["id"])
+        phase = (app["frame"] + rect.left * 7) % PUDDLE_GLINT_EVERY
+        if phase < 8:
+            surface.fill((210, 236, 255), (rect.left + 4 + phase, rect.top + 7, 2, 1))
+
+
+PUDDLE_GLINT_EVERY = 110
 
 
 def draw_standing(app, screen, thing):
@@ -6387,6 +6541,10 @@ def draw_standing(app, screen, thing):
         draw_generator(app, screen, thing)
     elif story.OBJECTS.get(thing["id"], {}).get("picture") == "decor_lantern":
         draw_lantern(app, screen, thing)
+    elif story.OBJECTS.get(thing["id"], {}).get("picture") in ("decor_candle", "decor_stove"):
+        draw_thing(screen, thing)
+        if effects.FX["ambient"]:
+            draw_flame(app, screen, thing)
     elif thing["id"] == "deck_statue" and statue_trembles(app):
         draw_trembling_statue(app, screen)  # the crab is breaking out: one more moment
     elif thing["id"] == "deck_statue" and engine.statue_broken(app["state"]):
@@ -7170,6 +7328,8 @@ FX = {
     "crumble": True,        # the crab statue shaking the ship, trembling and dropping stones before it breaks
     "shatter": True,        # the giant claw that breaks the screen when the crab has caught both players
     "darkness": True,       # the dark rooms, lit only around lanterns, crystals, portals and the players
+    "scenery": True,        # floors and walls with details, walls with depth, shading and shadows of the furniture
+    "ambient": True,        # small things that move: steam, drops from the ceiling, flames, a glint on puddles
 }
 
 # --- Timing and sizes (frames are 1/60 of a second) --------------------------------------
@@ -7179,6 +7339,8 @@ DARK_COLOR = (6, 8, 22)      # what the dark of a dark room looks like: almost b
 LIGHT_REACH = (1.0, 0.82, 0.64, 0.46)  # how far each step of a light reaches, of its radius: the last is fully lit
 LIGHT_BANDS = len(LIGHT_REACH)         # a light fades into the dark in this many hard steps, not smoothly
 CONE_BANDS = 3               # and a cone of light in this many, along its length
+DRIP_COLOR = (150, 196, 236)  # a drop of water from the ceiling
+DRIP_GRAVITY = 0.12
 SHARD_GRAVITY = 0.2          # pixels per frame, per frame: how fast the pieces of a broken screen fall
 SHARD_PUSH = 1.6             # how hard they are pushed away from where the screen was hit
 SHARD_SPIN = 5               # degrees per frame, at most, either way
@@ -7262,6 +7424,7 @@ def new_fx():
         "clue": None,        # the glow on what gave a new clue: {"rect", "age"}
         "warp": 0,           # frames left of the purple warp
         "flash": 0,          # frames left of the white flash
+        "drips": [],         # drops falling from the ceiling: {"x", "y", "land", "vy"}
     }
 
 
@@ -7274,6 +7437,7 @@ def reset_room(fx, room, floor, indoor):
     fx["fuse"] = None
     fx["clue"] = None
     fx["dust"] = []
+    fx["drips"] = []
     if not (FX["dust"] and indoor):
         return
     rng = random.Random(f"{SEED}-{room}")  # the same dust every time the room is entered
@@ -7768,6 +7932,465 @@ def punch(layer, picture, center):
     pixel keeps the clearer of the two."""
     place = picture.get_rect(center=(round(center[0]), round(center[1])))
     layer.blit(picture, place, special_flags=pygame.BLEND_RGBA_MIN)
+
+
+# --- Drops from the ceiling ----------------------------------------------------------------
+
+
+def add_drip(fx, x, y, land):
+    """A drop leaves the ceiling at (x, y) and falls until it lands at the height `land`."""
+    fx["drips"].append({"x": x, "y": float(y), "land": land, "vy": 0.0})
+
+
+def update_drips(fx):
+    """Drops fall faster and faster; when one lands it splashes in a few tiny drops."""
+    falling = []
+    for drip in fx["drips"]:
+        drip["vy"] += DRIP_GRAVITY
+        drip["y"] += drip["vy"]
+        if drip["y"] >= drip["land"]:
+            spawn(fx, drip["x"], drip["land"], 4, [DRIP_COLOR, (210, 236, 255)], speed=0.9, life=9,
+                  gravity=0.12, up=0.7, spread=math.pi * 0.8, angle=-math.pi / 2)
+        else:
+            falling.append(drip)
+    fx["drips"] = falling
+
+
+def draw_drips(surface, fx):
+    """Each falling drop is a streak of two pixels."""
+    for drip in fx["drips"]:
+        surface.fill(DRIP_COLOR, (int(drip["x"]), int(drip["y"]) - 1, 1, 2))
+
+
+================================================================================
+# FILE: plot_twist/scenery.py
+================================================================================
+
+"""The scenery of the rooms: floors, walls and the shading of the furniture, drawn in code.
+
+The floor and wall pictures of sprites.py are one tile each: repeated in every
+tile, the same plank seam or crack comes back every 16 pixels. Here the floor of a
+whole room is built once, with details that depend on where they are (x, y): planks
+of different lengths that do not line up, grain, knots and nails in the wood, cracks
+and damp stains in the stone, pebbles in the earth. Everything comes from a hash of
+the coordinates, never from chance: the same room always looks the same.
+
+The walls get some depth (a "2.5D" look): the back wall shows its top edge and its
+face, the others their top, and the walls cast a short shadow on the floor next to
+them. The light comes from the top left, as for the giant claw and the characters.
+
+The furniture is shaded the same way: a lighter edge where the light falls, a darker
+one on the other side, and an outline that is not plain black but a dark shade of
+the colour it surrounds, a little bluer (hue shifting: shadows are cool).
+
+Some of the ways of doing it come from the examples of Pyxel (github.com/kitao/pyxel):
+continuous noise cut into a few hard bands of colour, and half-transparency made with
+a chequered dither. This module knows nothing about the game: main.py says which room
+is made of what.
+"""
+
+import math
+
+import pygame
+
+TILE = 16
+SHADOW = (10, 8, 26)          # the colour of every shadow: almost black, a little blue
+SHADOW_ALPHA = 110            # how dark a shadow on the floor is, where it is solid
+WALL_SHADOW = (4, 3)          # how far the shadow of the back wall and of the left wall reach onto the floor
+CAP = 4                       # the top edge of the back wall, in pixels
+DAMP = (0.64, 0.75)           # where the damp noise starts to stain: dithered, then solid
+DAMP_TINT = (199, 210, 224)   # what damp does to a colour (multiplied): darker, and towards blue-green
+SLAB_DARKER = (226, 228, 240)  # the same for a darker stone slab
+SLAB_LIGHTER = (12, 10, 6)    # added to a lighter one
+WALL_TOP_LIGHT = (14, 11, 6)  # added to the top of a wall: it catches the light
+
+_backgrounds = {}             # (key) -> a room's floor and walls, made once
+_shaded = {}                  # (name) -> a picture with its shading, made once
+_ground = {}                  # (width, height) -> an oval shadow, made once
+
+
+# --- Numbers from coordinates -------------------------------------------------------------
+
+
+def hash01(x, y, seed=0):
+    """A number from 0 to 1 that looks random but only depends on (x, y) and the seed."""
+    n = (x * 374761393 + y * 668265263 + seed * 2246822519) & 0xFFFFFFFF
+    n = ((n ^ (n >> 13)) * 1274126177) & 0xFFFFFFFF
+    return ((n ^ (n >> 16)) & 0xFFFF) / 65536
+
+
+def seed_of(name):
+    """A whole number from a name, always the same (Python's own hash() changes at every run)."""
+    return sum((index + 1) * ord(letter) for index, letter in enumerate(name))
+
+
+def value_noise(x, y, size, seed):
+    """Smooth noise from 0 to 1: random values on a grid `size` pixels apart, blended in between."""
+    gx, gy = x / size, y / size
+    x0, y0 = math.floor(gx), math.floor(gy)
+    fx, fy = gx - x0, gy - y0
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    top = hash01(x0, y0, seed) * (1 - fx) + hash01(x0 + 1, y0, seed) * fx
+    bottom = hash01(x0, y0 + 1, seed) * (1 - fx) + hash01(x0 + 1, y0 + 1, seed) * fx
+    return top * (1 - fy) + bottom * fy
+
+
+# --- Colours -------------------------------------------------------------------------------
+
+
+def clamp(value):
+    return max(0, min(255, int(round(value))))
+
+
+def darker(color, amount):
+    """A darker colour, a little bluer: the shadow side of something."""
+    r, g, b = color[:3]
+    keep = 1 - amount
+    return (clamp(r * keep - 4 * amount), clamp(g * keep - 2 * amount), clamp(b * keep + 22 * amount))
+
+
+def lighter(color, amount):
+    """A lighter colour, a little warmer: the side the light falls on."""
+    r, g, b = color[:3]
+    return (clamp(r + (255 - r) * amount + 10 * amount), clamp(g + (255 - g) * amount + 4 * amount),
+            clamp(b + (255 - b) * amount - 8 * amount))
+
+
+def blend(one, two, share):
+    return tuple(clamp(a + (b - a) * share) for a, b in zip(one[:3], two[:3]))
+
+
+def brightness(color):
+    r, g, b = color[:3]
+    return 0.3 * r + 0.59 * g + 0.11 * b
+
+
+_colors = {}
+
+
+def colors_of(picture):
+    """The colours of a picture, the most used first (worked out once for each picture)."""
+    key = id(picture), picture.get_size()
+    if key in _colors and _colors[key][0] is picture:
+        return _colors[key][1]
+    count = {}
+    for x in range(picture.get_width()):
+        for y in range(picture.get_height()):
+            color = tuple(picture.get_at((x, y)))
+            if color[3]:
+                count[color[:3]] = count.get(color[:3], 0) + 1
+    result = sorted(count, key=lambda color: -count[color])
+    _colors[key] = (picture, result)
+    return result
+
+
+def dot(surface, x, y, color):
+    if 0 <= x < surface.get_width() and 0 <= y < surface.get_height():
+        surface.set_at((x, y), color)
+
+
+# --- Floors --------------------------------------------------------------------------------
+
+
+def wood_floor(surface, area, tile, seed):
+    """Planks four pixels wide, of different lengths, their ends never lined up: grain, knots,
+    nails at their ends, some a little darker or lighter than the others."""
+    colors = colors_of(tile)
+    plank = colors[0]
+    seam = min(colors[:3], key=brightness)
+    grain = blend(plank, seam, 0.4)
+    worn = lighter(plank, 0.12)
+    nail = blend(seam, (176, 176, 190), 0.55)
+    surface.fill(plank, area)
+    for strip, y in enumerate(range(area.top, area.bottom, 4)):
+        surface.fill(seam, (area.left, y + 3, area.width, 1))  # the gap between two rows of planks
+        x = area.left - int(hash01(strip, 0, seed) * 40)  # where the first plank of the row starts: never the same
+        while x < area.right:
+            length = 20 + int(hash01(x, strip, seed) * 36)
+            mood = hash01(strip, x, seed + 1)
+            plank_area = pygame.Rect(x + 1, y, length - 1, 3).clip(area)
+            if mood < 0.22:
+                for px in range(plank_area.left, plank_area.right):  # a darker plank: dithered, not flat
+                    for py in range(plank_area.top, plank_area.bottom):
+                        if (px + py) % 2 == 0:
+                            surface.set_at((px, py), grain)
+            elif mood > 0.82:
+                surface.fill(worn, (plank_area.left, plank_area.top, plank_area.width, 1))  # worn by feet
+            for streak in range(1 + int(hash01(x, strip, seed + 2) * 2)):  # the grain of the wood
+                sx = x + 3 + int(hash01(x + streak, strip, seed + 3) * max(length - 10, 1))
+                sy = y + int(hash01(x, strip + streak, seed + 4) * 3)
+                span = 3 + int(hash01(sx, sy, seed + 5) * 6)
+                surface.fill(grain, pygame.Rect(sx, sy, span, 1).clip(plank_area))
+            if hash01(x, strip, seed + 6) < 0.12:  # a knot
+                kx = x + 4 + int(hash01(strip, x, seed + 7) * max(length - 8, 1))
+                if area.left <= kx < area.right - 2:
+                    surface.fill(seam, (kx, y + 1, 2, 1))
+                    dot(surface, kx - 1, y + 1, grain)
+                    dot(surface, kx + 2, y + 1, grain)
+            if area.left <= x < area.right:
+                surface.fill(seam, (x, y, 1, 3))  # the end of the plank
+                for nx in (x - 2, x + 2):  # a nail on each side of it
+                    if area.left <= nx < area.right:
+                        dot(surface, nx, y + 1, nail)
+            x += length
+
+
+def stone_floor(surface, area, tile, seed, polished=False):
+    """The stone slabs of the picture, but each a little different: darker or lighter ones,
+    cracks, chipped corners. Polished floors (marble, tiles) get only a few hairlines."""
+    colors = colors_of(tile)
+    mortar = min(colors[:3], key=brightness)
+    for left in range(area.left, area.right, TILE):
+        for top in range(area.top, area.bottom, TILE):
+            surface.blit(tile, (left, top))
+            col, row = left // TILE, top // TILE
+            mood = hash01(col, row, seed)
+            slab = pygame.Rect(left, top, TILE, TILE)
+            if not polished and mood < 0.25:  # a slab darker than the others, a little bluer
+                surface.fill(SLAB_DARKER, slab, special_flags=pygame.BLEND_RGB_MULT)
+            elif not polished and mood > 0.8:  # or lighter, a little warmer
+                surface.fill(SLAB_LIGHTER, slab, special_flags=pygame.BLEND_RGB_ADD)
+            if not polished:
+                chips(surface, left, top, col, row, seed, mortar)  # every slab: its own few chips
+            if hash01(col, row, seed + 1) < (0.14 if polished else 0.32):
+                crack(surface, left, top, seed + col * 7 + row * 13, mortar, polished)
+
+
+def chips(surface, left, top, col, row, seed, dark):
+    """Two or three chips in a tile: a dark pixel with a light one above it, where they fall depends
+    on the tile. So no two tiles of the same floor are alike."""
+    for chip in range(2 + int(hash01(col, row, seed + 40) * 2)):
+        x = left + 1 + int(hash01(col, row, seed + 41 + chip) * 14)
+        y = top + 2 + int(hash01(row, col, seed + 51 + chip) * 12)
+        if y - 1 >= top:
+            dot(surface, x, y - 1, lighter(tuple(surface.get_at((x, y - 1)))[:3], 0.2))
+        dot(surface, x, y, dark)
+
+
+def crack(surface, left, top, seed, color, short=False):
+    """A thin crack across part of a tile: a zigzag, with a light chip beside it."""
+    x = left + 3 + int(hash01(seed, 1) * 9)
+    y = top + 2 + int(hash01(seed, 2) * 9)
+    length = (3 if short else 5) + int(hash01(seed, 3) * 4)
+    for step in range(length):
+        if not (left < x < left + TILE - 1 and top < y < top + TILE - 1):
+            break
+        dot(surface, x, y, color)
+        if step == 1:
+            dot(surface, x + 1, y - 1, lighter(tuple(surface.get_at((x + 1, y - 1)))[:3], 0.25))
+        x += 1
+        y += 1 if hash01(seed, step + 10) < 0.5 else -1 if hash01(seed, step + 20) < 0.3 else 0
+
+
+def earth_floor(surface, area, tile, seed):
+    """Packed earth: the picture, with pebbles here and there, and cracks."""
+    colors = colors_of(tile)
+    dark = darker(colors[0], 0.35)
+    for left in range(area.left, area.right, TILE):
+        for top in range(area.top, area.bottom, TILE):
+            surface.blit(tile, (left, top))
+            col, row = left // TILE, top // TILE
+            for pebble in range(int(hash01(col, row, seed) * 3)):
+                px = left + 2 + int(hash01(col, row, seed + 10 + pebble) * 11)
+                py = top + 2 + int(hash01(row, col, seed + 20 + pebble) * 11)
+                surface.fill((96, 96, 112), (px, py, 2, 2))
+                dot(surface, px, py, (176, 176, 190))  # lit from the top left
+                dot(surface, px + 2, py + 1, dark)
+                dot(surface, px + 1, py + 2, dark)
+            chips(surface, left, top, col, row, seed, dark)
+            if hash01(col, row, seed + 2) < 0.2:
+                crack(surface, left, top, seed + col * 5 + row * 11, dark)
+
+
+def damp(surface, area, seed, strength=1.0):
+    """Stains of damp: smooth noise, cut into hard bands like on an old console (dithered where it
+    starts, solid where it is wettest), darker and greener-blue where it is wet."""
+    dither = pygame.Surface((2, 2))
+    dither.fill((255, 255, 255))
+    dither.set_at((0, 0), DAMP_TINT)
+    dither.set_at((1, 1), DAMP_TINT)
+    for y in range(area.top, area.bottom, 2):
+        for x in range(area.left, area.right, 2):
+            wet = value_noise(x, y, 26, seed) * 0.7 + value_noise(x, y, 9, seed + 3) * 0.3
+            wet = wet * strength
+            if wet < DAMP[0]:
+                continue
+            block = pygame.Rect(x, y, 2, 2).clip(area)
+            if wet >= DAMP[1]:
+                surface.fill(DAMP_TINT, block, special_flags=pygame.BLEND_RGB_MULT)  # wettest: solid
+            else:
+                surface.blit(dither, block, special_flags=pygame.BLEND_RGB_MULT)  # where it starts: every other pixel
+
+
+# --- Walls ---------------------------------------------------------------------------------
+
+
+def back_wall(surface, rect, wall, seed, stained=False):
+    """A tile of the back wall, seen from the front: its top edge (light, with a dark line under
+    it), its face with the picture of the wall, darker towards the floor; streaks of damp if stained."""
+    surface.blit(wall, rect)
+    colors = colors_of(wall)
+    face = colors[0]
+    top = lighter(max(colors[:3], key=brightness), 0.25)
+    surface.fill(top, (rect.left, rect.top, rect.width, CAP - 1))
+    surface.fill(lighter(top, 0.3), (rect.left, rect.top, rect.width, 1))
+    surface.fill(darker(face, 0.55), (rect.left, rect.top + CAP - 1, rect.width, 1))
+    for row, amount in ((rect.bottom - 3, 0.18), (rect.bottom - 2, 0.3), (rect.bottom - 1, 0.45)):
+        for px in range(rect.left, rect.right):  # the foot of the wall, in the shade
+            surface.set_at((px, row), darker(tuple(surface.get_at((px, row)))[:3], amount))
+    if stained and hash01(rect.left // TILE, 0, seed) < 0.45:  # water running down from the top
+        sx = rect.left + 2 + int(hash01(rect.left, 1, seed) * 12)
+        for py in range(rect.top + CAP, rect.top + CAP + 4 + int(hash01(rect.left, 2, seed) * 8)):
+            surface.set_at((sx, py), darker(tuple(surface.get_at((sx, py)))[:3], 0.3))
+
+
+def wall_top(surface, rect, wall, inner):
+    """A tile of a side or front wall, seen from above: the picture of the wall, lighter (its top
+    catches the light), with a light line along the edge that faces the room (`inner`: "left",
+    "right" or "top") and a dark one where the wall drops to the floor."""
+    surface.blit(wall, rect)
+    surface.fill(WALL_TOP_LIGHT, rect, special_flags=pygame.BLEND_RGB_ADD)
+    top = lighter(colors_of(wall)[0], 0.35)
+    edges = {"left": (rect.left, rect.top, 1, rect.height), "right": (rect.right - 1, rect.top, 1, rect.height),
+             "top": (rect.left, rect.top, rect.width, 1)}
+    surface.fill(top, edges[inner])
+
+
+def contact_shadow(surface, area, side, reach):
+    """The shadow a wall casts on the floor beside it: solid next to the wall, dithered further out."""
+    shade = pygame.Surface(area.size, pygame.SRCALPHA)
+    for step in range(reach):
+        alpha = SHADOW_ALPHA if step < reach // 2 else SHADOW_ALPHA * 3 // 4
+        dithered = step >= reach // 2
+        if side == "top":
+            for px in range(area.width):
+                if not dithered or (px + step) % 2 == 0:
+                    shade.set_at((px, step), SHADOW + (alpha,))
+        else:
+            for py in range(area.height):
+                if not dithered or (py + step) % 2 == 0:
+                    shade.set_at((step, py), SHADOW + (alpha,))
+    surface.blit(shade, area.topleft)
+
+
+def background(key, columns, rows, floor, wall, material, outdoor, seed, stained=False):
+    """The floor and walls of a room, made once and kept: a picture of columns x rows tiles.
+
+    `material` is "wood", "stone", "tiles" or "earth"; an outdoor room has no walls of its own
+    (the sea is there), so it gets none of their depth.
+    """
+    if key in _backgrounds:
+        return _backgrounds[key]
+    picture = pygame.Surface((columns * TILE, rows * TILE))
+    inside = pygame.Rect(TILE, TILE, (columns - 2) * TILE, (rows - 2) * TILE)
+    if material == "wood":
+        wood_floor(picture, inside, floor, seed)
+    elif material == "earth":
+        earth_floor(picture, inside, floor, seed)
+    else:
+        stone_floor(picture, inside, floor, seed, polished=material == "tiles")
+    if stained:
+        damp(picture, inside, seed)
+    for col in range(columns):
+        for row in range(rows):
+            if inside.collidepoint(col * TILE, row * TILE):
+                continue
+            rect = pygame.Rect(col * TILE, row * TILE, TILE, TILE)
+            if outdoor:
+                picture.blit(wall, rect)
+            elif row == 0:
+                back_wall(picture, rect, wall, seed, stained)
+            elif col == 0:
+                wall_top(picture, rect, wall, "right")
+            elif col == columns - 1:
+                wall_top(picture, rect, wall, "left")
+            else:
+                wall_top(picture, rect, wall, "top")
+    if not outdoor:
+        contact_shadow(picture, pygame.Rect(inside.left, inside.top, inside.width, WALL_SHADOW[0]), "top",
+                       WALL_SHADOW[0])
+        contact_shadow(picture, pygame.Rect(inside.left, inside.top, WALL_SHADOW[1], inside.height), "left",
+                       WALL_SHADOW[1])
+    _backgrounds[key] = picture
+    return picture
+
+
+# --- Furniture ------------------------------------------------------------------------------
+
+
+OUTLINE = (20, 16, 28)  # the plain outline of the pictures in sprites.py
+
+
+def shaded(name, picture):
+    """A picture of furniture with its shading, made once and kept under `name`.
+
+    The plain black outline becomes a dark shade of the colour inside it, a little bluer.
+    Inside, the pixels with the open air or the outline above or to the left of them get
+    lighter (the light comes from the top left), those with it below or to the right darker:
+    four tones in all, from the outline to the light edge.
+    """
+    if name in _shaded:
+        return _shaded[name]
+    width, height = picture.get_size()
+    pixels = [[tuple(picture.get_at((x, y))) for y in range(height)] for x in range(width)]
+
+    def at(x, y):
+        if 0 <= x < width and 0 <= y < height:
+            return pixels[x][y]
+        return (0, 0, 0, 0)
+
+    def solid(color):
+        return color[3] > 0 and color[:3] != OUTLINE
+
+    def edge(color):
+        return color[3] == 0 or color[:3] == OUTLINE
+
+    result = picture.copy()
+    for x in range(width):
+        for y in range(height):
+            color = pixels[x][y]
+            if not color[3]:
+                continue
+            if color[:3] == OUTLINE:
+                near = [at(x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+                near = [one for one in near if solid(one)]
+                if not near:
+                    near = [at(x + dx, y + dy) for dx in (-2, 0, 2) for dy in (-2, 0, 2)]
+                    near = [one for one in near if solid(one)]
+                if near:
+                    inside = tuple(sum(one[index] for one in near) / len(near) for index in range(3))
+                    dark = darker(inside, 0.68)
+                    result.set_at((x, y), dark + (color[3],))
+                continue
+            lit = edge(at(x, y - 1)) or edge(at(x - 1, y))
+            shade = edge(at(x, y + 1)) or edge(at(x + 1, y))
+            if lit and not shade:
+                result.set_at((x, y), lighter(color, 0.16) + (color[3],))
+            elif shade and not lit:
+                result.set_at((x, y), darker(color, 0.16) + (color[3],))
+    _shaded[name] = result
+    return result
+
+
+def ground_shadow(width, height):
+    """The shadow of something standing on the floor: an oval, solid in the middle and dithered
+    around it (half-transparent, the old way)."""
+    key = (width, height)
+    if key not in _ground:
+        picture = pygame.Surface((width, height), pygame.SRCALPHA)
+        inner = pygame.Rect(0, 0, max(width - 4, 1), max(height - 2, 1))
+        inner.center = (width // 2, height // 2)
+        cx, cy = (width - 1) / 2, (height - 1) / 2
+        for x in range(width):
+            for y in range(height):
+                outside = ((x - cx) / (width / 2)) ** 2 + ((y - cy) / (height / 2)) ** 2
+                middle = ((x - cx) / (inner.width / 2)) ** 2 + ((y - cy) / (inner.height / 2)) ** 2
+                if middle <= 1:
+                    picture.set_at((x, y), SHADOW + (SHADOW_ALPHA,))
+                elif outside <= 1 and (x + y) % 2 == 0:
+                    picture.set_at((x, y), SHADOW + (SHADOW_ALPHA,))
+        _ground[key] = picture
+    return _ground[key]
 
 
 ================================================================================
@@ -12550,6 +13173,7 @@ import engine
 import main
 import net
 import save
+import scenery
 import sounds
 import sprites
 import story
@@ -15795,6 +16419,163 @@ def test_the_choice_screen_has_room_for_the_taller_characters(app):
     main.draw(app, screen)
 
 
+# --- The scenery in the game: floors, walls, furniture, small things that move ---------------
+
+
+def scenery_room(app, room, actions=TINCTURES_FOUND, tile=None, frames=3):
+    start_new_game(app)
+    state = play(actions)
+    state["room"] = room
+    app["state"] = state
+    p1(app)["pos"] = free_spot(app, *tile) if tile else main.spawn_at_entry(room)
+    for _ in range(frames):
+        main.update(app, 0, 0)
+    app["fade"] = 0
+    app["banner_frames"] = 0
+
+
+def drawn_room(app):
+    surface = pygame.Surface(main.room_surface(main.view(app)["room"]).get_size())
+    main.draw_room(app, surface)
+    return surface
+
+
+def test_every_room_is_built_once_when_the_game_starts(app, monkeypatch):
+    for room, info in story.ROOMS.items():
+        for wave in range(main.SEA_PICTURES if info["outdoor"] else 1):
+            assert (room, wave) in scenery._backgrounds, (room, wave)
+    built = []
+    monkeypatch.setattr(scenery, "wood_floor", lambda *args: built.append(args))
+    monkeypatch.setattr(scenery, "stone_floor", lambda *args, **kwargs: built.append(args))
+    scenery_room(app, "galley")
+    for _ in range(main.WAVE_FRAMES * main.SEA_PICTURES):
+        main.update(app, 0, 0)
+        drawn_room(app)
+    scenery_room(app, "deck")
+    for _ in range(main.WAVE_FRAMES * main.SEA_PICTURES):
+        main.update(app, 0, 0)
+        drawn_room(app)
+    assert built == []  # walking in builds nothing: no stutter
+
+
+def test_the_room_is_drawn_from_its_backdrop_and_the_switch_brings_back_the_tiles(app, monkeypatch):
+    scenery_room(app, "galley", tile=(8, 8))
+    with_it = drawn_room(app)
+    backdrop = main.room_backdrop("galley")
+    corner = (16 * 5 + 3, main.HUD_HEIGHT + 16 * 6 + 2)  # a bit of empty floor
+    assert with_it.get_at(corner) == backdrop.get_at((corner[0], corner[1] - main.HUD_HEIGHT))
+    monkeypatch.setitem(effects.FX, "scenery", False)
+    monkeypatch.setitem(effects.FX, "ambient", False)
+    without = drawn_room(app)
+    floor = sprites.image("floor_galley")
+    assert without.get_at(corner) == floor.get_at((corner[0] % 16, (corner[1] - main.HUD_HEIGHT) % 16))  # the old tiles
+
+
+def test_furniture_is_shaded_and_casts_a_shadow(app, monkeypatch):
+    scenery_room(app, "hold", IN_THE_HOLD, tile=(7, 6))
+    crate = [name for name, info in story.OBJECTS.items() if info["room"] == "hold" and info.get("picture") == "decor_crate"][0]
+    thing = {"id": crate, "kind": "decor", "status": "present"}
+    assert main.thing_picture(thing) is scenery.shaded("decor_crate", sprites.image("decor_crate"))
+    rect = main.thing_rect(crate)
+    with_it = drawn_room(app)
+    monkeypatch.setitem(effects.FX, "scenery", False)
+    assert main.thing_picture(thing) is sprites.image("decor_crate")
+    monkeypatch.setitem(effects.FX, "scenery", True)
+    monkeypatch.setattr(main, "draw_ground_shadows", lambda screen, things: None)
+    no_shadow = drawn_room(app)
+    below = [(x, y) for x in range(rect.left + 2, rect.right + 2) for y in (rect.bottom - 1, rect.bottom)]
+    darker = [spot for spot in below if sum(tuple(with_it.get_at(spot))[:3]) < sum(tuple(no_shadow.get_at(spot))[:3])]
+    assert len(darker) >= 5  # the shadow sticks out under it, a little to the right
+    assert all(spot[0] >= rect.left for spot in darker)
+
+
+def test_only_what_stands_on_the_floor_casts_a_shadow():
+    def thing(name, kind="decor", status="present"):
+        return {"id": name, "kind": kind, "status": status}
+    lantern = next(name for name, info in story.OBJECTS.items() if info.get("picture") == "decor_lantern")
+    puddle = next(name for name, info in story.OBJECTS.items() if info.get("picture") == "decor_puddle")
+    barrel = next(name for name, info in story.OBJECTS.items() if info.get("picture") == "decor_barrel")
+    assert main.casts_shadow(thing(barrel))
+    assert not main.casts_shadow(thing(lantern))  # it hangs on the wall
+    assert not main.casts_shadow(thing(puddle))   # it lies flat
+    assert not main.casts_shadow(thing("deck_to_cabin", "door", "open"))
+    assert not main.casts_shadow(thing("corridor_portal", "portal", "present"))
+    assert main.casts_shadow(thing("anvil", "anvil"))
+
+
+def test_steam_rises_from_the_stoves(app):
+    scenery_room(app, "galley", tile=(8, 8))
+    stoves = [main.thing_rect(name) for name, info in story.OBJECTS.items()
+              if info["room"] == "galley" and info.get("picture") == "decor_stove"]
+    assert len(stoves) == 2
+    app["fx"]["particles"].clear()
+    for _ in range(main.STEAM_EVERY * 4):
+        main.update(app, 0, 0)
+    steam = [one for one in app["fx"]["particles"] if one["color"] in main.STEAM]
+    assert len(steam) >= 4
+    assert all(any(abs(one["x"] - stove.centerx) < 10 and one["y"] < stove.top + 2 for stove in stoves) for one in steam)
+    assert all(one["vy"] < 0 for one in steam)  # going up
+
+
+def test_water_drips_from_the_ceiling_of_damp_rooms_and_splashes(app):
+    scenery_room(app, "corridor")
+    ceiling = main.floor_rect("corridor")
+    seen, splashes = set(), 0
+    for _ in range(main.DRIP_EVERY * 12):
+        main.update(app, 0, 0)
+        for drip in app["fx"]["drips"]:
+            assert ceiling.left <= drip["x"] < ceiling.right and drip["y"] >= ceiling.top
+            seen.add(drip["x"])
+        splashes = max(splashes, sum(1 for one in app["fx"]["particles"] if one["color"] in (effects.DRIP_COLOR, (210, 236, 255))))
+    assert len(seen) >= 3 and splashes >= 3
+    picture = drawn_room(app)
+    scenery_room(app, "galley")  # a dry room
+    for _ in range(main.DRIP_EVERY * 6):
+        main.update(app, 0, 0)
+    assert app["fx"]["drips"] == []
+
+
+def test_flames_flicker_and_puddles_glint(app):
+    scenery_room(app, "galley", tile=(8, 8))
+    stove = next(name for name, info in story.OBJECTS.items() if info["room"] == "galley" and info.get("picture") == "decor_stove")
+    rect = main.thing_rect(stove)
+    fire = pygame.Rect(rect.left + 4, rect.top + 9, 9, 3)
+    looks = set()
+    for _ in range(40):
+        main.update(app, 0, 0)
+        picture = drawn_room(app)
+        looks.add(tuple(tuple(picture.get_at((x, y)))[:3] for x in range(fire.left, fire.right) for y in range(fire.top, fire.bottom)))
+    assert len(looks) >= 4  # the fire changes every few frames
+    candles = [name for name, info in story.OBJECTS.items() if info.get("picture") == "decor_candle"]
+    puddles = [name for name, info in story.OBJECTS.items() if info.get("picture") == "decor_puddle"]
+    assert candles and puddles
+    room = story.OBJECTS[puddles[0]]["room"]
+    scenery_room(app, room)
+    rect = main.thing_rect(puddles[0])
+    glints = 0
+    for _ in range(main.PUDDLE_GLINT_EVERY):
+        main.update(app, 0, 0)
+        picture = drawn_room(app)
+        glints += any(tuple(picture.get_at((x, rect.top + 7)))[:3] == (210, 236, 255) for x in range(rect.left, rect.right))
+    assert 4 <= glints <= 12  # now and then, briefly
+
+
+def test_without_the_small_things_nothing_moves(app, monkeypatch):
+    monkeypatch.setitem(effects.FX, "ambient", False)
+    scenery_room(app, "corridor")
+    app["fx"]["particles"].clear()
+    for _ in range(main.DRIP_EVERY * 4):
+        main.update(app, 0, 0)
+    assert app["fx"]["drips"] == [] and app["fx"]["particles"] == []
+
+
+def test_every_room_is_drawn_with_the_scenery_in_its_usual_time(app):
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for room in story.ROOMS:
+        scenery_room(app, room)
+        main.draw(app, screen)
+
+
 ================================================================================
 # FILE: plot_twist/test_effects.py
 ================================================================================
@@ -16273,6 +17054,243 @@ def test_the_corners_of_a_cone():
 
 def test_darkness_has_its_switch():
     assert effects.FX["darkness"] is True
+
+
+================================================================================
+# FILE: plot_twist/test_scenery.py
+================================================================================
+
+"""Tests for the scenery: floors and walls with details, the depth of the walls, the shading of furniture."""
+
+import pygame
+import pytest
+
+import scenery
+import sprites
+import story
+
+
+@pytest.fixture(autouse=True)
+def display():
+    pygame.display.set_mode((1, 1))
+
+
+def colors(surface, area=None):
+    area = area or surface.get_rect()
+    return [tuple(surface.get_at((x, y)))[:3] for x in range(area.left, area.right) for y in range(area.top, area.bottom)]
+
+
+def tile(surface, col, row):
+    return colors(surface, pygame.Rect(col * 16, row * 16, 16, 16))
+
+
+def build(room, columns=10, rows=8, key=None):
+    info = story.ROOMS[room]
+    wall = sprites.image("wall_" + room) or sprites.image("wall_" + room + "_0")
+    return scenery.background(key or ("test", room, columns, rows), columns, rows, sprites.image("floor_" + room), wall,
+                              info["floor"], info["outdoor"], scenery.seed_of(room), info.get("damp", False))
+
+
+# --- Numbers from coordinates ------------------------------------------------------------------
+
+
+def test_the_hash_depends_only_on_the_coordinates_and_the_seed():
+    values = [scenery.hash01(x, y, 3) for x in range(40) for y in range(40)]
+    assert all(0 <= value < 1 for value in values)
+    assert len(set(values)) > 1500  # spread out, not a few values
+    assert 0.4 < sum(values) / len(values) < 0.6
+    assert scenery.hash01(5, 9, 3) == scenery.hash01(5, 9, 3) != scenery.hash01(9, 5, 3)
+    assert scenery.hash01(5, 9, 3) != scenery.hash01(5, 9, 4)
+    assert scenery.seed_of("cabin") == scenery.seed_of("cabin") != scenery.seed_of("galley")
+
+
+def test_value_noise_is_smooth():
+    row = [scenery.value_noise(x, 10, 20, 7) for x in range(200)]
+    assert all(0 <= value <= 1 for value in row)
+    assert max(abs(one - two) for one, two in zip(row, row[1:])) < 0.12  # no jumps from a pixel to the next
+    assert max(row) - min(row) > 0.4  # but it does change across the room
+
+
+# --- Floors -----------------------------------------------------------------------------------
+
+
+def test_every_room_has_a_floor_material():
+    assert {info["floor"] for info in story.ROOMS.values()} <= {"wood", "stone", "tiles", "earth"}
+    assert story.ROOMS["cabin"]["floor"] == "wood" and story.ROOMS["hold"]["floor"] == "stone"
+    assert story.ROOMS["mine"]["floor"] == "earth" and story.ROOMS["infirmary"]["floor"] == "tiles"
+    assert {room for room, info in story.ROOMS.items() if info.get("damp")} == {"hold", "corridor", "corridor_end", "mine"}
+
+
+@pytest.mark.parametrize("room", ["cabin", "hold", "mine", "infirmary"])
+def test_no_two_tiles_of_a_floor_are_the_same(room):
+    picture = build(room)
+    tiles = [tuple(tile(picture, col, row)) for col in range(1, 9) for row in range(1, 7)]
+    assert len(set(tiles)) >= len(tiles) * (0.95 if room != "infirmary" else 0.2)  # polished floors: a few hairlines
+
+
+def test_the_same_room_is_always_drawn_the_same():
+    one = build("hold", key=("same", 1))
+    two = build("hold", key=("same", 2))
+    assert colors(one) == colors(two)
+    assert build("hold", key=("same", 1)) is one  # and it is built only once
+
+
+def test_wooden_planks_do_not_line_up_and_have_nails_and_grain():
+    picture = build("cabin", columns=16, rows=8, key=("planks",))
+    plank = scenery.colors_of(sprites.image("floor_cabin"))[0]
+    seam = min(scenery.colors_of(sprites.image("floor_cabin"))[:3], key=scenery.brightness)
+    ends = []
+    for strip in range(4, 4 * 24, 4):
+        y = 16 + strip
+        if y + 3 > 16 * 7:
+            break
+        ends.append(tuple(x for x in range(17, 16 * 15 - 1) if tuple(picture.get_at((x, y)))[:3] == seam
+                          and tuple(picture.get_at((x, y + 2)))[:3] == seam))
+        assert tuple(picture.get_at((40, y - 1)))[:3] == seam  # the gap between two rows of planks
+    assert len(set(ends)) == len(ends)  # no two rows of planks end in the same places
+    gaps = [two - one for row in ends for one, two in zip(row, row[1:])]
+    assert min(gaps) >= 18 and max(gaps) > 32  # planks of different lengths
+    nails = sum(1 for color in colors(picture) if scenery.brightness(color) > scenery.brightness(plank) + 15)
+    assert nails > 20
+    shades = set(colors(picture, pygame.Rect(16, 16, 16 * 14, 16 * 6)))
+    assert len(shades) >= 5  # plank, gap, grain, a lighter worn edge, nails
+
+
+def test_stone_floors_have_cracks_and_damp_stains():
+    dry = build("hold", key=("dry",))
+    info = story.ROOMS["hold"]
+    floor = sprites.image("floor_hold")
+    plain = pygame.Surface((160, 128))
+    for col in range(10):
+        for row in range(8):
+            plain.blit(floor, (col * 16, row * 16))
+    inside = pygame.Rect(16, 16, 128, 96)
+    changed = sum(1 for one, two in zip(colors(dry, inside), colors(plain, inside)) if one != two)
+    assert changed > 1000  # slabs darker and lighter, cracks, damp
+    assert info["damp"]
+    bluer = sum(1 for one, two in zip(colors(dry, inside), colors(plain, inside))
+                if one != two and one[2] - one[0] > two[2] - two[0])
+    assert bluer > 100  # the damp is darker and bluer
+
+
+def test_damp_comes_in_hard_bands_dithered_where_it_starts():
+    surface = pygame.Surface((200, 120))
+    surface.fill((120, 120, 120))
+    scenery.damp(surface, surface.get_rect(), 5)
+    seen = set(colors(surface))
+    assert len(seen) == 2 and (120, 120, 120) in seen  # dry, or wet: one hard band of colour, no fade
+    wet = (seen - {(120, 120, 120)}).pop()
+    assert sum(wet) < 360 and wet[2] > wet[0]  # darker, and bluer
+    dithered = solid = 0
+    for x in range(0, 200, 2):
+        for y in range(0, 120, 2):
+            block = [tuple(surface.get_at((x + dx, y + dy)))[:3] for dx in (0, 1) for dy in (0, 1)]
+            wet = sum(1 for color in block if color != (120, 120, 120))
+            dithered += wet == 2
+            solid += wet == 4
+    assert dithered > 20 and solid > 5
+
+
+# --- Walls ------------------------------------------------------------------------------------
+
+
+def test_the_back_wall_has_a_light_top_a_face_and_a_dark_foot():
+    picture = build("galley", key=("wall",))
+
+    def row(y):  # how bright a row of the back wall is, on average
+        return sum(scenery.brightness(picture.get_at((x, y))) for x in range(16, 16 * 9)) / (16 * 8)
+    top, under_cap = row(0), row(scenery.CAP - 1)
+    face = sum(row(y) for y in range(scenery.CAP, 13)) / (13 - scenery.CAP)
+    foot = row(15)
+    assert top > face > foot  # lit on top, darker down to the floor
+    assert under_cap < face  # a dark line where the top meets the face
+    assert row(1) > row(scenery.CAP + 1)
+
+
+def test_the_walls_cast_a_short_shadow_on_the_floor():
+    picture = build("galley", key=("shadow",))
+
+    def row(y):
+        return sum(scenery.brightness(picture.get_at((x, y))) for x in range(20, 140)) / 120
+
+    def column(x):
+        return sum(scenery.brightness(picture.get_at((x, y))) for y in range(20, 100)) / 80
+    open_floor = sum(row(y) for y in range(28, 60)) / 32
+    assert row(16) < open_floor * 0.75 and row(17) < open_floor * 0.75  # right under the back wall: solid shade
+    assert row(16 + scenery.WALL_SHADOW[0] - 1) < open_floor  # dithered further out
+    assert open_floor * 0.9 < row(16 + scenery.WALL_SHADOW[0] + 2)  # and then the floor as it is
+    open_column = sum(column(x) for x in range(30, 60)) / 30
+    assert column(16) < open_column * 0.8  # beside the left wall too
+
+
+def test_the_side_walls_show_their_top_with_a_light_edge_on_the_room_side():
+    picture = build("galley", key=("sides",))
+    wall = sprites.image("wall_galley")
+    assert scenery.brightness(picture.get_at((15, 40))) > scenery.brightness(picture.get_at((8, 40)))  # left wall
+    assert scenery.brightness(picture.get_at((9 * 16, 40))) > scenery.brightness(picture.get_at((9 * 16 + 8, 40)))
+    plain = scenery.brightness(wall.get_at((8, 8)))
+    assert scenery.brightness(picture.get_at((8, 16 * 3 + 8))) > plain  # the top catches the light
+
+
+def test_an_outdoor_room_keeps_its_sea_and_gets_no_walls():
+    picture = build("deck", key=("deck",))
+    sea = sprites.image("wall_deck_0")
+    assert colors(picture, pygame.Rect(0, 0, 16, 16)) == colors(sea)
+
+
+# --- Furniture --------------------------------------------------------------------------------
+
+
+def test_furniture_has_no_plain_black_outline_but_a_dark_shade_of_its_colour():
+    for name in ("decor_barrel", "decor_crate", "decor_bed", "decor_stove", "decor_table"):
+        plain = sprites.image(name)
+        shaded = scenery.shaded(name, plain)
+        assert shaded.get_size() == plain.get_size()
+        outline = [(x, y) for x in range(16) for y in range(16) if tuple(plain.get_at((x, y)))[:3] == scenery.OUTLINE
+                   and plain.get_at((x, y))[3]]
+        assert outline
+        for x, y in outline:
+            assert tuple(shaded.get_at((x, y)))[:3] != scenery.OUTLINE, (name, x, y)
+            assert scenery.brightness(shaded.get_at((x, y))) < 90, (name, x, y)  # still dark: a clean edge
+        alpha = [plain.get_at((x, y))[3] == shaded.get_at((x, y))[3] for x in range(16) for y in range(16)]
+        assert all(alpha)  # the same shape
+
+
+def test_shading_is_lighter_on_the_top_left_and_darker_on_the_bottom_right():
+    plain = sprites.image("decor_crate")
+    shaded = scenery.shaded("decor_crate", plain)
+    lighter = darker = 0
+    for x in range(16):
+        for y in range(16):
+            one, two = plain.get_at((x, y)), shaded.get_at((x, y))
+            if not one[3] or tuple(one)[:3] == scenery.OUTLINE:
+                continue
+            if scenery.brightness(two) > scenery.brightness(one):
+                lighter += 1
+                assert x < 13 and y < 13
+            elif scenery.brightness(two) < scenery.brightness(one):
+                darker += 1
+    assert lighter > 10 and darker > 10
+    assert scenery.shaded("decor_crate", plain) is shaded  # made once
+
+
+def test_the_hue_shifts_cool_in_the_shade_and_warm_in_the_light():
+    red = (214, 64, 52)
+    dark, light = scenery.darker(red, 0.4), scenery.lighter(red, 0.2)
+    assert scenery.brightness(dark) < scenery.brightness(red) < scenery.brightness(light)
+    assert dark[2] / max(dark[0], 1) > red[2] / red[0]  # bluer in the shade
+    assert light[2] / light[0] < (red[2] + (255 - red[2]) * 0.2) / (red[0] + (255 - red[0]) * 0.2)  # warmer in the light
+
+
+def test_the_ground_shadow_is_an_oval_solid_in_the_middle_and_dithered_around():
+    shadow = scenery.ground_shadow(14, 5)
+    assert shadow.get_size() == (14, 5)
+    assert shadow.get_at((7, 2))[3] == scenery.SHADOW_ALPHA  # solid in the middle
+    assert shadow.get_at((0, 0))[3] == 0 and shadow.get_at((13, 4))[3] == 0  # round: no corners
+    edge = [shadow.get_at((x, 2))[3] for x in range(0, 3)]
+    assert 0 in edge and scenery.SHADOW_ALPHA in edge  # dithered at its ends
+    assert set(shadow.get_at((x, y))[3] for x in range(14) for y in range(5)) == {0, scenery.SHADOW_ALPHA}
+    assert scenery.ground_shadow(14, 5) is shadow
 
 
 ================================================================================

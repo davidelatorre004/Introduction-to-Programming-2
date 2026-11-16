@@ -2,9 +2,21 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v37](versions/v37.md) - Taller characters (2026-11-16)
+## [v38](versions/v38.md) - Floors, walls and furniture with detail (2026-11-16)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- Floors no longer repeat the same tile: each room's floor is built from its material (a new "floor" in story.ROOMS: wood, stone, tiles or earth) with details that depend on where they are. Wood: planks of different lengths whose ends never line up, grain, knots, nails at the ends, some planks darker (dithered) or worn lighter. Stone: slabs a little darker or lighter, chips and cracks. Earth: pebbles lit from the top left, cracks. Polished tiles: a few hairlines.
+- Damp rooms (a new "damp": the hold, the corridor, its far end, the mine) get stains of damp, cut from smooth noise into hard bands, dithered where they start; water drips from their ceilings and splashes.
+- The walls have depth: the back wall shows a light top edge, a dark line under it, its face and a darker foot, with streaks of damp in damp rooms; the side and front walls show their lit top with a light edge on the room side. The back wall and the left wall cast a shadow of 4 and 3 pixels on the floor, solid then dithered; on the deck the railing does.
+- Furniture and machines are shaded: lighter where the light falls (top left), darker on the other side, and their black outline becomes a dark shade of the colour inside it, a little bluer. Whatever stands on the floor casts an oval shadow, solid in the middle and dithered around it, a little to the right; items lying on the floor a small one.
+- Small things move: steam rises from the stoves of the galley, the flame of each candle leaps and changes colour, the fire in a stove flickers, a glint runs across puddles now and then.
+- Everything is made with hashes of the coordinates, never with chance: the same room always looks the same. The floors and walls of every room (and each picture of the sea) are built once when the game starts, about a quarter of a second: entering a room never stutters, and a frame costs 3 to 4 ms. New module scenery.py, and two switches in effects.FX, "scenery" and "ambient": off, the rooms look as before.
+- Looked at for reference: the examples of Pyxel (kitao/pyxel): noise cut into hard bands, half-transparency made with a dither, an oval shadow solid inside and dithered outside.
+
+## [v37](versions/v37.md) - Taller characters (2026-11-16)
+
+In commit [`67846af`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/67846af32096e23dda703276431f2acd3e7a4cd6/plot_twist).
 
 - The four characters are 16 x 24 pixels instead of 16 x 16, with bigger heads and eyes: the Wizard has a tall pointed hat with a star (its tip bends back in profile), a white beard and a robe down to the shoes; the Nurse a white cap and uniform with red crosses, and a bun at the back; the Ghost big hollow eyes, a round mouth, a wavy hem and a faint glow around it (its aura); Flash a red cowl with lightning wings at the ears, a bolt on the chest, a gold belt and an orange scarf whose end flies behind while running.
 - The body that bumps into things does not change: still the 12 x 12 square at the feet, inside the bottom 16 x 16 of the picture, so every door and gap lets a player through as before. The rest of the picture rises above it.

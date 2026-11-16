@@ -41,6 +41,8 @@ FX = {
     "crumble": True,        # the crab statue shaking the ship, trembling and dropping stones before it breaks
     "shatter": True,        # the giant claw that breaks the screen when the crab has caught both players
     "darkness": True,       # the dark rooms, lit only around lanterns, crystals, portals and the players
+    "scenery": True,        # floors and walls with details, walls with depth, shading and shadows of the furniture
+    "ambient": True,        # small things that move: steam, drops from the ceiling, flames, a glint on puddles
 }
 
 # --- Timing and sizes (frames are 1/60 of a second) --------------------------------------
@@ -50,6 +52,8 @@ DARK_COLOR = (6, 8, 22)      # what the dark of a dark room looks like: almost b
 LIGHT_REACH = (1.0, 0.82, 0.64, 0.46)  # how far each step of a light reaches, of its radius: the last is fully lit
 LIGHT_BANDS = len(LIGHT_REACH)         # a light fades into the dark in this many hard steps, not smoothly
 CONE_BANDS = 3               # and a cone of light in this many, along its length
+DRIP_COLOR = (150, 196, 236)  # a drop of water from the ceiling
+DRIP_GRAVITY = 0.12
 SHARD_GRAVITY = 0.2          # pixels per frame, per frame: how fast the pieces of a broken screen fall
 SHARD_PUSH = 1.6             # how hard they are pushed away from where the screen was hit
 SHARD_SPIN = 5               # degrees per frame, at most, either way
@@ -133,6 +137,7 @@ def new_fx():
         "clue": None,        # the glow on what gave a new clue: {"rect", "age"}
         "warp": 0,           # frames left of the purple warp
         "flash": 0,          # frames left of the white flash
+        "drips": [],         # drops falling from the ceiling: {"x", "y", "land", "vy"}
     }
 
 
@@ -145,6 +150,7 @@ def reset_room(fx, room, floor, indoor):
     fx["fuse"] = None
     fx["clue"] = None
     fx["dust"] = []
+    fx["drips"] = []
     if not (FX["dust"] and indoor):
         return
     rng = random.Random(f"{SEED}-{room}")  # the same dust every time the room is entered
@@ -639,3 +645,31 @@ def punch(layer, picture, center):
     pixel keeps the clearer of the two."""
     place = picture.get_rect(center=(round(center[0]), round(center[1])))
     layer.blit(picture, place, special_flags=pygame.BLEND_RGBA_MIN)
+
+
+# --- Drops from the ceiling ----------------------------------------------------------------
+
+
+def add_drip(fx, x, y, land):
+    """A drop leaves the ceiling at (x, y) and falls until it lands at the height `land`."""
+    fx["drips"].append({"x": x, "y": float(y), "land": land, "vy": 0.0})
+
+
+def update_drips(fx):
+    """Drops fall faster and faster; when one lands it splashes in a few tiny drops."""
+    falling = []
+    for drip in fx["drips"]:
+        drip["vy"] += DRIP_GRAVITY
+        drip["y"] += drip["vy"]
+        if drip["y"] >= drip["land"]:
+            spawn(fx, drip["x"], drip["land"], 4, [DRIP_COLOR, (210, 236, 255)], speed=0.9, life=9,
+                  gravity=0.12, up=0.7, spread=math.pi * 0.8, angle=-math.pi / 2)
+        else:
+            falling.append(drip)
+    fx["drips"] = falling
+
+
+def draw_drips(surface, fx):
+    """Each falling drop is a streak of two pixels."""
+    for drip in fx["drips"]:
+        surface.fill(DRIP_COLOR, (int(drip["x"]), int(drip["y"]) - 1, 1, 2))

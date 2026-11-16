@@ -18,6 +18,7 @@ import engine
 import main
 import net
 import save
+import scenery
 import sounds
 import sprites
 import story
@@ -3261,3 +3262,160 @@ def test_the_choice_screen_has_room_for_the_taller_characters(app):
     assert main.CHOICE_MIDDLE + frame_height // 2 < main.CHOICE_TEXT_TOP  # above the name
     screen = pygame.Surface((main.WIDTH, main.HEIGHT))
     main.draw(app, screen)
+
+
+# --- The scenery in the game: floors, walls, furniture, small things that move ---------------
+
+
+def scenery_room(app, room, actions=TINCTURES_FOUND, tile=None, frames=3):
+    start_new_game(app)
+    state = play(actions)
+    state["room"] = room
+    app["state"] = state
+    p1(app)["pos"] = free_spot(app, *tile) if tile else main.spawn_at_entry(room)
+    for _ in range(frames):
+        main.update(app, 0, 0)
+    app["fade"] = 0
+    app["banner_frames"] = 0
+
+
+def drawn_room(app):
+    surface = pygame.Surface(main.room_surface(main.view(app)["room"]).get_size())
+    main.draw_room(app, surface)
+    return surface
+
+
+def test_every_room_is_built_once_when_the_game_starts(app, monkeypatch):
+    for room, info in story.ROOMS.items():
+        for wave in range(main.SEA_PICTURES if info["outdoor"] else 1):
+            assert (room, wave) in scenery._backgrounds, (room, wave)
+    built = []
+    monkeypatch.setattr(scenery, "wood_floor", lambda *args: built.append(args))
+    monkeypatch.setattr(scenery, "stone_floor", lambda *args, **kwargs: built.append(args))
+    scenery_room(app, "galley")
+    for _ in range(main.WAVE_FRAMES * main.SEA_PICTURES):
+        main.update(app, 0, 0)
+        drawn_room(app)
+    scenery_room(app, "deck")
+    for _ in range(main.WAVE_FRAMES * main.SEA_PICTURES):
+        main.update(app, 0, 0)
+        drawn_room(app)
+    assert built == []  # walking in builds nothing: no stutter
+
+
+def test_the_room_is_drawn_from_its_backdrop_and_the_switch_brings_back_the_tiles(app, monkeypatch):
+    scenery_room(app, "galley", tile=(8, 8))
+    with_it = drawn_room(app)
+    backdrop = main.room_backdrop("galley")
+    corner = (16 * 5 + 3, main.HUD_HEIGHT + 16 * 6 + 2)  # a bit of empty floor
+    assert with_it.get_at(corner) == backdrop.get_at((corner[0], corner[1] - main.HUD_HEIGHT))
+    monkeypatch.setitem(effects.FX, "scenery", False)
+    monkeypatch.setitem(effects.FX, "ambient", False)
+    without = drawn_room(app)
+    floor = sprites.image("floor_galley")
+    assert without.get_at(corner) == floor.get_at((corner[0] % 16, (corner[1] - main.HUD_HEIGHT) % 16))  # the old tiles
+
+
+def test_furniture_is_shaded_and_casts_a_shadow(app, monkeypatch):
+    scenery_room(app, "hold", IN_THE_HOLD, tile=(7, 6))
+    crate = [name for name, info in story.OBJECTS.items() if info["room"] == "hold" and info.get("picture") == "decor_crate"][0]
+    thing = {"id": crate, "kind": "decor", "status": "present"}
+    assert main.thing_picture(thing) is scenery.shaded("decor_crate", sprites.image("decor_crate"))
+    rect = main.thing_rect(crate)
+    with_it = drawn_room(app)
+    monkeypatch.setitem(effects.FX, "scenery", False)
+    assert main.thing_picture(thing) is sprites.image("decor_crate")
+    monkeypatch.setitem(effects.FX, "scenery", True)
+    monkeypatch.setattr(main, "draw_ground_shadows", lambda screen, things: None)
+    no_shadow = drawn_room(app)
+    below = [(x, y) for x in range(rect.left + 2, rect.right + 2) for y in (rect.bottom - 1, rect.bottom)]
+    darker = [spot for spot in below if sum(tuple(with_it.get_at(spot))[:3]) < sum(tuple(no_shadow.get_at(spot))[:3])]
+    assert len(darker) >= 5  # the shadow sticks out under it, a little to the right
+    assert all(spot[0] >= rect.left for spot in darker)
+
+
+def test_only_what_stands_on_the_floor_casts_a_shadow():
+    def thing(name, kind="decor", status="present"):
+        return {"id": name, "kind": kind, "status": status}
+    lantern = next(name for name, info in story.OBJECTS.items() if info.get("picture") == "decor_lantern")
+    puddle = next(name for name, info in story.OBJECTS.items() if info.get("picture") == "decor_puddle")
+    barrel = next(name for name, info in story.OBJECTS.items() if info.get("picture") == "decor_barrel")
+    assert main.casts_shadow(thing(barrel))
+    assert not main.casts_shadow(thing(lantern))  # it hangs on the wall
+    assert not main.casts_shadow(thing(puddle))   # it lies flat
+    assert not main.casts_shadow(thing("deck_to_cabin", "door", "open"))
+    assert not main.casts_shadow(thing("corridor_portal", "portal", "present"))
+    assert main.casts_shadow(thing("anvil", "anvil"))
+
+
+def test_steam_rises_from_the_stoves(app):
+    scenery_room(app, "galley", tile=(8, 8))
+    stoves = [main.thing_rect(name) for name, info in story.OBJECTS.items()
+              if info["room"] == "galley" and info.get("picture") == "decor_stove"]
+    assert len(stoves) == 2
+    app["fx"]["particles"].clear()
+    for _ in range(main.STEAM_EVERY * 4):
+        main.update(app, 0, 0)
+    steam = [one for one in app["fx"]["particles"] if one["color"] in main.STEAM]
+    assert len(steam) >= 4
+    assert all(any(abs(one["x"] - stove.centerx) < 10 and one["y"] < stove.top + 2 for stove in stoves) for one in steam)
+    assert all(one["vy"] < 0 for one in steam)  # going up
+
+
+def test_water_drips_from_the_ceiling_of_damp_rooms_and_splashes(app):
+    scenery_room(app, "corridor")
+    ceiling = main.floor_rect("corridor")
+    seen, splashes = set(), 0
+    for _ in range(main.DRIP_EVERY * 12):
+        main.update(app, 0, 0)
+        for drip in app["fx"]["drips"]:
+            assert ceiling.left <= drip["x"] < ceiling.right and drip["y"] >= ceiling.top
+            seen.add(drip["x"])
+        splashes = max(splashes, sum(1 for one in app["fx"]["particles"] if one["color"] in (effects.DRIP_COLOR, (210, 236, 255))))
+    assert len(seen) >= 3 and splashes >= 3
+    picture = drawn_room(app)
+    scenery_room(app, "galley")  # a dry room
+    for _ in range(main.DRIP_EVERY * 6):
+        main.update(app, 0, 0)
+    assert app["fx"]["drips"] == []
+
+
+def test_flames_flicker_and_puddles_glint(app):
+    scenery_room(app, "galley", tile=(8, 8))
+    stove = next(name for name, info in story.OBJECTS.items() if info["room"] == "galley" and info.get("picture") == "decor_stove")
+    rect = main.thing_rect(stove)
+    fire = pygame.Rect(rect.left + 4, rect.top + 9, 9, 3)
+    looks = set()
+    for _ in range(40):
+        main.update(app, 0, 0)
+        picture = drawn_room(app)
+        looks.add(tuple(tuple(picture.get_at((x, y)))[:3] for x in range(fire.left, fire.right) for y in range(fire.top, fire.bottom)))
+    assert len(looks) >= 4  # the fire changes every few frames
+    candles = [name for name, info in story.OBJECTS.items() if info.get("picture") == "decor_candle"]
+    puddles = [name for name, info in story.OBJECTS.items() if info.get("picture") == "decor_puddle"]
+    assert candles and puddles
+    room = story.OBJECTS[puddles[0]]["room"]
+    scenery_room(app, room)
+    rect = main.thing_rect(puddles[0])
+    glints = 0
+    for _ in range(main.PUDDLE_GLINT_EVERY):
+        main.update(app, 0, 0)
+        picture = drawn_room(app)
+        glints += any(tuple(picture.get_at((x, rect.top + 7)))[:3] == (210, 236, 255) for x in range(rect.left, rect.right))
+    assert 4 <= glints <= 12  # now and then, briefly
+
+
+def test_without_the_small_things_nothing_moves(app, monkeypatch):
+    monkeypatch.setitem(effects.FX, "ambient", False)
+    scenery_room(app, "corridor")
+    app["fx"]["particles"].clear()
+    for _ in range(main.DRIP_EVERY * 4):
+        main.update(app, 0, 0)
+    assert app["fx"]["drips"] == [] and app["fx"]["particles"] == []
+
+
+def test_every_room_is_drawn_with_the_scenery_in_its_usual_time(app):
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for room in story.ROOMS:
+        scenery_room(app, room)
+        main.draw(app, screen)
