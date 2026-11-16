@@ -5892,6 +5892,133 @@ def draw_darkness(app, surface, state, things):
     surface.blit(layer, (0, 0))
 
 
+# --- Atmosphere: the colour of the light, and soft lights -----------------------------------
+#
+# Every room has the colour of its light, multiplied into it (effects.lightmap): cold and
+# stormy on the deck, warm wood in the cabin, amber in the galley, violet in the infirmary
+# and wherever a portal is. Around a fire or a lit generator the light turns warmer, around
+# a portal or a crystal more violet. Then soft lights are added around what shines: lanterns,
+# candles, crystals, stoves, portals, lit generators, and the light coming in through an
+# open door. All of it stays pale: a room is never darker than READABLE, so every detail can
+# still be seen (the dark rooms have their darkness for that).
+
+READABLE = 200   # the darkest the light of a room may make anything, in brightness (0 to 255)
+ROOM_AMBIENT = {
+    "deck": (214, 224, 246),          # a storm: cold and grey-blue
+    "cabin": (250, 240, 222),         # warm wood
+    "galley": (252, 236, 212),        # amber, from the stoves
+    "helm": (236, 232, 248),          # fog, and the violet of the ring
+    "east_room": (238, 238, 244),
+    "hold": (220, 226, 240),          # cool and damp
+    "infirmary": (236, 226, 250),     # pale, a little spectral
+    "crab_room": (216, 236, 236),     # the green of the sea
+    "angel_room": (246, 242, 252),    # a pale, holy light
+    "corridor": (222, 226, 240),
+    "corridor_end": (236, 228, 248),  # the portal
+    "mine": (244, 234, 220),          # earth
+}
+DEFAULT_AMBIENT = (240, 240, 240)
+# What changes the colour of the light around it: (radius, tint), found by its picture or kind.
+LOCAL_TINTS = {
+    "decor_stove": (44, (255, 232, 198)),
+    "decor_lantern": (34, (255, 234, 200)),
+    "decor_candle": (22, (255, 232, 194)),
+    "decor_crystal": (30, (238, 218, 255)),
+    "portal": (52, (234, 214, 255)),
+    "cauldron": (36, (204, 228, 255)),
+    "switch_on": (30, (255, 232, 190)),
+}
+# What shines, softly: (radius, colour, how it changes: "flame", "pulse" or "steady").
+SOFT_LIGHTS = {
+    "decor_stove": (18, (60, 34, 10), "flame"),
+    "decor_lantern": (22, (40, 30, 12), "flame"),
+    "decor_candle": (12, (46, 34, 14), "flame"),
+    "decor_crystal": (16, (54, 26, 78), "pulse"),
+    "portal": (26, (38, 18, 58), "pulse"),
+    "switch_on": (10, (40, 32, 8), "steady"),
+}
+DOOR_LIGHT = 18                  # the light that comes in through an open door: its radius...
+DOOR_LIGHT_OUTSIDE = (24, 30, 44)  # ...cold from the storm outside
+DOOR_LIGHT_INSIDE = (36, 28, 14)   # ...warm from another room
+STORM_EVERY = 470                # frames between two flashes of distant lightning on the deck
+STORM_FLASH = (12, 16, 26)       # added to the deck while it lasts
+STORM_FRAMES = (0, 1, 4, 5)      # a flash in two flickers
+
+
+def light_kind(thing):
+    """What a thing is, for the light: its picture, "portal", "cauldron" or "switch_on" (a lit generator)."""
+    if thing["kind"] == "switch":
+        return "switch_on" if thing["status"] == "on" else None
+    if thing["kind"] in ("portal", "cauldron"):
+        return thing["kind"]
+    return story.OBJECTS.get(thing["id"], {}).get("picture")
+
+
+def light_center(app, thing):
+    """Where the light of a thing comes from: the flame of a lantern (which swings), else its middle."""
+    rect = thing_rect(thing["id"])
+    if light_kind(thing) == "decor_lantern":
+        return (rect.centerx + lantern_swing(app, thing["id"])[1], rect.top + 7)
+    if light_kind(thing) == "decor_candle":
+        return (rect.left + 7, rect.top + 2)
+    return rect.center
+
+
+def ambient_of(room):
+    return ROOM_AMBIENT.get(room, DEFAULT_AMBIENT)
+
+
+def draw_atmosphere(app, surface, state, things):
+    """Multiply the room by the colour of its light, warmer or more violet around some things;
+    on the deck, now and then, distant lightning brightens everything for an instant."""
+    if not effects.FX["atmosphere"]:
+        return
+    room = state["room"]
+    layer = effects.lightmap(surface.get_size(), ambient_of(room))
+    for thing in things:
+        tint = LOCAL_TINTS.get(light_kind(thing))
+        if tint is not None:
+            effects.tint(layer, light_center(app, thing), tint[0], tint[1])
+    surface.blit(layer, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
+    if story.ROOMS[room]["outdoor"] and app["frame"] % STORM_EVERY in STORM_FRAMES:
+        surface.fill(STORM_FLASH, special_flags=pygame.BLEND_RGB_ADD)
+
+
+def light_strength(app, thing, change):
+    """How bright a light is in this frame: a flame jumps, a crystal or a portal pulses slowly."""
+    rect = thing_rect(thing["id"])
+    if change == "flame":
+        return 0.75 + 0.25 * scenery.hash01(app["frame"] // 4, rect.left * 31 + rect.top, 9)
+    if change == "pulse":
+        return effects.pulse(app["frame"], 0.05, 0.55, 1.0, rect.left * 0.3 + rect.top)
+    return 1.0
+
+
+def door_light(state, door):
+    """Where the light of an open door falls, just inside the room, and its colour (cold from the deck)."""
+    opening = door_rect(door)
+    dx, dy = TOWARD[story.DOORS[door]["side"]]
+    center = (opening.centerx - dx * (opening.width // 2 + 6), opening.centery - dy * (opening.height // 2 + 6))
+    outside = story.ROOMS[story.DOORS[door]["to"]]["outdoor"]
+    return center, DOOR_LIGHT_OUTSIDE if outside else DOOR_LIGHT_INSIDE
+
+
+def draw_soft_lights(app, surface, state, things):
+    """The soft lights of the room, added on top: around what shines, and through the open doors."""
+    if not effects.FX["atmosphere"]:
+        return
+    for thing in things:
+        if thing["kind"] == "door":
+            if thing["status"] == "open" and not story.ROOMS[state["room"]]["outdoor"]:
+                center, color = door_light(state, thing["id"])
+                effects.soft_light(surface, center, DOOR_LIGHT, color)
+            continue
+        light = SOFT_LIGHTS.get(light_kind(thing))
+        if light is not None:
+            radius, color, change = light
+            effects.soft_light(surface, light_center(app, thing), radius, color, light_strength(app, thing, change))
+
+
 def draw_lights(app, surface, things):
     """The light of the room, added on top: lanterns, crystals, the blue fire of the cauldron."""
     if not effects.FX["lights"] and not effects.FX["cauldron"]:
@@ -6485,8 +6612,10 @@ def draw_room(app, screen):
     effects.draw_particles(screen, app["fx"]["particles"])
     effects.draw_drips(screen, app["fx"])
     effects.draw_dust(screen, app["fx"], app["frame"])
+    draw_atmosphere(app, screen, state, things)  # the colour of the light in this room
     draw_darkness(app, screen, state, things)  # a dark room: dark, but for the holes of light
     draw_lights(app, screen, things)
+    draw_soft_lights(app, screen, state, things)
     # The letter of each generator, on the floor above it.
     for thing in things:
         if thing["kind"] == "switch":
@@ -7330,6 +7459,7 @@ FX = {
     "darkness": True,       # the dark rooms, lit only around lanterns, crystals, portals and the players
     "scenery": True,        # floors and walls with details, walls with depth, shading and shadows of the furniture
     "ambient": True,        # small things that move: steam, drops from the ceiling, flames, a glint on puddles
+    "atmosphere": True,     # the colour of the light in each room, and soft lights around what shines
 }
 
 # --- Timing and sizes (frames are 1/60 of a second) --------------------------------------
@@ -7960,6 +8090,90 @@ def draw_drips(surface, fx):
     """Each falling drop is a streak of two pixels."""
     for drip in fx["drips"]:
         surface.fill(DRIP_COLOR, (int(drip["x"]), int(drip["y"]) - 1, 1, 2))
+
+
+# --- Atmosphere: the colour of the light in a room, and soft lights -----------------------------
+#
+# Two layers over a room, the way old consoles did it with few colours:
+# - a lightmap, multiplied into the room (BLEND_RGB_MULT): one colour for the whole room
+#   (white changes nothing, a pale blue makes it cold), and around some things a disc
+#   of another colour (warmer near a fire, violet near a portal);
+# - soft lights, added on top (BLEND_RGB_ADD): bright in the middle, then fainter in
+#   hard steps, with a dither between the steps so the edge is pixelated, not blurred.
+
+_lightmaps = {}   # size -> the lightmap for rooms of that size, made once and filled every frame
+_tints = {}       # (radius, colour) -> a disc of tint, fading to white at its edge
+_soft = {}        # (radius, colour) -> a soft light
+SOFT_LEVELS = 8   # how many strengths a soft light can have, as it flickers or pulses
+
+
+def lightmap(size, color):
+    """A lightmap of this size, all of one colour: tint discs go on it, then it is multiplied into the room."""
+    if size not in _lightmaps:
+        _lightmaps[size] = pygame.Surface(size)
+    layer = _lightmaps[size]
+    layer.fill(color)
+    return layer
+
+
+def stepped(distance, steps, x, y):
+    """How much of a light (or a tint) there is at `distance` from its middle (0 to 1, past 1 nothing),
+    in `steps` hard steps, with every other pixel taking the next step down where two steps meet."""
+    if distance >= 1:
+        return 0.0
+    level = (1 - distance) * steps
+    band = math.ceil(level)
+    if band - level > 0.5 and (x + y) % 2 == 0:
+        band -= 1  # half way between two steps: a dither
+    return max(band, 0) / steps
+
+
+def tint_disc(radius, color, steps=4):
+    """A disc of a tint, for a lightmap: `color` in the middle, white (no change) at its edge."""
+    key = (radius, color)
+    if key not in _tints:
+        size = radius * 2 + 1
+        picture = pygame.Surface((size, size))
+        picture.fill((255, 255, 255))
+        for x in range(size):
+            for y in range(size):
+                share = stepped(math.hypot(x - radius, y - radius) / max(radius, 1), steps, x, y)
+                if share:
+                    picture.set_at((x, y), tuple(int(255 + (c - 255) * share) for c in color))
+        _tints[key] = picture
+    return _tints[key]
+
+
+def tint(layer, center, radius, color):
+    """Lay a disc of a tint on a lightmap: where it falls, the lightmap is multiplied by it."""
+    disc = tint_disc(radius, color)
+    layer.blit(disc, (round(center[0]) - radius, round(center[1]) - radius), special_flags=pygame.BLEND_RGB_MULT)
+
+
+def soft_light_picture(radius, color):
+    """A soft light: `color` in the middle, fainter in four hard steps out to its edge, dithered between them."""
+    key = (radius, color)
+    if key not in _soft:
+        size = radius * 2 + 1
+        picture = pygame.Surface((size, size))
+        picture.fill((0, 0, 0))
+        for x in range(size):
+            for y in range(size):
+                share = stepped(math.hypot(x - radius, y - radius) / max(radius, 1), 4, x, y)
+                if share:
+                    picture.set_at((x, y), tuple(int(c * share * share) for c in color))
+        _soft[key] = picture
+    return _soft[key]
+
+
+def soft_light(surface, center, radius, color, strength=1.0):
+    """Add a soft light to the surface. `strength` from 0 to 1 dims it (for flickering and pulsing)."""
+    strength = round(max(0.0, min(1.0, strength)) * SOFT_LEVELS) / SOFT_LEVELS  # a few levels: few pictures to keep
+    if strength <= 0 or radius < 1:
+        return
+    dimmed = tuple(int(c * strength) for c in color)
+    picture = soft_light_picture(radius, dimmed)
+    surface.blit(picture, (round(center[0]) - radius, round(center[1]) - radius), special_flags=pygame.BLEND_RGB_ADD)
 
 
 ================================================================================
@@ -10955,6 +11169,7 @@ def play(name):
 
 import pytest
 
+import effects
 import main
 import save
 
@@ -10977,6 +11192,14 @@ def no_opening_lightning(monkeypatch):
     Its own tests turn it back on.
     """
     monkeypatch.setattr(main, "LIGHTNING_FRAMES", 0)
+
+
+@pytest.fixture(autouse=True)
+def no_atmosphere(monkeypatch):
+    """The tests check the exact colours of what is drawn, so the colour of the light of each room
+    (which shifts them a little) is off. Its own tests turn it back on.
+    """
+    monkeypatch.setitem(effects.FX, "atmosphere", False)
 
 
 ================================================================================
@@ -16576,6 +16799,153 @@ def test_every_room_is_drawn_with_the_scenery_in_its_usual_time(app):
         main.draw(app, screen)
 
 
+# --- Atmosphere: the colour of the light in each room, and soft lights ---
+
+
+def light_of(app, monkeypatch, frame=1):
+    """The lightmap of the room the player is in, as it multiplies a white room (the storm flash aside)."""
+    monkeypatch.setitem(effects.FX, "atmosphere", True)
+    app["frame"] = frame
+    state = main.view(app)
+    surface = main.room_surface(state["room"]).copy()
+    surface.fill((255, 255, 255))
+    main.draw_atmosphere(app, surface, state, engine.things_here(state))
+    return surface
+
+
+def average(surface, area=None):
+    area = area or surface.get_rect()
+    picture = pygame.transform.average_color(surface, area)
+    return picture[:3]
+
+
+@pytest.mark.parametrize("room", list(story.ROOMS))
+def test_the_light_of_a_room_never_hides_anything(app, monkeypatch, room):
+    scenery_room(app, room)
+    light = light_of(app, monkeypatch)
+    darkest = min(
+        scenery.brightness(light.get_at((x, y)))
+        for x in range(light.get_width())
+        for y in range(main.HUD_HEIGHT, light.get_height())
+    )
+    assert darkest >= main.READABLE
+
+
+def test_every_room_has_the_colour_of_its_light(app, monkeypatch):
+    for room in story.ROOMS:
+        scenery_room(app, room)
+        assert average(light_of(app, monkeypatch)) != (255, 255, 255)
+    r, g, b = main.ambient_of("deck")
+    assert b > g > r  # a storm: cold
+    r, g, b = main.ambient_of("galley")
+    assert r > g > b  # amber, from the stoves
+    r, g, b = main.ambient_of("infirmary")
+    assert b > r > g  # violet
+
+
+def test_the_light_turns_warm_by_the_stoves_and_violet_by_the_portal(app, monkeypatch):
+    scenery_room(app, "galley")
+    light = light_of(app, monkeypatch)
+    stove = next(name for name, info in story.OBJECTS.items() if info["room"] == "galley" and info.get("picture") == "decor_stove")
+    near = light.get_at(main.thing_rect(stove).center)
+    far = light.get_at((light.get_width() - 20, light.get_height() - 20))
+    assert near.b < far.b and near.r >= far.r - 4  # warmer: less blue
+    scenery_room(app, "corridor_end")
+    light = light_of(app, monkeypatch)
+    portal = next(name for name, info in story.OBJECTS.items() if info["room"] == "corridor_end" and info["kind"] == "portal")
+    near = light.get_at(main.thing_rect(portal).center)
+    far = light.get_at((light.get_width() - 12, light.get_height() - 12))
+    assert near.g < far.g and near.b >= far.b  # more violet: less green, as much blue
+
+
+def test_now_and_then_distant_lightning_brightens_the_deck(app, monkeypatch):
+    scenery_room(app, "deck")
+    calm = average(light_of(app, monkeypatch, frame=main.STORM_EVERY * 3 + 2))
+    flash = average(light_of(app, monkeypatch, frame=main.STORM_EVERY * 3))
+    assert all(f > c for f, c in zip(flash, calm))
+    scenery_room(app, "cabin")
+    assert average(light_of(app, monkeypatch, frame=main.STORM_EVERY * 3)) == average(light_of(app, monkeypatch, frame=main.STORM_EVERY * 3 + 2))
+
+
+def soft_lights_of(app, monkeypatch, frame=1):
+    """Only the soft lights of the room, on black."""
+    monkeypatch.setitem(effects.FX, "atmosphere", True)
+    app["frame"] = frame
+    state = main.view(app)
+    surface = main.room_surface(state["room"]).copy()
+    surface.fill((0, 0, 0))
+    main.draw_soft_lights(app, surface, state, engine.things_here(state))
+    return surface
+
+
+def test_lanterns_candles_crystals_and_stoves_shine_softly(app, monkeypatch):
+    for picture in ("decor_lantern", "decor_candle", "decor_crystal", "decor_stove"):
+        thing = next(name for name, info in story.OBJECTS.items() if info.get("picture") == picture)
+        scenery_room(app, story.OBJECTS[thing]["room"])
+        light = soft_lights_of(app, monkeypatch)
+        x, y = main.light_center(app, {"id": thing, "kind": "decor", "status": "present"})
+        radius = main.SOFT_LIGHTS[picture][0]
+        middle = scenery.brightness(light.get_at((x, y + 3)))
+        assert middle > 0, picture
+        assert scenery.brightness(light.get_at((x, y + radius - 2))) < middle, picture  # fainter towards its edge
+
+
+def test_the_soft_lights_are_pale_so_nothing_is_washed_out(app, monkeypatch):
+    for room in story.ROOMS:
+        scenery_room(app, room)
+        light = soft_lights_of(app, monkeypatch)
+        brightest = max(
+            max(light.get_at((x, y))[:3]) for x in range(0, light.get_width(), 2) for y in range(0, light.get_height(), 2)
+        )
+        assert brightest <= 120, room
+
+
+def test_flames_flicker_and_crystals_pulse(app, monkeypatch):
+    for picture in ("decor_candle", "decor_crystal"):
+        thing = next(name for name, info in story.OBJECTS.items() if info.get("picture") == picture)
+        scenery_room(app, story.OBJECTS[thing]["room"])
+        change = main.SOFT_LIGHTS[picture][2]
+        strengths = {round(main.light_strength(app | {"frame": frame}, {"id": thing}, change), 2) for frame in range(0, 200, 5)}
+        assert len(strengths) >= 3, picture
+        assert all(0.5 <= s <= 1.0 for s in strengths)
+
+
+def test_light_comes_in_through_an_open_door_and_not_a_closed_one(app, monkeypatch):
+    scenery_room(app, "cabin")
+    light = soft_lights_of(app, monkeypatch)
+    door = "cabin_to_deck"
+    assert engine.door_status(main.view(app), door) == "open"
+    center, color = main.door_light(main.view(app), door)
+    assert color == main.DOOR_LIGHT_OUTSIDE  # the deck is outside: a cold light
+    assert scenery.brightness(light.get_at(center)) > 0
+    assert not main.door_rect(door).collidepoint(center)  # just inside the room, not in the doorway
+    scenery_room(app, "deck", actions=[])
+    light = soft_lights_of(app, monkeypatch)
+    locked = "deck_to_crab"
+    assert engine.door_status(main.view(app), locked) != "open"
+    center, _ = main.door_light(main.view(app), locked)
+    assert light.get_at(center)[:3] == (0, 0, 0)
+
+
+def test_without_the_atmosphere_the_room_is_drawn_as_before(app, monkeypatch):
+    scenery_room(app, "galley")
+    before = pygame.image.tobytes(drawn_room(app), "RGB")
+    monkeypatch.setitem(effects.FX, "atmosphere", True)
+    assert pygame.image.tobytes(drawn_room(app), "RGB") != before
+    monkeypatch.setitem(effects.FX, "atmosphere", False)
+    assert pygame.image.tobytes(drawn_room(app), "RGB") == before
+
+
+def test_the_atmosphere_keeps_the_room_almost_as_bright(app, monkeypatch):
+    for room in ("deck", "galley", "infirmary", "cabin"):
+        scenery_room(app, room)
+        plain = scenery.brightness(average(drawn_room(app)))
+        monkeypatch.setitem(effects.FX, "atmosphere", True)
+        lit = scenery.brightness(average(drawn_room(app)))
+        monkeypatch.setitem(effects.FX, "atmosphere", False)
+        assert lit >= 0.85 * plain, room
+
+
 ================================================================================
 # FILE: plot_twist/test_effects.py
 ================================================================================
@@ -17054,6 +17424,62 @@ def test_the_corners_of_a_cone():
 
 def test_darkness_has_its_switch():
     assert effects.FX["darkness"] is True
+
+
+# --- Atmosphere: lightmaps, tints and soft lights ---
+
+
+def test_a_light_fades_in_hard_steps_with_a_dither_between_them():
+    assert effects.stepped(0, 4, 0, 0) == 1.0
+    assert effects.stepped(1, 4, 0, 0) == 0.0 and effects.stepped(1.5, 4, 3, 3) == 0.0
+    values = {effects.stepped(d / 100, 4, 0, 1) for d in range(100)}
+    assert values <= {0.0, 0.25, 0.5, 0.75, 1.0}
+    # just inside a step, every other pixel takes the next step down
+    assert effects.stepped(0.42, 4, 0, 0) != effects.stepped(0.42, 4, 0, 1)
+    assert effects.stepped(0.42, 4, 0, 0) == effects.stepped(0.42, 4, 1, 1)
+    assert effects.stepped(0.30, 4, 0, 0) == effects.stepped(0.30, 4, 0, 1)  # inside a step: no dither
+
+
+def test_a_lightmap_is_made_once_for_each_size_and_filled_again():
+    first = effects.lightmap((40, 30), (200, 210, 220))
+    second = effects.lightmap((40, 30), (250, 240, 230))
+    assert first is second
+    assert tuple(second.get_at((5, 5)))[:3] == (250, 240, 230)
+
+
+def test_a_tint_is_its_colour_in_the_middle_and_nothing_at_its_edge():
+    disc = effects.tint_disc(10, (200, 180, 255))
+    assert tuple(disc.get_at((10, 10)))[:3] == (200, 180, 255)
+    assert tuple(disc.get_at((0, 0)))[:3] == (255, 255, 255)
+    assert tuple(disc.get_at((10, 0)))[:3] == (255, 255, 255)
+    layer = effects.lightmap((60, 60), (240, 240, 240))
+    effects.tint(layer, (30, 30), 10, (200, 180, 255))
+    middle = layer.get_at((30, 30))
+    assert middle.g < middle.b and tuple(layer.get_at((2, 2)))[:3] == (240, 240, 240)
+
+
+def test_a_soft_light_is_brightest_in_the_middle_and_dithered_at_its_edge():
+    picture = effects.soft_light_picture(12, (80, 60, 20))
+    row = [picture.get_at((x, 12)).r for x in range(12, 25)]
+    assert row[0] == 80 and row[-1] == 0
+    assert all(a >= b for a, b in zip(row, row[1:]))
+    edge = {tuple(picture.get_at((x, y)))[:3] for x in range(25) for y in range(25) if 0.6 < math.hypot(x - 12, y - 12) / 12 < 0.7}
+    assert len(edge) >= 2  # two steps, pixel by pixel
+    surface = pygame.Surface((40, 40))
+    surface.fill((100, 100, 100))
+    effects.soft_light(surface, (20, 20), 12, (80, 60, 20))
+    assert tuple(surface.get_at((20, 20)))[:3] == (180, 160, 120)
+    assert tuple(surface.get_at((1, 1)))[:3] == (100, 100, 100)
+
+
+def test_a_soft_light_has_only_a_few_strengths_to_keep():
+    effects._soft.clear()
+    surface = pygame.Surface((30, 30))
+    for step in range(100):
+        effects.soft_light(surface, (15, 15), 6, (64, 64, 64), step / 100)
+    assert len(effects._soft) <= effects.SOFT_LEVELS
+    effects.soft_light(surface, (15, 15), 6, (64, 64, 64), 0)
+    assert len(effects._soft) <= effects.SOFT_LEVELS
 
 
 ================================================================================

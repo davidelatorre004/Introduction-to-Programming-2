@@ -2,9 +2,21 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v38](versions/v38.md) - Floors, walls and furniture with detail (2026-11-16)
+## [v39](versions/v39.md) - The colour of the light in every room (2026-11-16)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- Every room has the colour of its light, multiplied into it (a lightmap with BLEND_RGB_MULT): cold and stormy on the deck, warm wood in the cabin, amber in the galley, violet and a little spectral in the infirmary and by the portals, cool and damp in the hold, the green of the sea in the crab's room, earth in the mine.
+- The light changes colour around what it comes from: warmer around stoves, lanterns, candles and lit generators, more violet around portals and crystals, bluer around the cauldron. On the deck, now and then, distant lightning brightens everything for an instant.
+- Soft lights are added around what shines (BLEND_RGB_ADD): lanterns, candles, crystals, stoves, portals and lit generators. They fade in four hard steps, dithered pixel by pixel where two steps meet, like the rest of the pixel art. Flames flicker, crystals and portals pulse slowly.
+- Light comes in through every open door, just inside the room: cold if the door leads to the deck, warm if it leads to another room. Closed doors let none in.
+- Everything stays readable: the light of a room never makes anything darker than 200 out of 255 in brightness, a room keeps at least 85% of its brightness, and the soft lights stay pale. The contact shadows under walls and furniture of the previous version stay as they were.
+- New tools in effects.py (lightmap, tint, soft_light) and a switch in effects.FX, "atmosphere": off, the rooms look as before. A frame costs less than half a millisecond more.
+- Looked at for reference: the examples of Mekire (pygame-samples), which shade a picture by laying a mask over a colour.
+
+## [v38](versions/v38.md) - Floors, walls and furniture with detail (2026-11-16)
+
+In commit [`7dd2b3a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/7dd2b3a3ada62f45de4eaf219e482e57800ff74d/plot_twist).
 
 - Floors no longer repeat the same tile: each room's floor is built from its material (a new "floor" in story.ROOMS: wood, stone, tiles or earth) with details that depend on where they are. Wood: planks of different lengths whose ends never line up, grain, knots, nails at the ends, some planks darker (dithered) or worn lighter. Stone: slabs a little darker or lighter, chips and cracks. Earth: pebbles lit from the top left, cracks. Polished tiles: a few hairlines.
 - Damp rooms (a new "damp": the hold, the corridor, its far end, the mine) get stains of damp, cut from smooth noise into hard bands, dithered where they start; water drips from their ceilings and splashes.

@@ -2,6 +2,7 @@
 
 import pytest
 
+import effects
 import main
 import save
 
@@ -24,3 +25,11 @@ def no_opening_lightning(monkeypatch):
     Its own tests turn it back on.
     """
     monkeypatch.setattr(main, "LIGHTNING_FRAMES", 0)
+
+
+@pytest.fixture(autouse=True)
+def no_atmosphere(monkeypatch):
+    """The tests check the exact colours of what is drawn, so the colour of the light of each room
+    (which shifts them a little) is off. Its own tests turn it back on.
+    """
+    monkeypatch.setitem(effects.FX, "atmosphere", False)
