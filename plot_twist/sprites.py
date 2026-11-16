@@ -59,62 +59,81 @@ PALETTE = {
     "v": (58, 86, 132),    # the face of a wave
 }
 
-# The player's head and body are the same in the three frames of a direction:
-# only the legs change.
+# The figure every character is made from: 16 x 24, three times as tall as it is
+# wide at the feet. The head, the body and the arms (rows 0 to 20) are the same in
+# the three pictures of a direction; only the legs (rows 21 to 23) change. Rows 0 to
+# 4 are empty, for what a character wears on its head. In the game the feet stand
+# on the player's body (a 12 x 12 square: what bumps into walls); the rest of the
+# picture rises above it, over whatever is behind.
+FIGURE_HEIGHT = 24
+LEGS_TOP = 21      # the first row of the legs: what stays on the floor while the rest breathes
+EMPTY = "................"
 PLAYER_DOWN = [
-    "................",
+    EMPTY, EMPTY, EMPTY, EMPTY, EMPTY,
     "......kkkk......",
     "....kkhhhhkk....",
     "...khhhhhhhhk...",
-    "...khhhhhhhhk...",
-    "...khzzzzzzhk...",
-    "...kzkzzzzkzk...",
-    "...kzzzzzzzzk...",
-    "....kzzZZzzk....",
+    "..khhhhhhhhhhk..",
+    "..khhzzzzzzhhk..",
+    "..khzzzzzzzzhk..",
+    "..kzzwkzzwkzzk..",  # the eyes: a glint, and the pupil
+    "..kzzkkzzkkzzk..",
+    "..kZzzzzzzzzZk..",
+    "...kZzzRRzzZk...",  # the mouth
+    "....kkZZZZkk....",
     "...kkggggggkk...",
-    "..kzkggGGggkzk..",
+    "..kzkgggGggkzk..",
+    "..kzkggGgggkzk..",
     "..kzkggggggkzk..",
     "...kkjjjjjjkk...",
 ]
 PLAYER_UP = [
-    "................",
+    EMPTY, EMPTY, EMPTY, EMPTY, EMPTY,
     "......kkkk......",
     "....kkhhhhkk....",
     "...khhhhhhhhk...",
-    "...khhhhhhhhk...",
-    "...khhhhhhhhk...",
-    "...khhhhhhhhk...",
+    "..khhhhhhhhhhk..",
+    "..khhhhhhhhhhk..",
+    "..khhhhhhhhhhk..",
+    "..khhhhhhhhhhk..",
+    "..khhhhhhhhhhk..",
+    "..kZhhhhhhhhZk..",
     "...kZhhhhhhZk...",
-    "....kZzzzzZk....",
+    "....kkZZZZkk....",
     "...kkggggggkk...",
     "..kzkggggggkzk..",
-    "..kzkggGGggkzk..",
+    "..kzkgggGggkzk..",
+    "..kzkggggggkzk..",
     "...kkjjjjjjkk...",
 ]
 PLAYER_RIGHT = [
-    "................",
+    EMPTY, EMPTY, EMPTY, EMPTY, EMPTY,
     ".....kkkkk......",
     "....khhhhhkk....",
     "...khhhhhhhhk...",
-    "...khhhhhzzzk...",
-    "...khhhzzzzzk...",
-    "...khhzzzzkzk...",
-    "...kkhzzzzzzk...",
-    "....kkzzzZzk....",
+    "..khhhhhhhhhhk..",
+    "..khhhhhhzzzzk..",
+    "..khhhhzzzzzzk..",
+    "..khhhzzzzwkzk..",
+    "..khhhzzzzkkzk..",
+    "..kkhhzzzzzzzk..",
+    "...kkhZzzzRzk...",
+    "....kkZZZZkk....",
     "....kkggggkk....",
     "....kgggkzzk....",
+    "....kgggGkzk....",
     "....kggggGk.....",
     "....kjjjjjk.....",
 ]
 LEGS_FRONT = [
-    ["....kjjkkjjk....", "....kkk..kkk....", "................"],  # standing
-    ["....kjjkkkkk....", "....kkk.........", "................"],  # left foot down
-    ["....kkkkkjjk....", ".........kkk....", "................"],  # right foot down
+    ["....kjjkkjjk....", "....kjjkkjjk....", "...kkkk..kkkk..."],  # standing
+    ["....kjjkkjjk....", "....kjjk.kkk....", "...kkkk........."],  # left foot down
+    ["....kjjkkjjk....", "....kkk.kjjk....", ".........kkkk..."],  # right foot down
 ]
 LEGS_SIDE = [
-    ["....kjjkjjk.....", "....kkk.kkk.....", "................"],  # standing
-    ["...kjjk.kjjk....", "...kkk...kkk....", "................"],  # a long step
-    ["....kjjkjjk.....", "....kkk.kkk.....", "................"],  # feet together again
+    ["....kjjkjjk.....", "....kjjkjjk.....", "....kkkkkkkk...."],  # standing
+    ["...kjjk.kjjk....", "..kjjk...kjjk...", "..kkkk...kkkk..."],  # a long step
+    ["....kjjkjjk.....", "...kjjk.kjjk....", "...kkkk.kkkk...."],  # a short step
 ]
 
 SPRITES = {
@@ -1546,58 +1565,123 @@ SPRITES = {
     ],
 }
 
-# The four characters. Each is the figure above (PLAYER_DOWN, PLAYER_UP, PLAYER_RIGHT and
-# the legs) in other colors, with some rows drawn again: a hat, a cap, a ghost's hem.
-# "colors" says which letter of the figure becomes which; "rows" gives, for a direction,
-# the rows that replace the figure's (by their number from the top); "legs" replaces
-# the three pictures of the legs, seen from the front and from the side.
-WIZARD_HAT = {0: ".......kk.......", 1: "......kPPk......", 2: ".....kPPyPk.....", 3: "....kPPPPPPk....",
-              4: "..kkkPPPPPPkkk.."}
+# The four characters. Each is the figure above in its own colors ("colors" become
+# "become"), with patches drawn over it: for each direction, rows by their number
+# from the top, where "." keeps what is there and any other letter paints over it.
+# "steps" adds patches for each of the three pictures of a walk (a scarf that flies);
+# "legs" replaces the legs, seen from the front and from the side (a ghost's hem).
+WIZARD_HAT_FRONT = {
+    0: ".......kk.......",
+    1: "......kPPk......",
+    2: "......kPyk......",  # a star
+    3: ".....kPPPPk.....",
+    4: ".....kPPPPk.....",
+    5: "....kPPPPPPk....",
+    6: "....kPPpPPPk....",
+    7: "..kkkkkkkkkkkk..",
+    8: ".kPPPPPPPPPPPPk.",  # the brim
+}
+WIZARD_HAT_SIDE = {
+    0: "....kk..........",
+    1: "....kPPk........",  # the tip bends back
+    2: ".....kPyk.......",
+    3: ".....kPPPk......",
+    4: "....kPPPPPk.....",
+    5: "....kPPPPPPk....",
+    6: "...kPPPpPPPk....",
+    7: ".kkkkkkkkkkkkk..",
+    8: "kPPPPPPPPPPPPPk.",
+}
+NURSE_CAP = {
+    3: "....kkkkkkkk....",
+    4: "...kwwwwwwwwk...",
+    5: "...kwwwrrwwwk...",  # a red cross
+    6: "...kwwrrrrwwk...",
+    7: "...kwwwrrwwwk...",
+    8: "..kkkkkkkkkkkk..",
+}
+NURSE_CAP_BACK = {row: line.replace("r", "w") for row, line in NURSE_CAP.items()}
+NURSE_CAP_SIDE = {
+    3: "....kkkkkkk.....",
+    4: "...kwwwwwwwk....",
+    5: "...kwwwwwrwk....",
+    6: "...kwwwwrrrk....",
+    7: "...kwwwwwrwk....",
+    8: "..kkkkkkkkkkk...",
+}
 GHOST_HEM_FRONT = [
-    ["...kwwwwwwwwk...", "...kwkkwwkkwk...", "....k..kk..k...."],
-    ["...kwwwwwwwwk...", "...kkwwkkwwkk...", "......kk..kk...."],
-    ["...kwwwwwwwwk...", "...kwwkkwwkkk...", "....kk..kk......"],
+    ["..kwwwwwwwwwwk..", "..kwwfwwwfwwwk..", "..k.kk.kk.kk.k.."],
+    ["..kwwwwwwwwwwk..", "..kwwwfwwwfwwk..", "..kk.kk.kk.kk..."],
+    ["..kwwwwwwwwwwk..", "..kwfwwwfwwwfk..", "...kk.kk.kk.kk.."],
 ]
 GHOST_HEM_SIDE = [
-    ["....kwwwwwk.....", "....kwkwkwk.....", ".....k.k.k......"],
-    ["....kwwwwwk.....", "....kkwkwkk.....", "......k.k......."],
-    ["....kwwwwwk.....", "....kwkwkwk.....", ".....k.k.k......"],
+    ["...kwwwwwwk.....", "...kwfwwfwk.....", "...k.kk.kk......"],
+    ["...kwwwwwwk.....", "..kwwfwwfwk.....", "..kk.kk.kk......"],
+    ["...kwwwwwwk.....", "....kwwfwwk.....", "....kk.kk.k....."],
+]
+FLASH_SCARF_SIDE = [  # the end of the scarf, behind: hanging when still, flying while running
+    {16: "...o............", 17: "...o............", 18: "..oo............"},
+    {15: ".oo.............", 16: "ooo............."},
+    {15: "oo..............", 16: ".ooo............"},
 ]
 CHARACTER_LOOKS = {
-    # A pointed hat with a star, and a long purple robe.
+    # A tall pointed hat with a star, a white beard, and a long purple robe down to the shoes.
     "wizard": {"colors": "gGj", "become": "pPP",
-               "rows": {"down": WIZARD_HAT, "up": WIZARD_HAT, "right": WIZARD_HAT}},
-    # A white uniform, and a white cap with a red cross.
+               "patches": {"down": WIZARD_HAT_FRONT | {
+                               13: "..kwzzzzzzzzwk..", 14: "...kwwwRRwwwk...", 15: "....kwwwwwwk....",
+                               16: "....kwwlwwk.....", 17: "......kwwk......"},
+                           "up": WIZARD_HAT_FRONT,
+                           "right": WIZARD_HAT_SIDE | {
+                               13: "........wwwww...", 14: ".......kwwwwk...", 15: "........kwwk....",
+                               16: ".........kk....."}}},
+    # A white cap and uniform with red crosses, and her hair in a bun at the back.
     "nurse": {"colors": "gGj", "become": "wlw",
-              "rows": {"down": {2: "....kkwwwwkk....", 3: "...khwwrrwwhk..."},
-                       "up": {2: "....kkwwwwkk....", 3: "...khwwwwwwhk..."},
-                       "right": {2: "....kwwwwwkk....", 3: "...khwwwwrwhk..."}}},
-    # All white and pale blue, with a wavy hem instead of legs.
-    "ghost": {"colors": "hzZgGj", "become": "wwfwwf",
-              "rows": {"down": {6: "...kwwkwwkwwk...", 7: "...kwwkwwkwwk...", 8: "....kwwwwwwk...."},
-                       "right": {5: "...kwwwwwwkwk...", 6: "...kwwwwwwkwk...", 8: "....kkwwwwwk...."}},
+              "patches": {"down": NURSE_CAP | {17: "........r.......", 18: ".......rrr......",
+                                                        19: "........r......."},
+                          "up": NURSE_CAP_BACK | {9: ".....khhhk......", 10: ".....khhhk......"},
+                          "right": NURSE_CAP_SIDE | {9: ".khk............", 10: ".khk............",
+                                                            18: ".......r........"}}},
+    # All white and pale blue, with big hollow eyes, a round mouth and a wavy hem instead of legs.
+    # (main.py adds a faint glow around it: its aura.)
+    "ghost": {"colors": "hzZgGjR", "become": "wwfwwfk",
+              "patches": {"down": {11: "..kwwkkwwkkwwk..", 12: "..kwwkkwwkkwwk..", 14: "...kfwwkkwwfk..."},
+                          "right": {11: "..kwwwwwwwkkwk..", 12: "..kwwwwwwwkkwk..", 14: "...kkwfwwwkwk..."}},
               "legs": {"front": GHOST_HEM_FRONT, "side": GHOST_HEM_SIDE}},
-    # A red suit and cowl, with a yellow bolt on the chest.
-    "flash": {"colors": "hgGj", "become": "rryR", "rows": {}},
+    # A red suit and cowl with lightning wings at the ears, a bolt on the chest, a gold belt,
+    # and an orange scarf whose end flies behind while running.
+    "flash": {"colors": "hgGj", "become": "rrRR",
+              "patches": {"down": {9: ".y............y.", 10: "y..............y", 11: ".y............y.",
+                                   15: ".....oooooo.....", 16: "...oo...........", 17: "........y.......",
+                                   18: ".......yy.......", 19: ".......y........", 20: ".....yyyyyy....."},
+                          "up": {15: ".....oooooo.....", 16: "......oo........", 17: "......oo........",
+                                 18: ".......o........", 20: ".....yyyyyy....."},
+                          "right": {9: "...y............", 10: "..y.............", 11: "...y............",
+                                    15: "....oooooo......", 17: "......y.........", 18: ".....yy.........",
+                                    20: ".....yyyyy......"}},
+              "steps": {"right": FLASH_SCARF_SIDE}},
 }
 
 
-def _dress(rows, look, direction):
-    """The rows of the figure, in the colors of a character and with its own rows drawn again."""
-    table = str.maketrans(look["colors"], look["become"])
-    again = look["rows"].get(direction, {})
-    return [again.get(number, row.translate(table)) for number, row in enumerate(rows)]
+def _patch(rows, patches):
+    """Paint patches over rows: in a patch "." keeps the letter below, any other letter replaces it."""
+    result = list(rows)
+    for number, patch in patches.items():
+        result[number] = "".join(old if new == "." else new for old, new in zip(result[number], patch))
+    return result
 
 
 for _character, _look in CHARACTER_LOOKS.items():
+    _table = str.maketrans(_look["colors"], _look["become"])
     _legs = _look.get("legs", {})
     for _direction, _body, _steps in (("down", PLAYER_DOWN, _legs.get("front", LEGS_FRONT)),
                                       ("up", PLAYER_UP, _legs.get("front", LEGS_FRONT)),
                                       ("right", PLAYER_RIGHT, _legs.get("side", LEGS_SIDE))):
         for _step in range(3):
-            _picture = _dress(_body, _look, _direction)
-            _hem = _steps[_step] if "legs" in _look else _dress(_steps[_step], dict(_look, rows={}), _direction)
-            SPRITES[f"{_character}_{_direction}_{_step}"] = _picture + _hem
+            _hem = _steps[_step] if "legs" in _look else [row.translate(_table) for row in _steps[_step]]
+            _picture = [row.translate(_table) for row in _body] + _hem
+            _picture = _patch(_picture, _look["patches"].get(_direction, {}))
+            _picture = _patch(_picture, _look.get("steps", {}).get(_direction, [{}, {}, {}])[_step])
+            SPRITES[f"{_character}_{_direction}_{_step}"] = _picture
 
 # Some rooms reuse the wood of the cabin and the planks of the hold.
 SPRITES["floor_galley"] = SPRITES["floor_cabin"]

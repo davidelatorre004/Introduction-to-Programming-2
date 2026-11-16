@@ -3004,19 +3004,80 @@ def player_picture(app, player):
     return sprites.image(character + "_" + direction + "_" + str(step), flip=fx < 0)
 
 
+# --- How a character stands: its shadow, its breath, its steps -----------------------------
+#
+# The picture of a character (16 x 24) is taller than its body (the 12 x 12 square that
+# bumps into things): it stands with its feet on the body's bottom edge and rises
+# above it. The room draws everything that stands from the back to the front by where
+# its feet are (see draw_room), so the head of a character covers what is behind it,
+# and what stands in front covers the character.
+
+SHADOW_SIZE = (14, 4)        # the oval shadow under the feet of a character: a little wider than them
+DOWNED_SHADOW_SIZE = (20, 5)  # ...and under a character lying on the floor
+SHADOW_DARKNESS = 90         # how dark it is, from 0 to 255: the floor shows through
+BREATH_FRAMES = 80           # a breath, in and out, while a character stands still
+BREATH_OUT = 34              # ...of which these frames breathing out: the body sinks one pixel
+GHOST_AURA = 11              # the radius of the faint glow around the ghost
+_shadows = {}
+
+
+def shadow_picture(size):
+    """A dark oval, see-through: made once for each size."""
+    if size not in _shadows:
+        picture = pygame.Surface(size, pygame.SRCALPHA)
+        pygame.draw.ellipse(picture, (0, 0, 0, SHADOW_DARKNESS), picture.get_rect())
+        _shadows[size] = picture
+    return _shadows[size]
+
+
+def breathing_out(app, player):
+    """True while a character standing still breathes out: their body sinks one pixel onto their legs.
+
+    Each player breathes in their own time, so two players standing together do not move together.
+    """
+    if player["moving"]:
+        return False
+    return (app["frame"] + 29 * player_number(app, player)) % BREATH_FRAMES >= BREATH_FRAMES - BREATH_OUT
+
+
+def stride_rise(player):
+    """How far a walking character rises (-1 pixel) or not (0): up at every stride, down between them."""
+    if not player["moving"]:
+        return 0
+    return -1 if (player["walk"] // (WALK_STEP_FRAMES // 2)) % 2 == 1 else 0
+
+
+def draw_character(screen, picture, feet, sink, rise):
+    """Draw a character's picture standing at `feet` (the middle of its bottom edge): the legs where
+    they are, the rest `sink` pixels lower (breathing out), all of it `rise` pixels higher (a stride)."""
+    place = picture.get_rect(midbottom=(feet[0], feet[1] + rise))
+    legs = pygame.Rect(0, sprites.LEGS_TOP, picture.get_width(), picture.get_height() - sprites.LEGS_TOP)
+    screen.blit(picture, (place.x, place.y + sprites.LEGS_TOP), legs)
+    above = pygame.Rect(0, 0, picture.get_width(), sprites.LEGS_TOP)
+    screen.blit(picture, (place.x, place.y + sink), above)
+
+
 def draw_player(app, screen, player):
     body = player_rect(player["pos"])
+    number = player_number(app, player)
     picture = player_picture(app, player)
-    if picture is not None and player_number(app, player) in app["hidden"]:
+    feet = (body.centerx, body.bottom + 1)
+    if picture is not None and number in app["hidden"]:
         picture = picture.copy()
         picture.set_alpha(110)  # hidden from the crab: half there
-    if picture is not None and player_number(app, player) in app["downed"]:
+    if picture is not None and number in app["downed"]:
+        shadow = shadow_picture(DOWNED_SHADOW_SIZE)
+        screen.blit(shadow, shadow.get_rect(center=(feet[0], feet[1] - 2)))
         lying = pygame.transform.rotate(picture, 90)  # knocked down by the crab: on the floor
-        screen.blit(lying, lying.get_rect(midbottom=(body.centerx, body.bottom + 1)))
+        screen.blit(lying, lying.get_rect(midbottom=feet))
         return
     if picture is not None:
-        # The sprite is taller than the body: it stands on it, feet on the bottom edge.
-        screen.blit(picture, picture.get_rect(midbottom=(body.centerx, body.bottom + 1)))
+        shadow = shadow_picture(SHADOW_SIZE)
+        screen.blit(shadow, shadow.get_rect(center=(feet[0], feet[1] - 2)))  # on the floor: it does not bob
+        if player_character(app, player) == "ghost" and effects.FX["lights"]:
+            effects.glow(screen, (body.centerx, body.bottom - 9), GHOST_AURA, (36, 54, 70),
+                         effects.pulse(app["frame"], 0.06, 0.45, 1.0, number))  # its aura
+        draw_character(screen, picture, feet, 1 if breathing_out(app, player) else 0, stride_rise(player))
         return
     pygame.draw.rect(screen, COLORS["player"], body)
     fx, fy = player["facing"]
@@ -3773,6 +3834,8 @@ def draw_join_screen(app, screen):
 
 CHARACTER_ZOOM = 2   # the characters are shown twice as big on the choice screen
 CHARACTER_GAP = 56   # pixels between the middles of two characters
+CHOICE_MIDDLE = 82   # where the middle of the characters' frames is, from the top of the screen
+CHOICE_TEXT_TOP = 120  # where the name and the ability of the one highlighted start
 
 
 def draw_character_choice(app, screen):
@@ -3793,8 +3856,8 @@ def draw_character_choice(app, screen):
     first = WIDTH // 2 - (len(entries) - 1) * CHARACTER_GAP // 2
     for index, character in enumerate(entries):
         picture = sprites.image(story.CHARACTERS[character]["sprite"] + "_down_0")
-        center = (first + index * CHARACTER_GAP, 88)
-        frame = pygame.Rect(0, 0, 16 * CHARACTER_ZOOM + 12, 16 * CHARACTER_ZOOM + 12)
+        center = (first + index * CHARACTER_GAP, CHOICE_MIDDLE)
+        frame = pygame.Rect(0, 0, TILE * CHARACTER_ZOOM + 12, sprites.FIGURE_HEIGHT * CHARACTER_ZOOM + 12)
         frame.center = center
         pygame.draw.rect(screen, COLORS["box"], frame)
         chosen = index == app["menu_index"]
@@ -3807,7 +3870,7 @@ def draw_character_choice(app, screen):
             shade(screen, frame.inflate(-2, -2), 170)  # taken by player 1
     for index, line in enumerate(character_lines(app, entries[app["menu_index"]])):
         color = COLORS["highlight"] if index == 0 else COLORS["text"]
-        draw_text(screen, font, line, color, (WIDTH // 2, 116 + index * font.get_linesize()), "center", True)
+        draw_text(screen, font, line, color, (WIDTH // 2, CHOICE_TEXT_TOP + index * font.get_linesize()), "center", True)
     draw_lines_at_bottom(app, screen, story.MESSAGES["choose_hint"])
 
 

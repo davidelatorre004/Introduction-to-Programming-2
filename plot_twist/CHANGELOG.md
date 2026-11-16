@@ -2,9 +2,19 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v36](versions/v36.md) - Dark rooms and light (2026-11-15)
+## [v37](versions/v37.md) - Taller characters (2026-11-16)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- The four characters are 16 x 24 pixels instead of 16 x 16, with bigger heads and eyes: the Wizard has a tall pointed hat with a star (its tip bends back in profile), a white beard and a robe down to the shoes; the Nurse a white cap and uniform with red crosses, and a bun at the back; the Ghost big hollow eyes, a round mouth, a wavy hem and a faint glow around it (its aura); Flash a red cowl with lightning wings at the ears, a bolt on the chest, a gold belt and an orange scarf whose end flies behind while running.
+- The body that bumps into things does not change: still the 12 x 12 square at the feet, inside the bottom 16 x 16 of the picture, so every door and gap lets a player through as before. The rest of the picture rises above it.
+- An oval shadow lies under the feet. Standing still, a character breathes: the body sinks one pixel onto the legs, each player in their own time. Walking, they rise one pixel at every stride, and the shadow stays on the floor.
+- Depth: the room already draws what stands from the back to the front by where the feet are, so the taller head covers the back wall and the furniture behind, and what stands in front covers the character; tests check both. The choice screen makes room for the taller characters.
+- Looked at for reference: the Zelda tutorial of clear-code-projects (its hitbox made smaller than the picture with rect.inflate, and its YSort group). The game already did both, sorting by the feet rather than by the middle, which is what keeps tall and short things right.
+
+## [v36](versions/v36.md) - Dark rooms and light (2026-11-15)
+
+In commit [`bd0db06`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/bd0db06690f6169a06b961c962c00b65e027cbac/plot_twist).
 
 - Three rooms are dark now: the corridor under the hold, its far end, and the mine, the darkest (a new optional "dark" in story.ROOMS, from 1 to 255). The other rooms are drawn exactly as before.
 - What gives light: lanterns (a glow, and a cone thrown down on the floor that sways with them, with a flame that jumps), crystals and the heart of the mine (pulsing), portals, and the players: a glow around each and a cone the way they face. A player who is down gives only a little light; one in another room or out of the game gives none.
