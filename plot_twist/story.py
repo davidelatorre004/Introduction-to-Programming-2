@@ -97,6 +97,9 @@ FLAGS = {
     "visited_mine": False,
 }
 
+# "floor" is what the floor is made of, for the details drawn on it: "wood", "stone",
+# "tiles" or "earth". "damp" (optional) stains a room with damp, and water drips from
+# its ceiling.
 # "dark" (optional) makes a room dark, from 1 to 255: only lanterns, crystals, portals
 # and the players light it. Without it the room is fully lit.
 # "outdoor" tells the screen to draw the sea around the room. "entry" is the tile
@@ -104,6 +107,7 @@ FLAGS = {
 # A room is 16 x 12 tiles, walls included: the floor goes from (1, 1) to (14, 10).
 ROOMS = {
     "deck": {
+        "floor": "wood",
         "name": "Deck",
         "description": (
             "The deck of a ship adrift. All around, nothing but ocean. "
@@ -115,6 +119,7 @@ ROOMS = {
         "size": (16, 24),  # twice as tall as the screen: the view scrolls with the player
     },
     "cabin": {
+        "floor": "wood",
         "name": "Captain's cabin",
         "description": (
             "A wide cabin. Sea charts scattered on the floor, and eight generators humming around a square, "
@@ -126,6 +131,8 @@ ROOMS = {
         "size": (24, 18),  # half as wide and half as long again as the screen: the view scrolls
     },
     "hold": {
+        "floor": "stone",
+        "damp": True,
         "name": "Hold",
         "description": (
             "Dark, overturned crates and the smell of brine. Five numbered tiles shine in the floor, "
@@ -136,18 +143,21 @@ ROOMS = {
         "entry": (7, 2),
     },
     "crab_room": {
+        "floor": "tiles",
         "name": "Crab's room",
         "description": "A damp room full of shells. A huge crab watches you in silence.",
         "outdoor": False,
         "entry": (2, 5),
     },
     "angel_room": {
+        "floor": "tiles",
         "name": "Angel's room",
         "description": "A room flooded with white light. In the middle, an angel smiles at you.",
         "outdoor": False,
         "entry": (13, 5),
     },
     "infirmary": {
+        "floor": "tiles",
         "name": "Infirmary",
         "description": (
             "Empty beds with grey sheets, a cabinet full of bottles. "
@@ -158,12 +168,14 @@ ROOMS = {
         "entry": (13, 5),
     },
     "galley": {
+        "floor": "wood",
         "name": "Galley",
         "description": "Pots hanging from the ceiling, a cold stove and a table laid for a meal nobody ate.",
         "outdoor": False,
         "entry": (13, 5),
     },
     "helm": {
+        "floor": "wood",
         "name": "Helm",
         "description": (
             "The ship's wheel turns slowly on its own. Through the windows, only fog. "
@@ -173,12 +185,15 @@ ROOMS = {
         "entry": (11, 8),
     },
     "east_room": {
+        "floor": "wood",
         "name": "Empty room",
         "description": "An empty room. Marks on the floor show where furniture used to stand.",
         "outdoor": False,
         "entry": (2, 5),
     },
     "corridor": {
+        "floor": "stone",
+        "damp": True,
         "name": "Corridor",
         "description": "A long, cramped corridor under the hold. Water drips from the low ceiling.",
         "outdoor": False,
@@ -187,6 +202,8 @@ ROOMS = {
         "dark": 150,
     },
     "corridor_end": {
+        "floor": "stone",
+        "damp": True,
         "name": "End of the corridor",
         "description": "The corridor ends here, in front of a ring of purple light that hums softly.",
         "outdoor": False,
@@ -194,6 +211,8 @@ ROOMS = {
         "dark": 160,
     },
     "mine": {
+        "floor": "earth",
+        "damp": True,
         "name": "Mine",
         "description": (
             "A mine dug deep into the rock, far from the sea. Rails lead into the dark, "

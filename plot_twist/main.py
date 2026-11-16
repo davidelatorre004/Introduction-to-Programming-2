@@ -27,6 +27,7 @@ import effects
 import engine
 import net
 import save
+import scenery
 import sounds
 import sprites
 import story
@@ -51,6 +52,9 @@ DIALOG_LINES = 4           # lines of text per page of the text box
 DIALOG_PADDING = 8
 DIALOG_TEXT_WIDTH = WIDTH - 4 * DIALOG_PADDING  # margin and padding on both sides of the box
 LIGHTNING_FRAMES = FPS     # the bolt that tears the screen when a new game starts: one second
+STEAM_EVERY = 9            # frames between two puffs of steam from a pot on a stove
+STEAM = [(196, 196, 208), (160, 162, 178), (220, 220, 228)]
+DRIP_EVERY = 45            # frames between two drops from the ceiling of a damp room (on average)
 ANVIL_SPARK_EVERY = 2      # frames between two red sparks around the anvil that waits for the key
 FADE_FRAMES = FPS // 4     # how long a room takes to come out of the dark after a door
 WALK_STEP_FRAMES = 8       # frames per step of the walking animation
@@ -668,7 +672,30 @@ def new_app(fonts):
     }
     open_main_menu(app)
     reset_crab(app)
+    prepare_rooms()
     return app
+
+
+def room_backdrop(room, wave=0):
+    """The floor and walls of a room with their details and depth (scenery.py), or None without pictures."""
+    floor = sprites.image("floor_" + room)
+    wall = sprites.image("wall_" + room + "_" + str(wave)) or sprites.image("wall_" + room)
+    if floor is None or wall is None:
+        return None
+    info = story.ROOMS[room]
+    columns, rows = room_size(room)
+    key = (room, wave if info["outdoor"] else 0)
+    return scenery.background(key, columns, rows, floor, wall, info["floor"], info["outdoor"], scenery.seed_of(room),
+                              stained=info.get("damp", False))
+
+
+def prepare_rooms():
+    """Build the floor and walls of every room now (a third of a second, once), not when a player
+    first walks in: entering a room never stutters."""
+    if effects.FX["scenery"]:
+        for room in story.ROOMS:
+            for wave in range(SEA_PICTURES if story.ROOMS[room]["outdoor"] else 1):  # each picture of the sea
+                room_backdrop(room, wave)
 
 
 def set_scene(app, scene, menu_index=0):
@@ -2511,12 +2538,20 @@ def update_effects(app):
                 if frame % ANVIL_SPARK_EVERY == 0:  # red sparks: this is where the key is made whole
                     effects.spawn(fx, rng.uniform(rect.left - 8, rect.right + 8), rng.uniform(rect.top - 4, rect.bottom + 4),
                                   1, effects.RED, speed=0.7, life=40, up=0.6)
+            elif story.OBJECTS.get(thing["id"], {}).get("picture") == "decor_stove" and effects.FX["ambient"]:
+                if (frame + rect.left) % STEAM_EVERY == 0:  # steam rising from the pot on the stove
+                    effects.spawn(fx, rect.centerx + rng.randint(-3, 3), rect.top + 1, 1, STEAM, speed=0.12,
+                                  life=55, up=0.32, spread=math.pi / 3, angle=-math.pi / 2)
             elif thing["kind"] == "cauldron" and effects.FX["cauldron"]:
                 flags = state["flags"]
                 if (flags["potion_step"] or flags["potion_solved"]) and frame % effects.CAULDRON_BUBBLE_EVERY == 0:
                     color = cauldron_color(state)
                     x, y = liquid_center(thing["id"])
                     effects.spawn(fx, x + rng.randint(-4, 4), y, 1, [lighter(color)], speed=0.1, life=36, up=0.35)
+        if effects.FX["ambient"] and story.ROOMS[room].get("damp") and rng.random() < 1 / DRIP_EVERY:
+            ceiling = floor_rect(room)  # a drop from the foot of the back wall, falling onto the floor
+            x = rng.randint(ceiling.left + 2, ceiling.right - 3)
+            effects.add_drip(fx, x, ceiling.top, ceiling.top + rng.randint(10, 46))
         for fading in fx["fading"]:
             area = fading["rect"]
             for _ in range(effects.BARRIER_SPARKS):
@@ -2538,6 +2573,7 @@ def update_effects(app):
             x, y = fx["fuse"]["center"]
             effects.spawn(fx, x, y, effects.FUSE_SPARKS, effects.WELD, speed=2.6, life=36, gravity=0.08, up=0.6)
             fx["flash"] = effects.FLASH_FRAMES
+    effects.update_drips(fx)
     effects.update(fx)
 
 
@@ -2954,8 +2990,20 @@ def thing_picture(thing):
     for name in names:
         picture = sprites.image(name)
         if picture is not None:
+            if effects.FX["scenery"] and is_furniture(thing, name):
+                return scenery.shaded(name, picture)  # light on the top left, a coloured outline
             return picture
     return None
+
+
+UNSHADED = ("decor_puddle", "decor_rails", "decor_notes", "portal")  # flat on the floor or on a wall: no volume
+
+
+def is_furniture(thing, name):
+    """True for the furniture and the machines of the rooms: what gets shaded like a solid thing."""
+    if name in UNSHADED:
+        return False
+    return thing["kind"] in ("decor", "altar", "anvil", "cauldron", "puzzle")
 
 
 def draw_thing(screen, thing, lift=0):
@@ -3088,6 +3136,17 @@ def draw_player(app, screen, player):
         pygame.draw.rect(screen, COLORS["black"], eye)
 
 
+def draw_railing_shadow(screen, room):
+    """The shadow the railing casts on the deck, under its top rail and beside its left one."""
+    columns, rows = room_size(room)
+    rail = tile_rect(1, 1, columns - 2, rows - 2).inflate(4, 4)
+    inside = rail.inflate(-4, -4)
+    reach = scenery.WALL_SHADOW
+    scenery.contact_shadow(screen, pygame.Rect(inside.left, inside.top, inside.width, reach[1]), "top", reach[1])
+    scenery.contact_shadow(screen, pygame.Rect(inside.left, inside.top, reach[1] - 1, inside.height), "left",
+                           reach[1] - 1)
+
+
 def draw_railing(screen, room):
     """The ship's wooden railing around the deck, with a post on every tile."""
     columns, rows = room_size(room)
@@ -3186,6 +3245,35 @@ def on_an_altar(state, item):
     return False
 
 
+# What casts a shadow on the floor: whatever stands on it. Not what hangs on a wall
+# (lanterns, notes), lies flat (rope, puddles, rails, portals), nor energy (barriers).
+HANGING = ("decor_lantern", "decor_notes")
+
+
+def casts_shadow(thing):
+    """True for a thing that stands on the floor of its room."""
+    if thing["kind"] in ("door", "tile", "barrier", "portal", "item") or is_flat(thing["id"]):
+        return False
+    return story.OBJECTS.get(thing["id"], {}).get("picture") not in HANGING
+
+
+def draw_ground_shadows(screen, things):
+    """An oval shadow under each thing standing on the floor, a little to the right (the light
+    comes from the top left), drawn before any of them so that none shades another."""
+    if not effects.FX["scenery"]:
+        return
+    for thing in things:
+        if casts_shadow(thing):
+            rect = thing_rect(thing["id"])
+            width = max(rect.width - 2, 6)
+            shadow = scenery.ground_shadow(width, 5 if rect.width <= TILE else 7)
+            screen.blit(shadow, shadow.get_rect(center=(rect.centerx + 2, rect.bottom - 1)))
+        elif thing["kind"] == "item" and thing["status"] == "on_floor":
+            rect = place_rect(thing)
+            shadow = scenery.ground_shadow(10, 3)
+            screen.blit(shadow, shadow.get_rect(center=(rect.centerx + 1, rect.bottom - 2)))
+
+
 def draw_room(app, screen):
     """The room of the player on this computer, with everything in it, the players who are there and the effects."""
     state = view(app)
@@ -3197,14 +3285,21 @@ def draw_room(app, screen):
         wall = sprites.image("wall_" + room)
     screen.fill(COLORS["black"])
     columns, rows = room_size(room)
-    for col in range(columns):
-        for row in range(rows):
-            inside = 1 <= col <= columns - 2 and 1 <= row <= rows - 2
-            picture = floor if inside else wall
-            if picture is None:
-                pygame.draw.rect(screen, floor_color if inside else wall_color, tile_rect(col, row))
-            else:
-                screen.blit(picture, tile_rect(col, row))
+    if effects.FX["scenery"] and floor is not None and wall is not None:
+        # The floor and the walls with their details and depth: built once for each room (see scenery.py).
+        outdoor = story.ROOMS[room]["outdoor"]
+        screen.blit(room_backdrop(room, wave_frame(app) if outdoor else 0), tile_rect(0, 0))
+        if outdoor:
+            draw_railing_shadow(screen, room)
+    else:
+        for col in range(columns):
+            for row in range(rows):
+                inside = 1 <= col <= columns - 2 and 1 <= row <= rows - 2
+                picture = floor if inside else wall
+                if picture is None:
+                    pygame.draw.rect(screen, floor_color if inside else wall_color, tile_rect(col, row))
+                else:
+                    screen.blit(picture, tile_rect(col, row))
     if story.ROOMS[room]["outdoor"]:
         draw_railing(screen, room)
     things = engine.things_here(state)
@@ -3215,6 +3310,7 @@ def draw_room(app, screen):
     draw_floor_puzzles(app, screen, things)
     draw_tile_effects(app, screen, things)
     draw_cables(screen, state, app["frame"])
+    draw_ground_shadows(screen, things)
     standing = []
     for thing in things:
         if thing["kind"] == "door":
@@ -3227,6 +3323,8 @@ def draw_room(app, screen):
                 draw_portal_light(app, screen, thing)
         elif thing["kind"] not in ("item", "tile"):
             standing.append(thing)
+    if effects.FX["ambient"]:
+        draw_puddle_glint(app, screen, things)
     for thing in things:
         if thing["kind"] == "item":
             draw_thing(screen, thing, ALTAR_LIFT if on_an_altar(state, thing["id"]) else 0)
@@ -3265,6 +3363,7 @@ def draw_room(app, screen):
     draw_fusing_key(app, screen)
     effects.draw_clue_glow(screen, app["fx"])
     effects.draw_particles(screen, app["fx"]["particles"])
+    effects.draw_drips(screen, app["fx"])
     effects.draw_dust(screen, app["fx"], app["frame"])
     draw_darkness(app, screen, state, things)  # a dark room: dark, but for the holes of light
     draw_lights(app, screen, things)
@@ -3274,6 +3373,42 @@ def draw_room(app, screen):
             rect = thing_rect(thing["id"])
             label = story.OBJECTS[thing["id"]]["label"]
             draw_text(screen, app["fonts"]["text"], label, COLORS["text"], (rect.centerx, rect.top - 10), "center", True)
+
+
+FLAME_COLORS = ((252, 214, 80), (240, 140, 50), (244, 240, 228))  # yellow, orange, white: a flame
+
+
+def flicker(app, thing, salt=0):
+    """A number from 0 to 1 that jumps every few frames: different for every flame, never random."""
+    rect = thing_rect(thing["id"])
+    return scenery.hash01(app["frame"] // 4 + salt, rect.left * 31 + rect.top, 5)
+
+
+def draw_flame(app, surface, thing):
+    """The flame of a candle leaps a pixel up and changes colour; the fire in a stove flickers."""
+    rect = thing_rect(thing["id"])
+    if story.OBJECTS[thing["id"]]["picture"] == "decor_candle":
+        tip = (rect.left + 7 + (1 if flicker(app, thing) > 0.5 else 0), rect.top - (1 if flicker(app, thing, 1) > 0.6 else 0))
+        surface.fill(FLAME_COLORS[int(flicker(app, thing, 2) * 3) % 3], (tip[0], tip[1], 1, 1))
+        return
+    for spark in range(3):  # the stove: three pixels of its fire change colour
+        x = rect.left + 4 + int(flicker(app, thing, spark) * 8)
+        y = rect.top + 9 + int(flicker(app, thing, spark + 7) * 2)
+        surface.fill(FLAME_COLORS[int(flicker(app, thing, spark + 3) * 2)], (x, y, 1, 1))
+
+
+def draw_puddle_glint(app, surface, things):
+    """A glint of light runs across each puddle now and then, as if a drop had just fallen in it."""
+    for thing in things:
+        if story.OBJECTS.get(thing["id"], {}).get("picture") != "decor_puddle":
+            continue
+        rect = thing_rect(thing["id"])
+        phase = (app["frame"] + rect.left * 7) % PUDDLE_GLINT_EVERY
+        if phase < 8:
+            surface.fill((210, 236, 255), (rect.left + 4 + phase, rect.top + 7, 2, 1))
+
+
+PUDDLE_GLINT_EVERY = 110
 
 
 def draw_standing(app, screen, thing):
@@ -3286,6 +3421,10 @@ def draw_standing(app, screen, thing):
         draw_generator(app, screen, thing)
     elif story.OBJECTS.get(thing["id"], {}).get("picture") == "decor_lantern":
         draw_lantern(app, screen, thing)
+    elif story.OBJECTS.get(thing["id"], {}).get("picture") in ("decor_candle", "decor_stove"):
+        draw_thing(screen, thing)
+        if effects.FX["ambient"]:
+            draw_flame(app, screen, thing)
     elif thing["id"] == "deck_statue" and statue_trembles(app):
         draw_trembling_statue(app, screen)  # the crab is breaking out: one more moment
     elif thing["id"] == "deck_statue" and engine.statue_broken(app["state"]):
