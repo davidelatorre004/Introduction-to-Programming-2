@@ -3688,7 +3688,7 @@ def test_the_easy_crab_decides_only_in_the_middle_of_a_tile_and_never_turns_back
             turns += 1
             tile = main.tile_of(crab["pos"])
             body = main.crab_rect(crab)
-            assert pygame.Vector2(body.center).distance_to(main.tile_rect(*tile).center) <= main.EASY_CRAB_SPEED + 1  # a pixel
+            assert pygame.Vector2(body.center).distance_to(main.tile_rect(*tile).center) <= main.CRAB_SPEED + 1  # a pixel
             if crab["heading"] == (-before[0], -before[1]):  # back only where the way ends
                 ways = [way for way in main.HEADINGS if (tile[0] + way[0], tile[1] + way[1]) in free]
                 assert ways == [crab["heading"]]
@@ -3811,20 +3811,17 @@ def test_the_hard_crab_is_the_one_of_always(app):
 # --- The easy crab's speed, the dash, the spell, the stone, the rubble, the ending for both ---
 
 
-def test_the_easy_crab_is_faster_than_the_hard_one_and_slower_than_the_players(app):
-    assert main.CRAB_SPEED < main.EASY_CRAB_SPEED < main.PLAYER_SPEED
+def test_the_easy_crab_is_as_slow_as_the_hard_one(app):
     two_playing(app, FIRST_HALF)
     easy(app)
     awake_crab(app)
     p1(app)["pos"] = free_spot(app, 4, 20)
     app["players"][1]["pos"] = free_spot(app, 4, 20)
-    steps = []
     for _ in range(60):
         last = app["crab"]["pos"]
         main.update(app, 0, 0)
-        steps.append((pygame.Vector2(app["crab"]["pos"]) - pygame.Vector2(last)).length())
-    assert max(steps) <= main.EASY_CRAB_SPEED + 1.01  # a pixel of rounding
-    assert sum(steps) > 60 * main.CRAB_SPEED  # it covers more ground than the hard one could
+        assert (pygame.Vector2(app["crab"]["pos"]) - pygame.Vector2(last)).length() <= main.CRAB_SPEED + 1.01  # a pixel
+    assert not hasattr(main, "EASY_CRAB_SPEED")
 
 
 def test_a_dashing_flash_on_the_other_computer_leaves_afterimages_here(app):

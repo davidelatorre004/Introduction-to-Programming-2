@@ -2,9 +2,15 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v41](versions/v41.md) - A ray, a dash, a crab of stone, and two claws to choose from (2026-11-17)
+## [v42](versions/v42.md) - The easy crab at its old speed (2026-11-17)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- The easy crab moves again at the speed it had before the previous version, the same as the hard one (0.6 of a player's speed instead of 0.8). How it hunts does not change.
+
+## [v41](versions/v41.md) - A ray, a dash, a crab of stone, and two claws to choose from (2026-11-17)
+
+In commit [`c11126d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/c11126d54aba61225dc40d03485357c0424b9dab/plot_twist).
 
 - The choice of the crab is two frames side by side, chosen with Left and Right: a common crab's claw for the easy one (sandy orange, a round speckled palm, blunt jaws with knobbly teeth) and the red claw of the end of the game for the hard one (long hooked jaws with sharp teeth, a saw of spikes, a glow that beats like blood). The highlighted claw slowly opens and shuts its jaws; the other frame is dark. The claws are drawn by claw.py, with the same shell as the giant claw in other tones (the giant claw is unchanged).
 - The easy crab is faster (0.8 of a player's speed instead of 0.6): blind to other rooms and taking the long way round, it was too slow to be a threat.

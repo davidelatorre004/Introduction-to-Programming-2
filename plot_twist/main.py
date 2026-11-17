@@ -1555,7 +1555,6 @@ def move_player(app, player, dx, dy):
 # Now and then it gives up the chase and goes to its corner of the room for a while.
 
 CRAB_SPEED = PLAYER_SPEED * 0.6    # pixels per frame: slower than the players
-EASY_CRAB_SPEED = PLAYER_SPEED * 0.8  # the easy crab is blind to other rooms and takes long ways: a little faster
 CRAB_PICTURE_SIZE = 20             # the crab's sprite, shrunk from the 2 x 2 tiles of the one in its room
 CRAB_WAKE_FRAMES = 3 * FPS         # still for a moment after waking: time to understand and run
 CRAB_TRANSIT_FRAMES = FPS          # between two rooms, out of sight
@@ -1870,8 +1869,8 @@ def move_easy_crab(app):
     tile = tuple(crab["next"])
     goal = tile_rect(*tile).center
     body = crab_rect(crab)
-    if math.hypot(goal[0] - body.centerx, goal[1] - body.centery) > EASY_CRAB_SPEED:
-        step_crab(crab, goal, solids, EASY_CRAB_SPEED)
+    if math.hypot(goal[0] - body.centerx, goal[1] - body.centery) > CRAB_SPEED:
+        step_crab(crab, goal, solids)
         if not crab["moving"]:
             crab["next"] = None  # something in the way: it starts again from where it is
         return
@@ -1892,7 +1891,7 @@ def move_easy_crab(app):
         return
     crab["heading"] = heading
     crab["next"] = (tile[0] + heading[0], tile[1] + heading[1])
-    step_crab(crab, tile_rect(*crab["next"]).center, solids, EASY_CRAB_SPEED)
+    step_crab(crab, tile_rect(*crab["next"]).center, solids)
 
 
 def farthest_tile(free, start, point, room):

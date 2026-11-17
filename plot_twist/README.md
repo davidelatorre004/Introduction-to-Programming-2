@@ -100,7 +100,7 @@ Some help:
 The Space ability works only once per game: the bottom left corner says so as long as it is available. If you use it while the crab is still a statue, it is wasted.
 
 **The crab (two players only).** As soon as you solve the cabin, the whole ship shakes: the crab statue on the deck trembles, breaks into pieces, and the crab comes out to hunt you. The rubble stays there until the end: you can walk behind the pile, only its base blocks the way.
-- It is slower than you (the easy one a little less slow). How it hunts depends on the difficulty the host chose:
+- It is slower than you. How it hunts depends on the difficulty the host chose:
   - **Hard:** it always knows where you are. It chases the nearest player along the shortest way, and if nobody is in its room it follows you through the open doors.
   - **Easy:** it hunts like the ghosts of an arcade maze. It only sees its own room. It decides where to go only in the middle of a tile, never turns back unless the way ends, and picks the way that looks nearest to you in a straight line, so obstacles can send it the long way round. Every 20 seconds it gives up for 7 seconds and goes to the top right corner of the room. If it sees nobody, it heads for a door of its room chosen at random and looks in the next room.
 - If it touches you, you go down and cannot move. Your partner has one minute to help you up: they must stand next to you and hold **E** for 4 seconds (the green bar shows how much is left).
