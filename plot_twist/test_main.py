@@ -1428,7 +1428,7 @@ def test_the_clue_sound_exists():
 def test_a_new_app_has_one_player_with_the_old_starting_values(app):
     assert len(app["players"]) == 1
     assert p1(app) == {"pos": (0, 0), "facing": (0, 1), "touching": None, "walk": 0, "moving": False,
-                       "on_tile": None, "zones": set()}
+                       "on_tile": None, "zones": set(), "dash": 0, "dash_way": (0, 0)}
     assert main.new_player((5, 7))["pos"] == (5, 7)
     for key in ("player", "facing", "touching", "walk", "moving", "on_tile", "zones"):
         assert key not in app, key  # they all live in the player now
@@ -2244,20 +2244,31 @@ def flash_game(app, actions=()):
     as_characters(app, "flash", "wizard")
 
 
-def test_flash_dashes_five_tiles_the_way_they_face(app, heard):
+def dash_out(app, dx=0, dy=0):
+    """Let the dash run its frames, with a direction held that it ignores."""
+    for _ in range(main.DASH_FRAMES + 1):
+        main.update(app, dx, dy)
+
+
+def test_flash_dashes_eight_tiles_the_way_they_face_in_a_few_frames(app, heard):
     flash_game(app)
-    p1(app)["pos"] = free_spot(app, 3, 6)
+    p1(app)["pos"] = free_spot(app, 2, 6)
     main.update(app, 1, 0)  # facing right
     start = p1(app)["pos"]
     press(app, pygame.K_SPACE)
-    assert p1(app)["pos"] == (start[0] + main.DASH_TILES * main.TILE, start[1])
-    assert app["dash_trail"] is not None and "ability" in heard
-    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))  # the streak
-    for _ in range(main.DASH_TRAIL_FRAMES):
+    assert p1(app)["dash"] == main.DASH_FRAMES and "ability" in heard and "dash" in heard
+    main.update(app, 0, 1)
+    assert p1(app)["pos"] == (start[0] + main.DASH_TILES * main.TILE // main.DASH_FRAMES, start[1])  # the keys wait
+    assert app["afterimages"] and main.DASH_TILES == 8
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))  # the yellow afterimages
+    dash_out(app)
+    assert p1(app)["pos"] == (start[0] + main.DASH_TILES * main.TILE, start[1]) and p1(app)["dash"] == 0
+    for _ in range(main.AFTERIMAGE_FRAMES):
         main.update(app, 0, 0)
-    assert app["dash_trail"] is None
+    assert app["afterimages"] == []
     where = p1(app)["pos"]
     press(app, pygame.K_SPACE)  # once only
+    dash_out(app)
     assert p1(app)["pos"] == where
 
 
@@ -2266,6 +2277,7 @@ def test_the_dash_stops_against_a_wall(app):
     p1(app)["pos"] = free_spot(app, 3, 6)
     main.update(app, -1, 0)  # facing left, three tiles from the railing
     press(app, pygame.K_SPACE)
+    dash_out(app)
     body = main.player_rect(p1(app)["pos"])
     assert body.left == main.tile_rect(1, 0).left and body.collidelist(main.solid_rects(app["state"])) == -1
     assert app["state"]["room"] == "deck"
@@ -2277,6 +2289,7 @@ def test_the_dash_goes_through_an_open_door_on_its_way(app):
     p1(app)["pos"] = (p1(app)["pos"][0], p1(app)["pos"][1] + 2 * main.TILE)  # two tiles below the door
     p1(app)["facing"] = (0, -1)
     press(app, pygame.K_SPACE)
+    dash_out(app)
     assert app["state"]["room"] == "cabin"
     assert p1(app)["pos"] == main.spawn_in_front_of("cabin_to_deck")  # where anyone comes in
 
@@ -2287,6 +2300,7 @@ def test_the_dash_stops_at_a_shut_door_which_says_why(app):
     p1(app)["pos"] = (p1(app)["pos"][0], p1(app)["pos"][1] - 2 * main.TILE)
     p1(app)["facing"] = (0, 1)
     press(app, pygame.K_SPACE)
+    dash_out(app)
     assert app["state"]["room"] == "deck" and dialog_text(app) == " ".join(
         main.wrap(story.DOORS["deck_to_hold"]["barred_text"], main.DIALOG_TEXT_WIDTH, main.text_width(app["fonts"]["text"])))
 
@@ -2299,6 +2313,7 @@ def test_the_dash_takes_a_portal_on_its_way(app):
     p1(app)["pos"] = (ring.centerx - main.PLAYER_SIZE // 2, ring.bottom + main.TILE)
     p1(app)["facing"] = (0, -1)
     press(app, pygame.K_SPACE)
+    dash_out(app)
     assert app["state"]["room"] == "mine"
 
 
@@ -2311,12 +2326,14 @@ def test_the_dash_carries_flash_past_the_crab(app):
     p1(app)["pos"] = (crab[0] - 2 * main.TILE, crab[1])  # the crab two tiles to the right
     p1(app)["facing"] = (1, 0)
     press(app, pygame.K_SPACE)
+    dash_out(app)  # right through it, frame by frame: too fast to catch
     assert p1(app)["pos"][0] > crab[0] + main.TILE  # on its other side
     main.update(app, 0, 0)
     assert app["downed"] == {}
 
 
-def test_the_dash_lights_only_the_tile_it_lands_on(app, heard):
+def test_the_dash_lights_only_the_tile_it_lands_on(app, heard, monkeypatch):
+    monkeypatch.setattr(main, "DASH_TILES", 5)  # a shorter dash: a long one would start beyond the hold's wall
     flash_game(app, IN_THE_HOLD)
     as_characters(app, "flash", "wizard")
     first, last = main.thing_rect("tile_1"), main.thing_rect("tile_3")
@@ -2325,6 +2342,9 @@ def test_the_dash_lights_only_the_tile_it_lands_on(app, heard):
     main.settle_on_floor(app, p1(app))
     p1(app)["facing"] = (1, 0)
     press(app, pygame.K_SPACE)  # over tile 1 and tile 2, landing on tile 3
+    for _ in range(main.DASH_FRAMES):
+        main.update(app, 0, 0)
+        assert "blip" not in heard  # nothing it flies over counts
     assert main.tile_under(app["state"], p1(app)["pos"]) == "tile_3"
     main.update(app, 0, 0)
     assert "blip" not in heard and app["state"]["flags"]["hold_step"] == 0  # tile 3 is not the first of the wave
@@ -2345,6 +2365,8 @@ def test_abilities_reach_the_host_from_the_other_computer(two_computers):
     assert main.ability_hint(guest) is None
     press(host, pygame.K_SPACE)
     pump(host, guest, lambda: guest["crab"]["stun"] > 0)
+    pump(host, guest, lambda: guest["beams"] != [])  # the ray of the spell, on both screens
+    assert host["beams"] != []
     main.draw(guest, pygame.Surface((main.WIDTH, main.HEIGHT)))
 
 
@@ -2538,18 +2560,35 @@ def test_the_statue_lies_in_pieces_once_the_crab_is_out_and_for_good(app):
     assert app["crab"] is None and engine.statue_broken(app["state"])
 
 
-def test_the_crab_vanishes_in_a_puff_of_dust(app):
+def test_the_crab_turns_to_stone_where_it_stands_then_to_dust(app, heard):
     two_playing(app, FIRST_HALF)
     awake_crab(app)
     main.update(app, 0, 0)
-    where = main.player_rect(app["crab"]["pos"]).center
+    crab = app["crab"]
+    where = main.player_rect(crab["pos"]).center
     state = play_two(KEY_FUSED)
     state["room"], state["flags"]["partner_room"] = "deck", "deck"
     app["state"] = state
     app["fx"]["particles"].clear()
     main.update(app, 0, 0)
+    stone = app["petrify"]
+    assert app["crab"] is None and stone is not None and stone["pos"] == crab["pos"] and "petrify" in heard
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    colours = []
+    for age in (2, main.PETRIFY_CRACK - 1, main.PETRIFY_CRACK + 10):
+        stone["age"] = age
+        main.draw_room(app, screen)
+        r, g, b = screen.get_at(where)[:3]
+        colours.append(max(r, g, b) - min(r, g, b))  # how much colour is left
+    assert colours[1] < colours[0]  # grey: stone
+    stone["age"] = main.PETRIFY_BURST - 1
+    main.update(app, 0, 0)
     dust = [one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS]
-    assert len(dust) >= 20 and all(abs(one["x"] - where[0]) < 12 and abs(one["y"] - where[1]) < 12 for one in dust)
+    assert len(dust) >= 20 and all(abs(one["x"] - where[0]) < 16 and abs(one["y"] - where[1]) < 16 for one in dust)
+    assert "crumble" in heard
+    for _ in range(main.PETRIFY_FRAMES):
+        main.update(app, 0, 0)
+    assert app["petrify"] is None
 
 
 # --- The whole screen (F11) -----------------------------------------------------------------
@@ -3649,7 +3688,7 @@ def test_the_easy_crab_decides_only_in_the_middle_of_a_tile_and_never_turns_back
             turns += 1
             tile = main.tile_of(crab["pos"])
             body = main.crab_rect(crab)
-            assert pygame.Vector2(body.center).distance_to(main.tile_rect(*tile).center) <= main.CRAB_SPEED + 1  # a pixel
+            assert pygame.Vector2(body.center).distance_to(main.tile_rect(*tile).center) <= main.EASY_CRAB_SPEED + 1  # a pixel
             if crab["heading"] == (-before[0], -before[1]):  # back only where the way ends
                 ways = [way for way in main.HEADINGS if (tile[0] + way[0], tile[1] + way[1]) in free]
                 assert ways == [crab["heading"]]
@@ -3766,3 +3805,136 @@ def test_the_hard_crab_is_the_one_of_always(app):
     for _ in range(30):
         main.update(app, 0, 0)
     assert app["crab"]["next"] is None and app["crab"]["clock"] == 0  # the arcade crab's things stay unused
+
+
+
+# --- The easy crab's speed, the dash, the spell, the stone, the rubble, the ending for both ---
+
+
+def test_the_easy_crab_is_faster_than_the_hard_one_and_slower_than_the_players(app):
+    assert main.CRAB_SPEED < main.EASY_CRAB_SPEED < main.PLAYER_SPEED
+    two_playing(app, FIRST_HALF)
+    easy(app)
+    awake_crab(app)
+    p1(app)["pos"] = free_spot(app, 4, 20)
+    app["players"][1]["pos"] = free_spot(app, 4, 20)
+    steps = []
+    for _ in range(60):
+        last = app["crab"]["pos"]
+        main.update(app, 0, 0)
+        steps.append((pygame.Vector2(app["crab"]["pos"]) - pygame.Vector2(last)).length())
+    assert max(steps) <= main.EASY_CRAB_SPEED + 1.01  # a pixel of rounding
+    assert sum(steps) > 60 * main.CRAB_SPEED  # it covers more ground than the hard one could
+
+
+def test_a_dashing_flash_on_the_other_computer_leaves_afterimages_here(app):
+    two_playing(app, FIRST_HALF)
+    as_characters(app, "wizard", "flash")
+    other = app["players"][1]
+    other["pos"] = free_spot(app, 4, 6)
+    main.take_player_info(other, dict(main.player_info(other), dash=4))  # what the other computer says
+    main.update(app, 0, 0)
+    assert len(app["afterimages"]) == 1 and main.dashing(app, 2)
+    picture = app["afterimages"][0]["picture"]
+    r, g, b = [sum(channel) for channel in zip(*(picture.get_at((x, y))[:3] for x in range(picture.get_width())
+                                                   for y in range(picture.get_height()) if picture.get_at((x, y)).a))]
+    assert r > b and g > b  # yellow
+    assert main.player_info(other)["dash"] == 4
+
+
+def test_the_wizards_spell_is_a_ray_from_the_wand_to_the_crab(app, heard):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app, wait=10 ** 6)
+    p1(app)["pos"] = free_spot(app, 4, 6)
+    press(app, pygame.K_SPACE)
+    main.update(app, 0, 0)
+    assert len(app["beams"]) == 1 and "zap" in heard
+    beam = app["beams"][0]
+    assert beam["to"] == main.crab_rect(app["crab"]).center and beam["room"] == "deck"
+    assert pygame.Vector2(beam["from"]).distance_to(main.player_rect(p1(app)["pos"]).center) < 12
+    points = main.beam_points(beam, app["frame"])
+    assert points[0] == beam["from"] and points[-1] == beam["to"] and len(points) > 3  # a zigzag
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    middle = points[len(points) // 2]
+    near = [screen.get_at((round(middle[0]) + dx, round(middle[1]) + dy))[:3] for dx in range(-3, 4) for dy in range(-3, 4)]
+    assert main.BEAM_COLORS[2] in near or main.BEAM_COLORS[0] in near
+    for _ in range(main.BEAM_FRAMES):
+        main.update(app, 0, 0)
+    assert app["beams"] == []
+
+
+def test_without_the_crab_in_the_room_the_ray_goes_to_the_wall(app):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])
+    awake_crab(app, wait=10 ** 6)
+    assert app["crab"]["room"] == "deck"
+    p1(app)["pos"] = free_spot(app, 10, 8)
+    p1(app)["facing"] = (1, 0)
+    press(app, pygame.K_SPACE)
+    main.update(app, 0, 0)
+    beam = app["beams"][0]
+    assert beam["to"][1] == beam["from"][1] and beam["to"][0] > beam["from"][0]
+    walls = main.wall_rects("cabin")
+    ahead = pygame.Rect(beam["to"][0] + 3, beam["to"][1] - 1, 2, 2)
+    assert ahead.collidelist(walls) != -1 or beam["to"][0] - beam["from"][0] >= main.BEAM_REACH - 4
+    assert app["crab"]["stun"] > 0  # the spell found it all the same
+
+
+def test_the_rubble_blocks_only_at_its_base(app):
+    two_playing(app, FIRST_HALF)
+    statue = main.thing_rect("deck_statue")
+    solids = main.solid_rects(app["state"])
+    assert main.rubble_rect() in solids and statue not in solids
+    assert statue.contains(main.rubble_rect()) and main.rubble_rect().bottom >= statue.bottom - 2
+    top = pygame.Rect(0, 0, main.PLAYER_SIZE, main.PLAYER_SIZE)
+    top.midtop = (statue.centerx, statue.top + 2)  # behind the pile, where only a few stones lie
+    assert top.collidelist(solids) == -1
+    low = pygame.Rect(0, 0, main.PLAYER_SIZE, main.PLAYER_SIZE)
+    low.midbottom = (statue.centerx, statue.bottom - 2)
+    assert low.collidelist(solids) != -1
+    assert statue in main.solid_rects(engine.new_game())  # alone, the statue stands whole: all of it is solid
+    assert statue in main.solid_rects(engine.new_game(two_players=True))  # ...and before the crab breaks out
+
+
+def test_the_other_computer_sees_the_ending_at_once_whatever_is_on_its_screen(two_computers):
+    host, guest = two_computers
+    for scene in ("pause", "inventory", "play"):
+        main.set_scene(guest, scene)
+        guest["dialog"] = ["something to read"] if scene == "play" else []
+        state = engine.restore_state(host["state"])
+        state["ending"] = "saved"
+        host["state"] = state
+        host["own_ending"] = True  # the host's player gave the wand: they read the text first
+        host["dialog"] = ["the ending's text"]
+        pump(host, guest, lambda: guest["scene"] == "ending")
+        assert guest["dialog"] == []
+        assert host["scene"] == "play" and host["dialog"] == ["the ending's text"]
+        host["dialog"] = []
+        main.update(host, 0, 0)
+        assert host["scene"] == "ending"
+        main.draw(guest, pygame.Surface((main.WIDTH, main.HEIGHT)))
+        for one in (host, guest):
+            one["state"] = engine.restore_state(dict(one["state"], ending=None))
+            main.set_scene(one, "play")
+            one["own_ending"] = False
+
+
+def test_the_choice_of_the_crab_is_two_frames_side_by_side(app):
+    press(app, pygame.K_RETURN, pygame.K_DOWN, pygame.K_RETURN)
+    boxes = main.difficulty_boxes()
+    assert list(boxes) == ["easy", "hard"] and boxes["easy"].right < boxes["hard"].left
+    assert all(screen_box.width == main.DIFFICULTY_BOX[0] for screen_box in boxes.values())
+    assert boxes["hard"].right <= main.WIDTH and boxes["easy"].left >= 0
+    press(app, pygame.K_LEFT)
+    assert main.menu_entries(app)[app["menu_index"]] == "easy"
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+    easy_inside = pygame.transform.average_color(screen, boxes["easy"].inflate(-8, -40))
+    hard_inside = pygame.transform.average_color(screen, boxes["hard"].inflate(-8, -40))
+    assert sum(easy_inside[:3]) > sum(hard_inside[:3])  # the other one is dark
+    press(app, pygame.K_RIGHT)
+    assert main.menu_entries(app)[app["menu_index"]] == "hard"
+    main.draw(app, screen)
+    press(app, pygame.K_RETURN)
+    assert app["difficulty"] == "hard"
+    main.end_network(app)

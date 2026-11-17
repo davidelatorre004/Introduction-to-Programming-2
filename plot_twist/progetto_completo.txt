@@ -28,7 +28,7 @@ CHARACTERS = {
               "ability": "Vanish: the crab cannot see you for 5 seconds.",
               "power": {"label": "Vanish", "text": "You vanish: the crab cannot see you"}},
     "flash": {"sprite": "flash", "name": "Flash",
-              "ability": "Dash: a lightning sprint of 5 tiles, through doors too.",
+              "ability": "Dash: a lightning sprint of 8 tiles, through doors too.",
               "power": {"label": "Dash", "text": "A lightning dash!"}},
 }
 
@@ -3445,9 +3445,17 @@ def solid_rects(state):
         if thing["kind"] == "door":
             if thing["status"] != "open":
                 solids.append(door_rect(thing["id"]))
+        elif thing["id"] == "deck_statue" and engine.statue_broken(state):
+            solids.append(rubble_rect())  # only the base of the pile: the stones above it are behind
         elif thing["kind"] not in ("item", "tile") and not is_flat(thing["id"]):
             solids.append(thing_rect(thing["id"]))
     return solids
+
+
+def rubble_rect():
+    """What the broken statue blocks: the base of its pile of rubble, not its whole 2 x 2 tiles."""
+    statue = thing_rect("deck_statue")
+    return pygame.Rect(statue.left + RUBBLE_BASE[0], statue.top + RUBBLE_BASE[1], RUBBLE_BASE[2], RUBBLE_BASE[3])
 
 
 def is_flat(thing):
@@ -3779,6 +3787,8 @@ def new_player(position=(0, 0)):
         "moving": False,         # whether the player moved in the last frame
         "on_tile": None,         # the numbered tile the player stood on in the last frame
         "zones": set(),          # the floor puzzles whose zone the player was in, in the last frame
+        "dash": 0,               # frames left of Flash's dash (see dash)
+        "dash_way": (0, 0),      # ...the way it goes
     }
 
 
@@ -3829,7 +3839,10 @@ def new_app(fonts):
         "shatter": None,         # the giant claw breaking the screen, while it lasts (see start_shatter)
         "lightning_due": False,  # a new game has just started: the bolt strikes once the opening text is read
         "hidden": {},            # the players the crab cannot see (the ghost's ability): number -> frames left
-        "dash_trail": None,      # the streak of Flash's dash, while it fades (see dash)
+        "afterimages": [],       # the yellow copies a dashing Flash leaves behind, while they fade (see dash)
+        "beams": [],             # the rays of the wizard's spell, while they last (see start_beam)
+        "petrify": None,         # the crab turning to stone where it stands, while it lasts (see crab_news)
+        "own_ending": False,     # the ending came from this computer's player: they read its text first
         "act_held": False,       # E is held down on this keyboard (to help a player up)
         "partner_reviving": False,  # E is held down on the other computer, as it said
         "seen": {},              # what this computer has already told about the crab (see crab_news)
@@ -4089,6 +4102,7 @@ def begin_game(app, state, opening_text):
     """
     app["state"] = state
     app["dialog"] = []
+    app["own_ending"] = False
     app["taken"] = None
     app["picked"] = None
     set_up_players(app)
@@ -4427,6 +4441,7 @@ def finish_action(app, action, before, state, outcome):
     if outcome["ok"]:
         show_outcome(app, action, before, state, outcome)
         app["state"] = state
+        app["own_ending"] = engine.is_over(state)  # this player reads the ending's text, then sees it
         save_progress(app)
         if is_host(app):
             heart_helps(app, outcome, my_number(app))
@@ -4547,8 +4562,11 @@ def handle_play_key(app, key):
 
 
 def handle_menu_key(app, key):
-    """Keys in a menu: up and down to move, E or Enter to choose, Esc to go back."""
+    """Keys in a menu: up and down to move, E or Enter to choose, Esc to go back.
+    The two frames of the choice of the crab are side by side: left and right move too."""
     entries = menu_entries(app)
+    if app["scene"] == "difficulty" and key in LEFT_KEYS + RIGHT_KEYS:
+        key = UP_KEYS[0] if key in LEFT_KEYS else DOWN_KEYS[0]
     if key in UP_KEYS:
         app["menu_index"] = (app["menu_index"] - 1) % len(entries)
     elif key in DOWN_KEYS:
@@ -4598,10 +4616,8 @@ def update(app, dx, dy, act=False):
     if is_host(app):
         update_crab(app)
     crab_news(app)
-    if app["dash_trail"] is not None:
-        app["dash_trail"]["frames"] -= 1
-        if app["dash_trail"]["frames"] <= 0:
-            app["dash_trail"] = None
+    ability_news(app)
+    update_ability_effects(app)
     update_crumble(app)
     update_effects(app)
     if app["scene"] == "shatter":
@@ -4616,6 +4632,10 @@ def update(app, dx, dy, act=False):
         app["fade"] -= 1
     if app["flash_frames"] > 0:
         app["flash_frames"] -= 1
+    if partner_ended(app):
+        app["dialog"] = []  # the other player has just reached an ending: here too, whatever is on screen
+        set_scene(app, "ending")
+        return
     if app["scene"] != "play" or app["dialog"]:
         return
     if engine.is_over(app["state"]):
@@ -4631,7 +4651,18 @@ def update(app, dx, dy, act=False):
         return  # nobody moves while it strikes
     if not can_move(app):
         return  # down, or out of the game
+    if local_player(app)["dash"] > 0:
+        dash_step(app)  # dashing: the keys wait
+        return
     move_player(app, local_player(app), dx, dy)
+
+
+def partner_ended(app):
+    """True on one computer of a game for two when the other player has just reached an ending
+    (not the crab's: both see the claw first), and this screen is not showing it yet."""
+    state = app["state"]
+    return (app["net"] is not None and state is not None and engine.is_over(state) and state["ending"] != "caught"
+            and not app["own_ending"] and app["scene"] not in ("ending", "shatter"))
 
 
 def move_player(app, player, dx, dy):
@@ -4686,6 +4717,7 @@ def move_player(app, player, dx, dy):
 # Now and then it gives up the chase and goes to its corner of the room for a while.
 
 CRAB_SPEED = PLAYER_SPEED * 0.6    # pixels per frame: slower than the players
+EASY_CRAB_SPEED = PLAYER_SPEED * 0.8  # the easy crab is blind to other rooms and takes long ways: a little faster
 CRAB_PICTURE_SIZE = 20             # the crab's sprite, shrunk from the 2 x 2 tiles of the one in its room
 CRAB_WAKE_FRAMES = 3 * FPS         # still for a moment after waking: time to understand and run
 CRAB_TRANSIT_FRAMES = FPS          # between two rooms, out of sight
@@ -4696,9 +4728,18 @@ REVIVE_FRAMES = 4 * FPS            # how long E must be held next to a player do
 NURSE_REVIVE_FRAMES = FPS          # ...and how long when the nurse helps: her ability, always on
 STUN_FRAMES = 5 * FPS              # how long the wizard's spell keeps the crab still
 HIDDEN_FRAMES = 5 * FPS            # how long the ghost stays out of the crab's sight
-DASH_TILES = 5                     # how far Flash dashes
+DASH_TILES = 8                     # how far Flash dashes
+DASH_FRAMES = 8                    # how long the dash lasts: 16 pixels a frame, ten times a walk
 DASH_STEP = 4                      # pixels at a time, so the dash stops at walls and finds doors
-DASH_TRAIL_FRAMES = 12             # how long the streak of the dash stays on screen
+AFTERIMAGE_FRAMES = 12             # how long each yellow afterimage of a dashing Flash takes to fade
+DASH_SPARKS = [(255, 236, 120), (255, 200, 60), (255, 255, 220)]
+BEAM_FRAMES = 36                   # how long the ray of the wizard's spell stays on screen
+BEAM_REACH = 8 * TILE              # how far it goes when the crab is not in the room
+BEAM_COLORS = [(170, 100, 255), (120, 210, 255), (255, 255, 255)]  # its glow, its sparks, its core
+PETRIFY_FRAMES = 96                # the crab turning to stone: grey, cracked, then dust
+PETRIFY_CRACK = 48                 # the frame its stone cracks
+PETRIFY_BURST = 78                 # the frame it bursts into dust
+RUBBLE_BASE = (2, 18, 30, 13)      # the base of the pile of rubble, inside the statue's 2 x 2 tiles: what is solid
 
 
 EASY_CHASE_FRAMES = 20 * FPS      # the easy crab chases this long...
@@ -4834,7 +4875,7 @@ def crab_target(app):
     return None if door is None else ("door", door)
 
 
-def step_crab(crab, goal, solids):
+def step_crab(crab, goal, solids, speed=CRAB_SPEED):
     """Move the crab one frame toward the middle of `goal` (a point in room pixels)."""
     x, y = crab_rect(crab).center
     dx, dy = goal[0] - x, goal[1] - y
@@ -4842,7 +4883,7 @@ def step_crab(crab, goal, solids):
     if distance < 1:
         crab["moving"] = False
         return
-    step = min(CRAB_SPEED, distance)
+    step = min(speed, distance)
     move_x = step * dx / distance
     move_y = step * dy / distance
     before = crab["pos"]
@@ -4991,8 +5032,8 @@ def move_easy_crab(app):
     tile = tuple(crab["next"])
     goal = tile_rect(*tile).center
     body = crab_rect(crab)
-    if math.hypot(goal[0] - body.centerx, goal[1] - body.centery) > CRAB_SPEED:
-        step_crab(crab, goal, solids)
+    if math.hypot(goal[0] - body.centerx, goal[1] - body.centery) > EASY_CRAB_SPEED:
+        step_crab(crab, goal, solids, EASY_CRAB_SPEED)
         if not crab["moving"]:
             crab["next"] = None  # something in the way: it starts again from where it is
         return
@@ -5013,7 +5054,7 @@ def move_easy_crab(app):
         return
     crab["heading"] = heading
     crab["next"] = (tile[0] + heading[0], tile[1] + heading[1])
-    step_crab(crab, tile_rect(*crab["next"]).center, solids)
+    step_crab(crab, tile_rect(*crab["next"]).center, solids, EASY_CRAB_SPEED)
 
 
 def farthest_tile(free, start, point, room):
@@ -5049,6 +5090,8 @@ def catch_players(app):
     body = crab_rect(crab)
     for number in hunted_players(app):  # it walks through a hidden player
         player = app["players"][number - 1]
+        if dashing(app, number):
+            continue  # too fast to catch: Flash goes past it
         if engine.player_room(state, number) == crab["room"] and body.colliderect(player_rect(player["pos"])):
             app["downed"][number] = DOWN_FRAMES
             crab["wait"] = CRAB_CATCH_FRAMES
@@ -5149,9 +5192,11 @@ def crab_news(app):
         if awake:
             sounds.play("crab_wake")
             start_crumble(app)  # the ship shakes, the statue trembles and bursts
-        elif app["seen"]["crab_at"] is not None and app["seen"]["crab_at"][0] == view(app)["room"]:
-            x, y = player_rect(app["seen"]["crab_at"][1]).center  # the crab turns to stone, and to dust
-            effects.spawn(app["fx"], x, y, 30, RUBBLE_COLORS, speed=1.2, life=40, up=0.8)
+        elif app["seen"]["crab_at"] is not None:
+            room, pos, facing = app["seen"]["crab_at"]  # where it was: there it turns to stone, then to dust
+            app["petrify"] = {"room": room, "pos": pos, "facing": facing, "age": 0}
+            if room == view(app)["room"]:
+                sounds.play("petrify")
         show_banner(app, story.MESSAGES["crab_wakes" if awake else "crab_sleeps"])
     downed = set(app["downed"])
     out = state["flags"]["out_player"]
@@ -5174,7 +5219,69 @@ def crab_news(app):
             show_banner(app, story.MESSAGES["partner_eliminated"])
     crab = app["crab"]
     app["seen"] = {"awake": awake, "downed": downed, "out": out, "caught": caught,
-                   "crab_at": None if crab is None else (crab["room"], crab["pos"])}
+                   "abilities": app["seen"].get("abilities", {}),
+                   "crab_at": None if crab is None else (crab["room"], crab["pos"], crab["facing"])}
+    update_petrify(app)
+
+
+def update_petrify(app):
+    """The crab turning to stone: once it cracks, the floor trembles; then it bursts into dust."""
+    stone = app["petrify"]
+    if stone is None:
+        return
+    stone["age"] += 1
+    if stone["age"] == PETRIFY_BURST and stone["room"] == view(app)["room"]:
+        x, y = player_rect(stone["pos"]).center
+        sounds.play("crumble")
+        if effects.FX["crumble"]:
+            effects.spawn(app["fx"], x, y, 40, RUBBLE_COLORS, speed=1.4, life=44, up=0.9, gravity=0.06)
+    if stone["age"] >= PETRIFY_FRAMES:
+        app["petrify"] = None
+
+
+_stone_crabs = {}
+
+
+def stone_crab(picture):
+    """The crab's picture in grey stone: its shading kept, its colours gone."""
+    key = id(picture)
+    if key not in _stone_crabs:
+        stone = pygame.transform.grayscale(picture)
+        stone.fill((150, 146, 138), special_flags=pygame.BLEND_RGB_MULT)  # its shading, softer...
+        stone.fill((96, 92, 84), special_flags=pygame.BLEND_RGB_ADD)      # ...on pale, warm marble, like the statue
+        _stone_crabs[key] = stone
+    return _stone_crabs[key]
+
+
+def draw_petrify(app, screen):
+    """The crab where it stood: its colour drains away into stone, the stone cracks and shivers,
+    and at the end it is gone in a burst of dust (see update_petrify)."""
+    stone = app["petrify"]
+    if stone is None or stone["room"] != view(app)["room"] or stone["age"] >= PETRIFY_BURST:
+        return
+    picture = sprites.image("crab")
+    body = player_rect(stone["pos"])
+    if picture is None:
+        pygame.draw.rect(screen, RUBBLE_COLORS[1], body)
+        return
+    small = pygame.transform.scale(picture, (CRAB_PICTURE_SIZE, CRAB_PICTURE_SIZE))
+    if stone["facing"][0] < 0:
+        small = pygame.transform.flip(small, True, False)
+    shiver = 0
+    if stone["age"] >= PETRIFY_CRACK:
+        shiver = (stone["age"] // 2) % 3 - 1  # cracked: it trembles before it bursts
+    place = small.get_rect(midbottom=(body.centerx + shiver, body.bottom + 2))
+    screen.blit(small, place)
+    grey = stone_crab(small).copy()
+    grey.set_alpha(min(255, 255 * stone["age"] // PETRIFY_CRACK))  # the colour drains away
+    screen.blit(grey, place)
+    if stone["age"] >= PETRIFY_CRACK:
+        cracks = 1 + 3 * (stone["age"] - PETRIFY_CRACK) // (PETRIFY_BURST - PETRIFY_CRACK)
+        for index in range(cracks):
+            x = place.left + 4 + round(scenery.hash01(index, 3, 21) * (place.width - 8))
+            y = place.top + 5 + round(scenery.hash01(index, 7, 21) * (place.height - 10))
+            pygame.draw.line(screen, RUBBLE_COLORS[2], (x, y), (x + 3 - 2 * (index % 2) * 3, y + 4), 1)
+            pygame.draw.line(screen, RUBBLE_COLORS[2], (x, y), (x - 2, y - 3), 1)
 
 
 # --- The statue crumbling, and the claw that breaks the screen ---------------------------
@@ -5350,12 +5457,15 @@ def reset_crab(app):
     app["downed"] = {}
     app["revive"] = {}
     app["hidden"] = {}
-    app["dash_trail"] = None
+    app["afterimages"] = []
+    app["beams"] = []
+    app["petrify"] = None
     app["crumble"] = 0
     app["shatter"] = None
     app["partner_reviving"] = False
     state = app["state"]
     app["seen"] = {"awake": state is not None and engine.crab_awake(state), "downed": set(),
+                   "abilities": {} if state is None else abilities_used(state),
                    "out": 0 if state is None else state["flags"]["out_player"],
                    "caught": state is not None and state["ending"] == "caught", "crab_at": None}
 
@@ -5537,13 +5647,23 @@ def apply_ability(app, number):
 
 
 def dash(app):
-    """Flash sprints DASH_TILES tiles the way they face: stopped by anything solid, and through
-    an open door or a portal on the way (a shut door stops them, and says why)."""
+    """Flash sprints DASH_TILES tiles the way they face, in DASH_FRAMES frames (see dash_step)."""
     player = local_player(app)
-    dx, dy = player["facing"]
-    start = player_rect(player["pos"]).center
-    room = view(app)["room"]
-    left = DASH_TILES * TILE
+    player["dash"] = DASH_FRAMES
+    player["dash_way"] = player["facing"]
+    sounds.play("dash")
+
+
+def dash_step(app):
+    """One frame of Flash's dash: a few pixels at a time, stopped by anything solid, and through
+    an open door or a portal on the way (a shut door stops them, and says why). The tiles of the
+    floor only count where the dash ends."""
+    player = local_player(app)
+    dx, dy = player["dash_way"]
+    player["dash"] -= 1
+    player["moving"] = True
+    player["walk"] += 1
+    left = DASH_TILES * TILE // DASH_FRAMES
     while left > 0:
         step = min(DASH_STEP, left)
         left -= step
@@ -5555,27 +5675,140 @@ def dash(app):
             if door != player["touching"]:
                 player["touching"] = door
                 go_through(app, door)
-            break
+            player["dash"] = 0
+            return
         portal = portal_touched(seen, player["pos"])
         if portal is not None:
             go_through_portal(app, portal)
-            break
+            player["dash"] = 0
+            return
         if player["pos"] == before:
-            break  # against something solid
-    app["dash_trail"] = {"room": room, "from": start, "to": player_rect(player["pos"]).center,
-                         "frames": DASH_TRAIL_FRAMES}
-    if view(app)["room"] != room:
-        app["dash_trail"] = None  # through the door at once (alone or on the host): nothing to show there
+            player["dash"] = 0  # against something solid
+            return
 
 
-def draw_dash_trail(app, screen):
-    """The yellow streak Flash leaves behind, fading."""
-    trail = app["dash_trail"]
-    if trail is None or trail["room"] != view(app)["room"]:
+def dashing(app, number):
+    """True while player `number` is in the middle of Flash's dash."""
+    return app["players"][number - 1]["dash"] > 0
+
+
+def abilities_used(state):
+    """Which player has used their ability: number -> True or False."""
+    return {number: state["flags"]["ability_used_" + str(number)] for number in (1, 2)}
+
+
+def ability_news(app):
+    """On every computer: an ability has just been used, here or on the other computer. Show it:
+    the ray of the wizard's spell, and the burst of Flash's start."""
+    state = app["state"]
+    if state is None:
         return
-    width = 1 + 4 * trail["frames"] // DASH_TRAIL_FRAMES
-    pygame.draw.line(screen, COLORS["highlight"], trail["from"], trail["to"], width)
-    pygame.draw.line(screen, COLORS["text"], trail["from"], trail["to"], 1)
+    used = abilities_used(state)
+    for number, now in used.items():
+        if not now or app["seen"].get("abilities", {}).get(number, False) or number > len(app["players"]):
+            continue
+        character = engine.character_of(state, number)
+        if engine.player_room(state, number) != view(app)["room"]:
+            continue  # elsewhere on the ship: nothing to see here
+        body = player_rect(app["players"][number - 1]["pos"])
+        if character == "wizard":
+            start_beam(app, number)
+        elif character == "flash" and effects.FX["wand"]:
+            effects.spawn(app["fx"], body.centerx, body.centery, 16, DASH_SPARKS, speed=1.6, life=18)
+    app["seen"]["abilities"] = used
+
+
+def start_beam(app, number):
+    """The wizard's spell: a ray from the wand to the crab, if it is in the room; otherwise the
+    way the wizard faces, as far as a wall (the spell finds the crab wherever it is)."""
+    player = app["players"][number - 1]
+    room = engine.player_room(app["state"], number)
+    body = player_rect(player["pos"])
+    fx, fy = player["facing"]
+    start = (body.centerx + fx * 7, body.centery - 6 + fy * 4)  # the tip of the wand
+    crab = app["crab"]
+    if crab is not None and crab["room"] == room:
+        end = crab_rect(crab).center
+    else:
+        end = start
+        walls = wall_rects(room)
+        for _ in range(BEAM_REACH // 4):
+            ahead = (end[0] + fx * 4, end[1] + fy * 4)
+            if pygame.Rect(ahead[0] - 1, ahead[1] - 1, 2, 2).collidelist(walls) != -1:
+                break
+            end = ahead
+    app["beams"].append({"room": room, "from": start, "to": end, "age": 0})
+    sounds.play("zap")
+    if effects.FX["wand"]:
+        effects.spawn(app["fx"], end[0], end[1], 24, BEAM_COLORS, speed=1.4, life=26, up=0.3)
+
+
+def update_ability_effects(app):
+    """The afterimages of a dash and the rays of a spell: they fade, and a dashing Flash leaves new ones."""
+    for image in app["afterimages"]:
+        image["age"] += 1
+    app["afterimages"] = [image for image in app["afterimages"] if image["age"] < AFTERIMAGE_FRAMES]
+    for beam in app["beams"]:
+        beam["age"] += 1
+    app["beams"] = [beam for beam in app["beams"] if beam["age"] < BEAM_FRAMES]
+    if app["state"] is None:
+        return
+    for number, player in enumerate(app["players"], start=1):
+        if player["dash"] <= 0 or engine.player_room(app["state"], number) != view(app)["room"]:
+            continue
+        picture = player_picture(app, player)
+        if picture is None:
+            continue
+        glow = picture.copy()
+        glow.fill((255, 226, 90), special_flags=pygame.BLEND_RGB_MULT)  # a copy of Flash, in yellow
+        glow.fill((70, 50, 0), special_flags=pygame.BLEND_RGB_ADD)
+        body = player_rect(player["pos"])
+        app["afterimages"].append({"picture": glow, "feet": (body.centerx, body.bottom + 1), "age": 0})
+        if effects.FX["wand"]:
+            effects.spawn(app["fx"], body.centerx, body.centery, 3, DASH_SPARKS, speed=0.6, life=14)
+
+
+def draw_afterimages(app, screen):
+    """The yellow copies a dashing Flash leaves behind, older ones fainter."""
+    for image in app["afterimages"]:
+        picture = image["picture"]
+        picture.set_alpha(200 - 200 * image["age"] // AFTERIMAGE_FRAMES)
+        screen.blit(picture, picture.get_rect(midbottom=image["feet"]))
+
+
+def beam_points(beam, frame):
+    """The zigzag of a ray: its ends fixed, the points between jumping sideways every few frames."""
+    (x0, y0), (x1, y1) = beam["from"], beam["to"]
+    length = math.hypot(x1 - x0, y1 - y0) or 1.0
+    nx, ny = -(y1 - y0) / length, (x1 - x0) / length
+    count = max(int(length // 10), 1)
+    points = [(x0, y0)]
+    for index in range(1, count):
+        share = index / count
+        jump = (scenery.hash01(index, frame // 3, 5) - 0.5) * 8
+        points.append((x0 + (x1 - x0) * share + nx * jump, y0 + (y1 - y0) * share + ny * jump))
+    points.append((x1, y1))
+    return points
+
+
+def draw_beams(app, screen):
+    """The rays of the wizard's spell: a violet zigzag with a white core, thinner as it fades,
+    and a ring that opens where it strikes."""
+    for beam in app["beams"]:
+        if beam["room"] != view(app)["room"]:
+            continue
+        left = 1 - beam["age"] / BEAM_FRAMES
+        points = [(round(x), round(y)) for x, y in beam_points(beam, app["frame"])]
+        if len(points) >= 2:
+            if effects.FX["lights"]:
+                for point in points[::2]:
+                    effects.glow(screen, point, 8, (40, 20, 70), left)
+            pygame.draw.lines(screen, BEAM_COLORS[0], False, points, max(1, round(5 * left)))
+            pygame.draw.lines(screen, BEAM_COLORS[1], False, points, max(1, round(3 * left)))
+            pygame.draw.lines(screen, BEAM_COLORS[2], False, points, 1)
+        ring = 3 + beam["age"] // 2
+        if left > 0.3:
+            pygame.draw.circle(screen, BEAM_COLORS[1], (round(beam["to"][0]), round(beam["to"][1])), ring, 1)
 
 
 def ability_hint(app):
@@ -5612,7 +5845,7 @@ def draw_ability_hint(app, screen):
 def player_info(player):
     """What the other computer needs to draw a player."""
     return {"pos": list(player["pos"]), "facing": list(player["facing"]), "moving": player["moving"],
-            "walk": player["walk"]}
+            "walk": player["walk"], "dash": player["dash"]}
 
 
 def take_player_info(player, info):
@@ -5621,6 +5854,7 @@ def take_player_info(player, info):
     player["facing"] = tuple(info["facing"])
     player["moving"] = bool(info["moving"])
     player["walk"] = int(info["walk"])
+    player["dash"] = int(info.get("dash", 0))
 
 
 def send(app, message):
@@ -6842,10 +7076,12 @@ def draw_room(app, screen):
     for player in app["players"]:
         if same_room(app, player):
             draw_downed_bars(app, screen, player)
-    draw_dash_trail(app, screen)
+    draw_petrify(app, screen)
     for thing in standing:
         if thing["id"] not in drawn:
             draw_standing(app, screen, thing)
+    draw_afterimages(app, screen)
+    draw_beams(app, screen)
     # The effects on top: barriers dissolving, the key welding, particles, dust, and the light.
     for thing in things:
         if thing["kind"] == "anvil" and effects.FX["anvil"] and not engine.key_fused(state):
@@ -7523,17 +7759,62 @@ def character_lines(app, character):
     return lines
 
 
+DIFFICULTY_BOX = (108, 112)   # each of the two frames of the choice of the crab
+DIFFICULTY_TOP = 46           # where they start, from the top of the screen
+DIFFICULTY_GAP = 12           # the sea between them
+DIFFICULTY_BACKS = {"easy": (22, 44, 70), "hard": (54, 14, 20)}  # the inside of each frame: sea, or blood
+_portraits = {}
+
+
+def claw_portrait(fierce, opening):
+    """The claw in a frame of the choice of the crab, made once for each way it can be open."""
+    key = (fierce, round(opening, 2))
+    if key not in _portraits:
+        _portraits[key] = claw.portrait((DIFFICULTY_BOX[0] - 8, DIFFICULTY_BOX[1] - 26), fierce, opening)
+    return _portraits[key]
+
+
+def difficulty_boxes():
+    """The two frames of the choice of the crab, side by side: difficulty -> rect."""
+    left = (WIDTH - 2 * DIFFICULTY_BOX[0] - DIFFICULTY_GAP) // 2
+    return {difficulty: pygame.Rect(left + index * (DIFFICULTY_BOX[0] + DIFFICULTY_GAP), DIFFICULTY_TOP,
+                                    *DIFFICULTY_BOX)
+            for index, difficulty in enumerate(story.DIFFICULTIES)}
+
+
 def draw_difficulty_choice(app, screen):
-    """The choice of the crab of a game for two, over the calm sea of the title, and what the highlighted one does."""
+    """The choice of the crab of a game for two, over the calm sea of the title: two frames side by
+    side, a common crab's claw for the easy one and the red claw of the end for the hard one. The
+    highlighted one blinks and slowly opens and shuts its jaws; the other is dark. Under them, what
+    the highlighted crab does."""
     draw_sea(app, screen, screen.get_rect(), calm=True)
     font = app["fonts"]["text"]
-    draw_text(screen, app["fonts"]["title"], story.MESSAGES["choose_difficulty"], COLORS["text"], (WIDTH // 2, 36),
+    draw_text(screen, app["fonts"]["title"], story.MESSAGES["choose_difficulty"], COLORS["text"], (WIDTH // 2, 22),
               "center", True)
-    draw_menu(app, screen, 84)
     entries = menu_entries(app)
-    text = story.DIFFICULTIES[entries[app["menu_index"] % len(entries)]]["text"]
-    for index, line in enumerate(wrap(text, WIDTH - 32, text_width(font))):
-        draw_text(screen, font, line, COLORS["text"], (WIDTH // 2, 136 + index * font.get_linesize()), "center", True)
+    chosen = entries[app["menu_index"] % len(entries)]
+    for difficulty, frame in difficulty_boxes().items():
+        here = difficulty == chosen
+        pygame.draw.rect(screen, DIFFICULTY_BACKS[difficulty], frame)
+        if here and difficulty == "hard" and effects.FX["lights"]:
+            effects.glow(screen, (frame.centerx, frame.top + 46), 40, (90, 10, 10),
+                         effects.pulse(app["frame"], 0.08, 0.5, 1.0))  # it beats, like blood
+        opening = 0.2 + 0.12 * math.sin(app["frame"] * 0.07) if here else 0.2
+        picture = claw_portrait(difficulty == "hard", round(opening * 20) / 20)
+        screen.blit(picture, picture.get_rect(midtop=(frame.centerx, frame.top + 4)))
+        name = story.MESSAGES["menu_" + difficulty]
+        draw_text(screen, app["fonts"]["text"], name, COLORS["highlight"] if here else COLORS["dim_text"],
+                  (frame.centerx, frame.bottom - 16), "center", True)
+        blink = (app["frame"] // 24) % 2 == 1
+        border = COLORS["highlight"] if here and not blink else COLORS["dim_text"]
+        pygame.draw.rect(screen, border, frame, 2 if here else 1)
+        if not here:
+            shade(screen, frame.inflate(-2, -2), 130)
+    text = story.DIFFICULTIES[chosen]["text"]
+    top = DIFFICULTY_TOP + DIFFICULTY_BOX[1] + 8
+    for index, line in enumerate(wrap(text, WIDTH - 24, text_width(font))):
+        draw_text(screen, font, line, COLORS["text"], (WIDTH // 2, top + index * font.get_linesize()), "center", True)
+    draw_lines_at_bottom(app, screen, story.MESSAGES["choose_hint"])
 
 
 def draw_mode_choice(app, screen):
@@ -8904,6 +9185,10 @@ LIGHT = (252, 156, 124)    # the edge that catches the light: salmon
 PLATE = (88, 20, 28)       # the dark plates of the joints
 TOOTH = (250, 228, 204)    # the small teeth inside the grip
 LIGHT_FROM = (-0.7071, -0.7071)  # the way to the light: up and to the left
+RED = {"outline": OUTLINE, "shadow": SHADOW, "base": BASE, "light": LIGHT, "plate": PLATE, "tooth": TOOTH}
+# A common shore crab, for the easy crab on the choice of the difficulty: sandy orange, softer.
+CORAL = {"outline": (62, 30, 22), "shadow": (172, 84, 50), "base": (230, 136, 80), "light": (255, 212, 160),
+         "plate": (122, 60, 38), "tooth": (250, 238, 214)}
 
 # --- The limb: lengths and widths, in pixels ------------------------------------------------
 
@@ -8936,21 +9221,22 @@ JAW_OPEN = 0.62                 # radians each jaw is open while the claw comes 
 RECOIL = (-3, -3, -2, 1, -1, 1, 0, -1, 0)  # pixels along the arm, frame by frame from the hit: a kick, then a shiver
 
 
-def jaw_line(hinge, heading, side, opening):
+def jaw_line(hinge, heading, side, opening, length=JAW, gap=JAW_GAP, spread=JAW_SPREAD, curl=JAW_CURL):
     """The middle line of one jaw: points from the hand to the tip.
 
     `side` is 1 for the jaw on the left of the way the hand points, -1 for the
     other. It leaves the hand leaning outwards and curls back in, so that the
-    two tips meet when `opening` is 0.
+    two tips meet when `opening` is 0. The giant claw has the jaws of the
+    constants above; a smaller one gives its own `length`, `gap`, `spread` and `curl`.
     """
     nx, ny = -math.sin(heading), math.cos(heading)  # the left of the way the hand points
-    x = hinge[0] - side * JAW_GAP * nx
-    y = hinge[1] - side * JAW_GAP * ny
+    x = hinge[0] - side * gap * nx
+    y = hinge[1] - side * gap * ny
     points = [(x, y)]
-    step = JAW / JAW_STEPS
+    step = length / JAW_STEPS
     for index in range(JAW_STEPS):
         along = (index + 0.5) / JAW_STEPS
-        turn = heading - side * (opening + JAW_SPREAD - JAW_CURL * along)
+        turn = heading - side * (opening + spread - curl * along)
         x += step * math.cos(turn)
         y += step * math.sin(turn)
         points.append((x, y))
@@ -9098,41 +9384,42 @@ def dot(surface, x, y, color):
         surface.set_at((x, y), color)
 
 
-def ribbon(surface, points, widths):
+def ribbon(surface, points, widths, tones=RED):
     """A piece of shell along a line of points, round like a tube: outline, red, shadow on the side
     away from the light, a pale edge on the side towards it, a dither where shadow and red meet,
-    and a few grains so that the shell is not flat."""
+    and a few grains so that the shell is not flat. `tones` are the four tones of the shell."""
     sides = normals(points)
     lit = lit_side(sides)
-    strip(surface, OUTLINE, points, widths, sides, -1, 1, extra=1.5)
-    strip(surface, BASE, points, widths, sides, -1, 1)
-    strip(surface, SHADOW, points, widths, sides, -lit, -lit * 0.25)
-    strip(surface, LIGHT, points, widths, sides, lit * 0.5, lit * 0.8)
+    strip(surface, tones["outline"], points, widths, sides, -1, 1, extra=1.5)
+    strip(surface, tones["base"], points, widths, sides, -1, 1)
+    strip(surface, tones["shadow"], points, widths, sides, -lit, -lit * 0.25)
+    strip(surface, tones["light"], points, widths, sides, lit * 0.5, lit * 0.8)
     for index, ((x, y), (nx, ny), width) in enumerate(along(points, widths, sides, 2)):
         if index % 2 == 0:  # every other pixel just past the shadow: shadow and red mix
-            dot(surface, x - lit * nx * width * 0.13, y - lit * ny * width * 0.13, SHADOW)
+            dot(surface, x - lit * nx * width * 0.13, y - lit * ny * width * 0.13, tones["shadow"])
     for index, ((x, y), (nx, ny), width) in enumerate(along(points, widths, sides, 5)):
         if width < 5:
             continue  # too thin for grains: the tip of a jaw
         share = GRAINS[index % len(GRAINS)]
-        dot(surface, x + lit * nx * width * share, y + lit * ny * width * share, SHADOW if share > -0.25 else OUTLINE)
+        dot(surface, x + lit * nx * width * share, y + lit * ny * width * share,
+            tones["shadow"] if share > -0.25 else tones["outline"])
 
 
-def joint(surface, center, radius, heading):
+def joint(surface, center, radius, heading, tones=RED):
     """A joint of the limb: two dark plates, one over the other, with a hard outline and a glint."""
     x, y = round(center[0]), round(center[1])
-    pygame.draw.circle(surface, OUTLINE, (x, y), radius + 1)
-    pygame.draw.circle(surface, PLATE, (x, y), radius)
+    pygame.draw.circle(surface, tones["outline"], (x, y), radius + 1)
+    pygame.draw.circle(surface, tones["plate"], (x, y), radius)
     over = (round(x + 3 * math.cos(heading)), round(y + 3 * math.sin(heading)))  # the plate of the next segment
-    pygame.draw.circle(surface, OUTLINE, over, radius - 2)
-    pygame.draw.circle(surface, SHADOW, over, radius - 3)
+    pygame.draw.circle(surface, tones["outline"], over, radius - 2)
+    pygame.draw.circle(surface, tones["shadow"], over, radius - 3)
     glint = (over[0] - radius // 3, over[1] - radius // 3)
     if surface.get_rect().collidepoint(glint):
-        pygame.draw.rect(surface, LIGHT, (glint[0], glint[1], 2, 1))
-        surface.set_at((glint[0], glint[1] + 1), BASE)
+        pygame.draw.rect(surface, tones["light"], (glint[0], glint[1], 2, 1))
+        surface.set_at((glint[0], glint[1] + 1), tones["base"])
 
 
-def thorn(surface, base, direction, wide, tall, color):
+def thorn(surface, base, direction, wide, tall, color, outline=OUTLINE):
     """A small triangle standing on an edge: a spike of chitin, or a tooth."""
     along = (-direction[1], direction[0])
     corners = [(base[0] - along[0] * wide, base[1] - along[1] * wide),
@@ -9140,7 +9427,7 @@ def thorn(surface, base, direction, wide, tall, color):
                (base[0] + along[0] * wide, base[1] + along[1] * wide)]
     corners = [(round(x), round(y)) for x, y in corners]
     pygame.draw.polygon(surface, color, corners)
-    pygame.draw.polygon(surface, OUTLINE, corners, 1)
+    pygame.draw.polygon(surface, outline, corners, 1)
 
 
 def segment(start, end, widths, count=5):
@@ -9200,6 +9487,102 @@ def layer(size, limb, offset=(0, 0)):
 def shadow_of(picture, darkness=120):
     """The dark shape a picture of the limb casts: the same outline, see-through black."""
     return pygame.mask.from_surface(picture).to_surface(setcolor=(0, 0, 0, darkness), unsetcolor=(0, 0, 0, 0))
+
+
+# --- Portraits: a claw alone in a frame, for the choice of the difficulty -------------------
+#
+# The same shell as the giant claw, smaller and still: a forearm coming in from the bottom
+# left, the hand, and the two jaws pointing up and to the right. The gentle one is a common
+# crab's claw: sandy orange, thick and round, with blunt jaws, knobbly little teeth and pale
+# speckles on the hand. The fierce one is the claw of the end of the game: red, with long
+# hooked jaws full of sharp teeth and a saw of spikes along its arm and its hand.
+
+PORTRAIT_AIM = -0.9      # radians: where the hand points, up and to the right
+GENTLE = {"tones": CORAL, "fore": (6, 8, 8), "hand": (10, 16, 17, 13), "hand_length": 30,
+          "jaw": 36, "jaw_widths": (8, 9, 8, 8, 7, 6, 5, 4, 3), "gap": 6, "spread": 0.3, "curl": 0.75,
+          "spikes": 0, "teeth": 4, "tooth": (2, 2)}
+FIERCE = {"tones": RED, "fore": (6, 8, 8), "hand": (9, 13, 13, 10), "hand_length": 26,
+          "jaw": 46, "jaw_widths": (8, 8, 7, 6, 5, 4, 3, 2, 1), "gap": 5, "spread": 0.55, "curl": 1.35,
+          "spikes": 6, "teeth": 6, "tooth": (2, 5)}
+SPECKLES = ((0.25, 0.35), (0.5, -0.4), (0.7, 0.25), (0.45, 0.05), (0.85, -0.15), (0.15, -0.25))  # along, across
+
+
+def seam(surface, point, heading, half_width, tones):
+    """Where two pieces of shell meet: a dark line across, with a pale glint on the lit side."""
+    nx, ny = -math.sin(heading), math.cos(heading)
+    a = (round(point[0] - nx * half_width), round(point[1] - ny * half_width))
+    b = (round(point[0] + nx * half_width), round(point[1] + ny * half_width))
+    pygame.draw.line(surface, tones["outline"], a, b, 2)
+    lit = a if nx * LIGHT_FROM[0] + ny * LIGHT_FROM[1] < 0 else b
+    toward = (point[0] - lit[0], point[1] - lit[1])
+    length = math.hypot(*toward) or 1.0
+    glint = (round(lit[0] + toward[0] / length * 3 + math.cos(heading) * 2),
+             round(lit[1] + toward[1] / length * 3 + math.sin(heading) * 2))
+    dot(surface, glint[0], glint[1], tones["light"])
+
+
+def portrait(size, fierce, opening=0.25):
+    """A claw alone on a clear picture of this size: the fierce red one, or the gentle orange one."""
+    look = FIERCE if fierce else GENTLE
+    tones = look["tones"]
+    width, height = size
+    picture = pygame.Surface(size, pygame.SRCALPHA)
+    heading = PORTRAIT_AIM
+    cos, sin = math.cos(heading), math.sin(heading)
+    reach = look["hand_length"] + look["jaw"] * 0.7  # from the wrist to about the tips
+    wrist = (width * 0.5 - reach * cos * 0.5, height * 0.52 - reach * sin * 0.5)
+    elbow = (wrist[0] - 40 * math.cos(heading + 0.3), wrist[1] - 40 * math.sin(heading + 0.3))
+    hinge = (wrist[0] + look["hand_length"] * cos, wrist[1] + look["hand_length"] * sin)
+    fore, fore_widths = segment(elbow, wrist, look["fore"])
+    hand, hand_widths = segment(wrist, hinge, look["hand"], 7)
+    outer = -1 if lit_side(normals(fore)) == 1 else 1  # the side away from the light: the back of the claw
+    if look["spikes"]:  # the saw of chitin along the back of the arm and of the hand
+        for line, widths in ((fore, fore_widths), (hand, hand_widths)):
+            line_sides = normals(line)
+            rim = edge(line, widths, line_sides, outer)
+            for index in range(1, len(rim) - 1):
+                nx, ny = line_sides[index]
+                thorn(picture, rim[index], (nx * outer, ny * outer), 2, 6 if index % 2 else 4, tones["shadow"],
+                      tones["outline"])
+    ribbon(picture, fore, fore_widths, tones)
+    knuckle = (round(hinge[0] + cos * 2), round(hinge[1] + sin * 2))  # under the roots of the two jaws: no hole
+    pygame.draw.circle(picture, tones["outline"], knuckle, look["gap"] + 3)
+    pygame.draw.circle(picture, tones["shadow"], knuckle, look["gap"] + 2)
+    for side in (1, -1):
+        line = jaw_line(hinge, heading, side, opening, look["jaw"], look["gap"], look["spread"], look["curl"])
+        widths = list(look["jaw_widths"])
+        jaw_sides = normals(line)
+        inner = edge(line, widths, jaw_sides, side)
+        wide, tall = look["tooth"]
+        for index in range(look["teeth"]):
+            place = 1 + index
+            nx, ny = jaw_sides[place]
+            if fierce:
+                thorn(picture, inner[place], (nx * side, ny * side), wide, tall - index % 2, tones["tooth"],
+                      tones["outline"])
+            else:  # knobbly little teeth: round bumps
+                x, y = inner[place][0] + nx * side * 1.5, inner[place][1] + ny * side * 1.5
+                pygame.draw.circle(picture, tones["outline"], (round(x), round(y)), wide + 1)
+                pygame.draw.circle(picture, tones["tooth"], (round(x), round(y)), wide)
+        ribbon(picture, line, widths, tones)
+        if not fierce:  # a blunt, rounded tip, darker like a real crab's
+            tip = line[-1]
+            pygame.draw.circle(picture, tones["outline"], (round(tip[0]), round(tip[1])), 4)
+            pygame.draw.circle(picture, tones["plate"], (round(tip[0]), round(tip[1])), 3)
+            dot(picture, tip[0] - 1, tip[1] - 1, tones["shadow"])
+    ribbon(picture, hand, hand_widths, tones)
+    if not fierce:  # pale speckles on the round palm
+        hand_sides = normals(hand)
+        for along_share, across in SPECKLES:
+            place = along_share * (len(hand) - 1)
+            low = min(int(place), len(hand) - 2)
+            x = hand[low][0] + (hand[low + 1][0] - hand[low][0]) * (place - low)
+            y = hand[low][1] + (hand[low + 1][1] - hand[low][1]) * (place - low)
+            nx, ny = hand_sides[low]
+            w = hand_widths[low]
+            pygame.draw.rect(picture, tones["light"], (round(x + nx * w * across), round(y + ny * w * across), 2, 2))
+    seam(picture, wrist, heading, look["fore"][-1] + 1, tones)
+    return picture
 
 
 ================================================================================
@@ -11354,6 +11737,12 @@ EFFECTS = {
     "knocked_out": [(330, 0.15), (262, 0.15), (196, 0.15), (131, 0.4)],  # a player is out of the game
     # The crab statue shakes and crumbles: low, jagged noise over a deep square wave.
     "crumble": [(-90, 0.08), (55, 0.05), (-60, 0.12), (41, 0.06), (-45, 0.2), (-30, 0.25)],
+    # The wizard's spell: a ray that crackles, falling and rising.
+    "zap": [(1568, 0.03), (-3000, 0.02), (1175, 0.03), (-2500, 0.02), (1760, 0.05), (2349, 0.08)],
+    # Flash's dash: a rush of air.
+    "dash": [(-6000, 0.03), (-4000, 0.04), (-2500, 0.06)],
+    # The crab turns to stone: a grinding that slows down.
+    "petrify": [(-70, 0.1), (62, 0.08), (-55, 0.12), (49, 0.1), (-40, 0.3)],
     # The giant claw snaps shut: a dry crack.
     "snap": [(-4000, 0.015), (1800, 0.02), (-2500, 0.025), (90, 0.05)],
     # The screen breaks like glass: a high crackle with a few bright chips.
@@ -15098,7 +15487,7 @@ def test_the_clue_sound_exists():
 def test_a_new_app_has_one_player_with_the_old_starting_values(app):
     assert len(app["players"]) == 1
     assert p1(app) == {"pos": (0, 0), "facing": (0, 1), "touching": None, "walk": 0, "moving": False,
-                       "on_tile": None, "zones": set()}
+                       "on_tile": None, "zones": set(), "dash": 0, "dash_way": (0, 0)}
     assert main.new_player((5, 7))["pos"] == (5, 7)
     for key in ("player", "facing", "touching", "walk", "moving", "on_tile", "zones"):
         assert key not in app, key  # they all live in the player now
@@ -15914,20 +16303,31 @@ def flash_game(app, actions=()):
     as_characters(app, "flash", "wizard")
 
 
-def test_flash_dashes_five_tiles_the_way_they_face(app, heard):
+def dash_out(app, dx=0, dy=0):
+    """Let the dash run its frames, with a direction held that it ignores."""
+    for _ in range(main.DASH_FRAMES + 1):
+        main.update(app, dx, dy)
+
+
+def test_flash_dashes_eight_tiles_the_way_they_face_in_a_few_frames(app, heard):
     flash_game(app)
-    p1(app)["pos"] = free_spot(app, 3, 6)
+    p1(app)["pos"] = free_spot(app, 2, 6)
     main.update(app, 1, 0)  # facing right
     start = p1(app)["pos"]
     press(app, pygame.K_SPACE)
-    assert p1(app)["pos"] == (start[0] + main.DASH_TILES * main.TILE, start[1])
-    assert app["dash_trail"] is not None and "ability" in heard
-    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))  # the streak
-    for _ in range(main.DASH_TRAIL_FRAMES):
+    assert p1(app)["dash"] == main.DASH_FRAMES and "ability" in heard and "dash" in heard
+    main.update(app, 0, 1)
+    assert p1(app)["pos"] == (start[0] + main.DASH_TILES * main.TILE // main.DASH_FRAMES, start[1])  # the keys wait
+    assert app["afterimages"] and main.DASH_TILES == 8
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))  # the yellow afterimages
+    dash_out(app)
+    assert p1(app)["pos"] == (start[0] + main.DASH_TILES * main.TILE, start[1]) and p1(app)["dash"] == 0
+    for _ in range(main.AFTERIMAGE_FRAMES):
         main.update(app, 0, 0)
-    assert app["dash_trail"] is None
+    assert app["afterimages"] == []
     where = p1(app)["pos"]
     press(app, pygame.K_SPACE)  # once only
+    dash_out(app)
     assert p1(app)["pos"] == where
 
 
@@ -15936,6 +16336,7 @@ def test_the_dash_stops_against_a_wall(app):
     p1(app)["pos"] = free_spot(app, 3, 6)
     main.update(app, -1, 0)  # facing left, three tiles from the railing
     press(app, pygame.K_SPACE)
+    dash_out(app)
     body = main.player_rect(p1(app)["pos"])
     assert body.left == main.tile_rect(1, 0).left and body.collidelist(main.solid_rects(app["state"])) == -1
     assert app["state"]["room"] == "deck"
@@ -15947,6 +16348,7 @@ def test_the_dash_goes_through_an_open_door_on_its_way(app):
     p1(app)["pos"] = (p1(app)["pos"][0], p1(app)["pos"][1] + 2 * main.TILE)  # two tiles below the door
     p1(app)["facing"] = (0, -1)
     press(app, pygame.K_SPACE)
+    dash_out(app)
     assert app["state"]["room"] == "cabin"
     assert p1(app)["pos"] == main.spawn_in_front_of("cabin_to_deck")  # where anyone comes in
 
@@ -15957,6 +16359,7 @@ def test_the_dash_stops_at_a_shut_door_which_says_why(app):
     p1(app)["pos"] = (p1(app)["pos"][0], p1(app)["pos"][1] - 2 * main.TILE)
     p1(app)["facing"] = (0, 1)
     press(app, pygame.K_SPACE)
+    dash_out(app)
     assert app["state"]["room"] == "deck" and dialog_text(app) == " ".join(
         main.wrap(story.DOORS["deck_to_hold"]["barred_text"], main.DIALOG_TEXT_WIDTH, main.text_width(app["fonts"]["text"])))
 
@@ -15969,6 +16372,7 @@ def test_the_dash_takes_a_portal_on_its_way(app):
     p1(app)["pos"] = (ring.centerx - main.PLAYER_SIZE // 2, ring.bottom + main.TILE)
     p1(app)["facing"] = (0, -1)
     press(app, pygame.K_SPACE)
+    dash_out(app)
     assert app["state"]["room"] == "mine"
 
 
@@ -15981,12 +16385,14 @@ def test_the_dash_carries_flash_past_the_crab(app):
     p1(app)["pos"] = (crab[0] - 2 * main.TILE, crab[1])  # the crab two tiles to the right
     p1(app)["facing"] = (1, 0)
     press(app, pygame.K_SPACE)
+    dash_out(app)  # right through it, frame by frame: too fast to catch
     assert p1(app)["pos"][0] > crab[0] + main.TILE  # on its other side
     main.update(app, 0, 0)
     assert app["downed"] == {}
 
 
-def test_the_dash_lights_only_the_tile_it_lands_on(app, heard):
+def test_the_dash_lights_only_the_tile_it_lands_on(app, heard, monkeypatch):
+    monkeypatch.setattr(main, "DASH_TILES", 5)  # a shorter dash: a long one would start beyond the hold's wall
     flash_game(app, IN_THE_HOLD)
     as_characters(app, "flash", "wizard")
     first, last = main.thing_rect("tile_1"), main.thing_rect("tile_3")
@@ -15995,6 +16401,9 @@ def test_the_dash_lights_only_the_tile_it_lands_on(app, heard):
     main.settle_on_floor(app, p1(app))
     p1(app)["facing"] = (1, 0)
     press(app, pygame.K_SPACE)  # over tile 1 and tile 2, landing on tile 3
+    for _ in range(main.DASH_FRAMES):
+        main.update(app, 0, 0)
+        assert "blip" not in heard  # nothing it flies over counts
     assert main.tile_under(app["state"], p1(app)["pos"]) == "tile_3"
     main.update(app, 0, 0)
     assert "blip" not in heard and app["state"]["flags"]["hold_step"] == 0  # tile 3 is not the first of the wave
@@ -16015,6 +16424,8 @@ def test_abilities_reach_the_host_from_the_other_computer(two_computers):
     assert main.ability_hint(guest) is None
     press(host, pygame.K_SPACE)
     pump(host, guest, lambda: guest["crab"]["stun"] > 0)
+    pump(host, guest, lambda: guest["beams"] != [])  # the ray of the spell, on both screens
+    assert host["beams"] != []
     main.draw(guest, pygame.Surface((main.WIDTH, main.HEIGHT)))
 
 
@@ -16208,18 +16619,35 @@ def test_the_statue_lies_in_pieces_once_the_crab_is_out_and_for_good(app):
     assert app["crab"] is None and engine.statue_broken(app["state"])
 
 
-def test_the_crab_vanishes_in_a_puff_of_dust(app):
+def test_the_crab_turns_to_stone_where_it_stands_then_to_dust(app, heard):
     two_playing(app, FIRST_HALF)
     awake_crab(app)
     main.update(app, 0, 0)
-    where = main.player_rect(app["crab"]["pos"]).center
+    crab = app["crab"]
+    where = main.player_rect(crab["pos"]).center
     state = play_two(KEY_FUSED)
     state["room"], state["flags"]["partner_room"] = "deck", "deck"
     app["state"] = state
     app["fx"]["particles"].clear()
     main.update(app, 0, 0)
+    stone = app["petrify"]
+    assert app["crab"] is None and stone is not None and stone["pos"] == crab["pos"] and "petrify" in heard
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    colours = []
+    for age in (2, main.PETRIFY_CRACK - 1, main.PETRIFY_CRACK + 10):
+        stone["age"] = age
+        main.draw_room(app, screen)
+        r, g, b = screen.get_at(where)[:3]
+        colours.append(max(r, g, b) - min(r, g, b))  # how much colour is left
+    assert colours[1] < colours[0]  # grey: stone
+    stone["age"] = main.PETRIFY_BURST - 1
+    main.update(app, 0, 0)
     dust = [one for one in app["fx"]["particles"] if one["color"] in main.RUBBLE_COLORS]
-    assert len(dust) >= 20 and all(abs(one["x"] - where[0]) < 12 and abs(one["y"] - where[1]) < 12 for one in dust)
+    assert len(dust) >= 20 and all(abs(one["x"] - where[0]) < 16 and abs(one["y"] - where[1]) < 16 for one in dust)
+    assert "crumble" in heard
+    for _ in range(main.PETRIFY_FRAMES):
+        main.update(app, 0, 0)
+    assert app["petrify"] is None
 
 
 # --- The whole screen (F11) -----------------------------------------------------------------
@@ -17319,7 +17747,7 @@ def test_the_easy_crab_decides_only_in_the_middle_of_a_tile_and_never_turns_back
             turns += 1
             tile = main.tile_of(crab["pos"])
             body = main.crab_rect(crab)
-            assert pygame.Vector2(body.center).distance_to(main.tile_rect(*tile).center) <= main.CRAB_SPEED + 1  # a pixel
+            assert pygame.Vector2(body.center).distance_to(main.tile_rect(*tile).center) <= main.EASY_CRAB_SPEED + 1  # a pixel
             if crab["heading"] == (-before[0], -before[1]):  # back only where the way ends
                 ways = [way for way in main.HEADINGS if (tile[0] + way[0], tile[1] + way[1]) in free]
                 assert ways == [crab["heading"]]
@@ -17436,6 +17864,139 @@ def test_the_hard_crab_is_the_one_of_always(app):
     for _ in range(30):
         main.update(app, 0, 0)
     assert app["crab"]["next"] is None and app["crab"]["clock"] == 0  # the arcade crab's things stay unused
+
+
+
+# --- The easy crab's speed, the dash, the spell, the stone, the rubble, the ending for both ---
+
+
+def test_the_easy_crab_is_faster_than_the_hard_one_and_slower_than_the_players(app):
+    assert main.CRAB_SPEED < main.EASY_CRAB_SPEED < main.PLAYER_SPEED
+    two_playing(app, FIRST_HALF)
+    easy(app)
+    awake_crab(app)
+    p1(app)["pos"] = free_spot(app, 4, 20)
+    app["players"][1]["pos"] = free_spot(app, 4, 20)
+    steps = []
+    for _ in range(60):
+        last = app["crab"]["pos"]
+        main.update(app, 0, 0)
+        steps.append((pygame.Vector2(app["crab"]["pos"]) - pygame.Vector2(last)).length())
+    assert max(steps) <= main.EASY_CRAB_SPEED + 1.01  # a pixel of rounding
+    assert sum(steps) > 60 * main.CRAB_SPEED  # it covers more ground than the hard one could
+
+
+def test_a_dashing_flash_on_the_other_computer_leaves_afterimages_here(app):
+    two_playing(app, FIRST_HALF)
+    as_characters(app, "wizard", "flash")
+    other = app["players"][1]
+    other["pos"] = free_spot(app, 4, 6)
+    main.take_player_info(other, dict(main.player_info(other), dash=4))  # what the other computer says
+    main.update(app, 0, 0)
+    assert len(app["afterimages"]) == 1 and main.dashing(app, 2)
+    picture = app["afterimages"][0]["picture"]
+    r, g, b = [sum(channel) for channel in zip(*(picture.get_at((x, y))[:3] for x in range(picture.get_width())
+                                                   for y in range(picture.get_height()) if picture.get_at((x, y)).a))]
+    assert r > b and g > b  # yellow
+    assert main.player_info(other)["dash"] == 4
+
+
+def test_the_wizards_spell_is_a_ray_from_the_wand_to_the_crab(app, heard):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app, wait=10 ** 6)
+    p1(app)["pos"] = free_spot(app, 4, 6)
+    press(app, pygame.K_SPACE)
+    main.update(app, 0, 0)
+    assert len(app["beams"]) == 1 and "zap" in heard
+    beam = app["beams"][0]
+    assert beam["to"] == main.crab_rect(app["crab"]).center and beam["room"] == "deck"
+    assert pygame.Vector2(beam["from"]).distance_to(main.player_rect(p1(app)["pos"]).center) < 12
+    points = main.beam_points(beam, app["frame"])
+    assert points[0] == beam["from"] and points[-1] == beam["to"] and len(points) > 3  # a zigzag
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    middle = points[len(points) // 2]
+    near = [screen.get_at((round(middle[0]) + dx, round(middle[1]) + dy))[:3] for dx in range(-3, 4) for dy in range(-3, 4)]
+    assert main.BEAM_COLORS[2] in near or main.BEAM_COLORS[0] in near
+    for _ in range(main.BEAM_FRAMES):
+        main.update(app, 0, 0)
+    assert app["beams"] == []
+
+
+def test_without_the_crab_in_the_room_the_ray_goes_to_the_wall(app):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])
+    awake_crab(app, wait=10 ** 6)
+    assert app["crab"]["room"] == "deck"
+    p1(app)["pos"] = free_spot(app, 10, 8)
+    p1(app)["facing"] = (1, 0)
+    press(app, pygame.K_SPACE)
+    main.update(app, 0, 0)
+    beam = app["beams"][0]
+    assert beam["to"][1] == beam["from"][1] and beam["to"][0] > beam["from"][0]
+    walls = main.wall_rects("cabin")
+    ahead = pygame.Rect(beam["to"][0] + 3, beam["to"][1] - 1, 2, 2)
+    assert ahead.collidelist(walls) != -1 or beam["to"][0] - beam["from"][0] >= main.BEAM_REACH - 4
+    assert app["crab"]["stun"] > 0  # the spell found it all the same
+
+
+def test_the_rubble_blocks_only_at_its_base(app):
+    two_playing(app, FIRST_HALF)
+    statue = main.thing_rect("deck_statue")
+    solids = main.solid_rects(app["state"])
+    assert main.rubble_rect() in solids and statue not in solids
+    assert statue.contains(main.rubble_rect()) and main.rubble_rect().bottom >= statue.bottom - 2
+    top = pygame.Rect(0, 0, main.PLAYER_SIZE, main.PLAYER_SIZE)
+    top.midtop = (statue.centerx, statue.top + 2)  # behind the pile, where only a few stones lie
+    assert top.collidelist(solids) == -1
+    low = pygame.Rect(0, 0, main.PLAYER_SIZE, main.PLAYER_SIZE)
+    low.midbottom = (statue.centerx, statue.bottom - 2)
+    assert low.collidelist(solids) != -1
+    assert statue in main.solid_rects(engine.new_game())  # alone, the statue stands whole: all of it is solid
+    assert statue in main.solid_rects(engine.new_game(two_players=True))  # ...and before the crab breaks out
+
+
+def test_the_other_computer_sees_the_ending_at_once_whatever_is_on_its_screen(two_computers):
+    host, guest = two_computers
+    for scene in ("pause", "inventory", "play"):
+        main.set_scene(guest, scene)
+        guest["dialog"] = ["something to read"] if scene == "play" else []
+        state = engine.restore_state(host["state"])
+        state["ending"] = "saved"
+        host["state"] = state
+        host["own_ending"] = True  # the host's player gave the wand: they read the text first
+        host["dialog"] = ["the ending's text"]
+        pump(host, guest, lambda: guest["scene"] == "ending")
+        assert guest["dialog"] == []
+        assert host["scene"] == "play" and host["dialog"] == ["the ending's text"]
+        host["dialog"] = []
+        main.update(host, 0, 0)
+        assert host["scene"] == "ending"
+        main.draw(guest, pygame.Surface((main.WIDTH, main.HEIGHT)))
+        for one in (host, guest):
+            one["state"] = engine.restore_state(dict(one["state"], ending=None))
+            main.set_scene(one, "play")
+            one["own_ending"] = False
+
+
+def test_the_choice_of_the_crab_is_two_frames_side_by_side(app):
+    press(app, pygame.K_RETURN, pygame.K_DOWN, pygame.K_RETURN)
+    boxes = main.difficulty_boxes()
+    assert list(boxes) == ["easy", "hard"] and boxes["easy"].right < boxes["hard"].left
+    assert all(screen_box.width == main.DIFFICULTY_BOX[0] for screen_box in boxes.values())
+    assert boxes["hard"].right <= main.WIDTH and boxes["easy"].left >= 0
+    press(app, pygame.K_LEFT)
+    assert main.menu_entries(app)[app["menu_index"]] == "easy"
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+    easy_inside = pygame.transform.average_color(screen, boxes["easy"].inflate(-8, -40))
+    hard_inside = pygame.transform.average_color(screen, boxes["hard"].inflate(-8, -40))
+    assert sum(easy_inside[:3]) > sum(hard_inside[:3])  # the other one is dark
+    press(app, pygame.K_RIGHT)
+    assert main.menu_entries(app)[app["menu_index"]] == "hard"
+    main.draw(app, screen)
+    press(app, pygame.K_RETURN)
+    assert app["difficulty"] == "hard"
+    main.end_network(app)
 
 
 ================================================================================
@@ -18463,6 +19024,45 @@ def test_the_limb_can_be_painted_pushed_aside_and_off_the_screen():
     assert pushed.get_at((x + 4, y - 3)) == still.get_at((x, y))
     for age in range(0, IMPACT + RETREAT + 3):
         claw.layer(SIZE, pose(age))  # every frame of the sequence, even with the limb outside
+
+
+
+def colours_of(picture):
+    return [picture.get_at((x, y)) for x in range(picture.get_width()) for y in range(picture.get_height())
+            if picture.get_at((x, y)).a]
+
+
+def test_the_two_portraits_are_a_common_claw_and_the_red_one_of_the_end():
+    gentle = claw.portrait((100, 86), fierce=False)
+    fierce = claw.portrait((100, 86), fierce=True)
+    for picture, tones in ((gentle, claw.CORAL), (fierce, claw.RED)):
+        colours = colours_of(picture)
+        assert len(colours) > 900  # a big claw, not a speck
+        used = {tuple(colour)[:3] for colour in colours}
+        assert {tones["outline"], tones["base"], tones["shadow"], tones["light"]} <= used  # four tones, shaded
+        assert used <= set(tones.values())  # hard pixels: nothing but the shell's own tones
+    assert claw.CORAL["base"] != claw.RED["base"]
+    assert colours_of(gentle)[0] is not None
+
+
+def test_the_fierce_claw_has_spikes_and_sharp_teeth_the_gentle_one_round_ones():
+    assert claw.FIERCE["spikes"] > 0 and claw.GENTLE["spikes"] == 0
+    assert claw.FIERCE["jaw"] > claw.GENTLE["jaw"] and claw.FIERCE["curl"] > claw.GENTLE["curl"]  # longer, hooked
+    assert max(claw.GENTLE["hand"]) > max(claw.FIERCE["hand"])  # a round, thick palm
+    fierce = claw.portrait((100, 86), fierce=True)
+    gentle = claw.portrait((100, 86), fierce=False)
+    assert pygame.mask.from_surface(fierce).count() != pygame.mask.from_surface(gentle).count()
+
+
+def test_a_portrait_opens_and_shuts_its_jaws():
+    shut = pygame.mask.from_surface(claw.portrait((100, 86), True, 0.05))
+    open_ = pygame.mask.from_surface(claw.portrait((100, 86), True, 0.35))
+    assert shut.overlap_area(open_, (0, 0)) < max(shut.count(), open_.count())
+
+
+def test_the_giant_claw_keeps_its_red_shell():
+    assert claw.RED == {"outline": claw.OUTLINE, "shadow": claw.SHADOW, "base": claw.BASE, "light": claw.LIGHT,
+                        "plate": claw.PLATE, "tooth": claw.TOOTH}
 
 
 ================================================================================

@@ -31,6 +31,12 @@ EFFECTS = {
     "knocked_out": [(330, 0.15), (262, 0.15), (196, 0.15), (131, 0.4)],  # a player is out of the game
     # The crab statue shakes and crumbles: low, jagged noise over a deep square wave.
     "crumble": [(-90, 0.08), (55, 0.05), (-60, 0.12), (41, 0.06), (-45, 0.2), (-30, 0.25)],
+    # The wizard's spell: a ray that crackles, falling and rising.
+    "zap": [(1568, 0.03), (-3000, 0.02), (1175, 0.03), (-2500, 0.02), (1760, 0.05), (2349, 0.08)],
+    # Flash's dash: a rush of air.
+    "dash": [(-6000, 0.03), (-4000, 0.04), (-2500, 0.06)],
+    # The crab turns to stone: a grinding that slows down.
+    "petrify": [(-70, 0.1), (62, 0.08), (-55, 0.12), (49, 0.1), (-40, 0.3)],
     # The giant claw snaps shut: a dry crack.
     "snap": [(-4000, 0.015), (1800, 0.02), (-2500, 0.025), (90, 0.05)],
     # The screen breaks like glass: a high crackle with a few bright chips.

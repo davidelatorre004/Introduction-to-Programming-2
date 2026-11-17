@@ -283,9 +283,17 @@ def solid_rects(state):
         if thing["kind"] == "door":
             if thing["status"] != "open":
                 solids.append(door_rect(thing["id"]))
+        elif thing["id"] == "deck_statue" and engine.statue_broken(state):
+            solids.append(rubble_rect())  # only the base of the pile: the stones above it are behind
         elif thing["kind"] not in ("item", "tile") and not is_flat(thing["id"]):
             solids.append(thing_rect(thing["id"]))
     return solids
+
+
+def rubble_rect():
+    """What the broken statue blocks: the base of its pile of rubble, not its whole 2 x 2 tiles."""
+    statue = thing_rect("deck_statue")
+    return pygame.Rect(statue.left + RUBBLE_BASE[0], statue.top + RUBBLE_BASE[1], RUBBLE_BASE[2], RUBBLE_BASE[3])
 
 
 def is_flat(thing):
@@ -617,6 +625,8 @@ def new_player(position=(0, 0)):
         "moving": False,         # whether the player moved in the last frame
         "on_tile": None,         # the numbered tile the player stood on in the last frame
         "zones": set(),          # the floor puzzles whose zone the player was in, in the last frame
+        "dash": 0,               # frames left of Flash's dash (see dash)
+        "dash_way": (0, 0),      # ...the way it goes
     }
 
 
@@ -667,7 +677,10 @@ def new_app(fonts):
         "shatter": None,         # the giant claw breaking the screen, while it lasts (see start_shatter)
         "lightning_due": False,  # a new game has just started: the bolt strikes once the opening text is read
         "hidden": {},            # the players the crab cannot see (the ghost's ability): number -> frames left
-        "dash_trail": None,      # the streak of Flash's dash, while it fades (see dash)
+        "afterimages": [],       # the yellow copies a dashing Flash leaves behind, while they fade (see dash)
+        "beams": [],             # the rays of the wizard's spell, while they last (see start_beam)
+        "petrify": None,         # the crab turning to stone where it stands, while it lasts (see crab_news)
+        "own_ending": False,     # the ending came from this computer's player: they read its text first
         "act_held": False,       # E is held down on this keyboard (to help a player up)
         "partner_reviving": False,  # E is held down on the other computer, as it said
         "seen": {},              # what this computer has already told about the crab (see crab_news)
@@ -927,6 +940,7 @@ def begin_game(app, state, opening_text):
     """
     app["state"] = state
     app["dialog"] = []
+    app["own_ending"] = False
     app["taken"] = None
     app["picked"] = None
     set_up_players(app)
@@ -1265,6 +1279,7 @@ def finish_action(app, action, before, state, outcome):
     if outcome["ok"]:
         show_outcome(app, action, before, state, outcome)
         app["state"] = state
+        app["own_ending"] = engine.is_over(state)  # this player reads the ending's text, then sees it
         save_progress(app)
         if is_host(app):
             heart_helps(app, outcome, my_number(app))
@@ -1385,8 +1400,11 @@ def handle_play_key(app, key):
 
 
 def handle_menu_key(app, key):
-    """Keys in a menu: up and down to move, E or Enter to choose, Esc to go back."""
+    """Keys in a menu: up and down to move, E or Enter to choose, Esc to go back.
+    The two frames of the choice of the crab are side by side: left and right move too."""
     entries = menu_entries(app)
+    if app["scene"] == "difficulty" and key in LEFT_KEYS + RIGHT_KEYS:
+        key = UP_KEYS[0] if key in LEFT_KEYS else DOWN_KEYS[0]
     if key in UP_KEYS:
         app["menu_index"] = (app["menu_index"] - 1) % len(entries)
     elif key in DOWN_KEYS:
@@ -1436,10 +1454,8 @@ def update(app, dx, dy, act=False):
     if is_host(app):
         update_crab(app)
     crab_news(app)
-    if app["dash_trail"] is not None:
-        app["dash_trail"]["frames"] -= 1
-        if app["dash_trail"]["frames"] <= 0:
-            app["dash_trail"] = None
+    ability_news(app)
+    update_ability_effects(app)
     update_crumble(app)
     update_effects(app)
     if app["scene"] == "shatter":
@@ -1454,6 +1470,10 @@ def update(app, dx, dy, act=False):
         app["fade"] -= 1
     if app["flash_frames"] > 0:
         app["flash_frames"] -= 1
+    if partner_ended(app):
+        app["dialog"] = []  # the other player has just reached an ending: here too, whatever is on screen
+        set_scene(app, "ending")
+        return
     if app["scene"] != "play" or app["dialog"]:
         return
     if engine.is_over(app["state"]):
@@ -1469,7 +1489,18 @@ def update(app, dx, dy, act=False):
         return  # nobody moves while it strikes
     if not can_move(app):
         return  # down, or out of the game
+    if local_player(app)["dash"] > 0:
+        dash_step(app)  # dashing: the keys wait
+        return
     move_player(app, local_player(app), dx, dy)
+
+
+def partner_ended(app):
+    """True on one computer of a game for two when the other player has just reached an ending
+    (not the crab's: both see the claw first), and this screen is not showing it yet."""
+    state = app["state"]
+    return (app["net"] is not None and state is not None and engine.is_over(state) and state["ending"] != "caught"
+            and not app["own_ending"] and app["scene"] not in ("ending", "shatter"))
 
 
 def move_player(app, player, dx, dy):
@@ -1524,6 +1555,7 @@ def move_player(app, player, dx, dy):
 # Now and then it gives up the chase and goes to its corner of the room for a while.
 
 CRAB_SPEED = PLAYER_SPEED * 0.6    # pixels per frame: slower than the players
+EASY_CRAB_SPEED = PLAYER_SPEED * 0.8  # the easy crab is blind to other rooms and takes long ways: a little faster
 CRAB_PICTURE_SIZE = 20             # the crab's sprite, shrunk from the 2 x 2 tiles of the one in its room
 CRAB_WAKE_FRAMES = 3 * FPS         # still for a moment after waking: time to understand and run
 CRAB_TRANSIT_FRAMES = FPS          # between two rooms, out of sight
@@ -1534,9 +1566,18 @@ REVIVE_FRAMES = 4 * FPS            # how long E must be held next to a player do
 NURSE_REVIVE_FRAMES = FPS          # ...and how long when the nurse helps: her ability, always on
 STUN_FRAMES = 5 * FPS              # how long the wizard's spell keeps the crab still
 HIDDEN_FRAMES = 5 * FPS            # how long the ghost stays out of the crab's sight
-DASH_TILES = 5                     # how far Flash dashes
+DASH_TILES = 8                     # how far Flash dashes
+DASH_FRAMES = 8                    # how long the dash lasts: 16 pixels a frame, ten times a walk
 DASH_STEP = 4                      # pixels at a time, so the dash stops at walls and finds doors
-DASH_TRAIL_FRAMES = 12             # how long the streak of the dash stays on screen
+AFTERIMAGE_FRAMES = 12             # how long each yellow afterimage of a dashing Flash takes to fade
+DASH_SPARKS = [(255, 236, 120), (255, 200, 60), (255, 255, 220)]
+BEAM_FRAMES = 36                   # how long the ray of the wizard's spell stays on screen
+BEAM_REACH = 8 * TILE              # how far it goes when the crab is not in the room
+BEAM_COLORS = [(170, 100, 255), (120, 210, 255), (255, 255, 255)]  # its glow, its sparks, its core
+PETRIFY_FRAMES = 96                # the crab turning to stone: grey, cracked, then dust
+PETRIFY_CRACK = 48                 # the frame its stone cracks
+PETRIFY_BURST = 78                 # the frame it bursts into dust
+RUBBLE_BASE = (2, 18, 30, 13)      # the base of the pile of rubble, inside the statue's 2 x 2 tiles: what is solid
 
 
 EASY_CHASE_FRAMES = 20 * FPS      # the easy crab chases this long...
@@ -1672,7 +1713,7 @@ def crab_target(app):
     return None if door is None else ("door", door)
 
 
-def step_crab(crab, goal, solids):
+def step_crab(crab, goal, solids, speed=CRAB_SPEED):
     """Move the crab one frame toward the middle of `goal` (a point in room pixels)."""
     x, y = crab_rect(crab).center
     dx, dy = goal[0] - x, goal[1] - y
@@ -1680,7 +1721,7 @@ def step_crab(crab, goal, solids):
     if distance < 1:
         crab["moving"] = False
         return
-    step = min(CRAB_SPEED, distance)
+    step = min(speed, distance)
     move_x = step * dx / distance
     move_y = step * dy / distance
     before = crab["pos"]
@@ -1829,8 +1870,8 @@ def move_easy_crab(app):
     tile = tuple(crab["next"])
     goal = tile_rect(*tile).center
     body = crab_rect(crab)
-    if math.hypot(goal[0] - body.centerx, goal[1] - body.centery) > CRAB_SPEED:
-        step_crab(crab, goal, solids)
+    if math.hypot(goal[0] - body.centerx, goal[1] - body.centery) > EASY_CRAB_SPEED:
+        step_crab(crab, goal, solids, EASY_CRAB_SPEED)
         if not crab["moving"]:
             crab["next"] = None  # something in the way: it starts again from where it is
         return
@@ -1851,7 +1892,7 @@ def move_easy_crab(app):
         return
     crab["heading"] = heading
     crab["next"] = (tile[0] + heading[0], tile[1] + heading[1])
-    step_crab(crab, tile_rect(*crab["next"]).center, solids)
+    step_crab(crab, tile_rect(*crab["next"]).center, solids, EASY_CRAB_SPEED)
 
 
 def farthest_tile(free, start, point, room):
@@ -1887,6 +1928,8 @@ def catch_players(app):
     body = crab_rect(crab)
     for number in hunted_players(app):  # it walks through a hidden player
         player = app["players"][number - 1]
+        if dashing(app, number):
+            continue  # too fast to catch: Flash goes past it
         if engine.player_room(state, number) == crab["room"] and body.colliderect(player_rect(player["pos"])):
             app["downed"][number] = DOWN_FRAMES
             crab["wait"] = CRAB_CATCH_FRAMES
@@ -1987,9 +2030,11 @@ def crab_news(app):
         if awake:
             sounds.play("crab_wake")
             start_crumble(app)  # the ship shakes, the statue trembles and bursts
-        elif app["seen"]["crab_at"] is not None and app["seen"]["crab_at"][0] == view(app)["room"]:
-            x, y = player_rect(app["seen"]["crab_at"][1]).center  # the crab turns to stone, and to dust
-            effects.spawn(app["fx"], x, y, 30, RUBBLE_COLORS, speed=1.2, life=40, up=0.8)
+        elif app["seen"]["crab_at"] is not None:
+            room, pos, facing = app["seen"]["crab_at"]  # where it was: there it turns to stone, then to dust
+            app["petrify"] = {"room": room, "pos": pos, "facing": facing, "age": 0}
+            if room == view(app)["room"]:
+                sounds.play("petrify")
         show_banner(app, story.MESSAGES["crab_wakes" if awake else "crab_sleeps"])
     downed = set(app["downed"])
     out = state["flags"]["out_player"]
@@ -2012,7 +2057,69 @@ def crab_news(app):
             show_banner(app, story.MESSAGES["partner_eliminated"])
     crab = app["crab"]
     app["seen"] = {"awake": awake, "downed": downed, "out": out, "caught": caught,
-                   "crab_at": None if crab is None else (crab["room"], crab["pos"])}
+                   "abilities": app["seen"].get("abilities", {}),
+                   "crab_at": None if crab is None else (crab["room"], crab["pos"], crab["facing"])}
+    update_petrify(app)
+
+
+def update_petrify(app):
+    """The crab turning to stone: once it cracks, the floor trembles; then it bursts into dust."""
+    stone = app["petrify"]
+    if stone is None:
+        return
+    stone["age"] += 1
+    if stone["age"] == PETRIFY_BURST and stone["room"] == view(app)["room"]:
+        x, y = player_rect(stone["pos"]).center
+        sounds.play("crumble")
+        if effects.FX["crumble"]:
+            effects.spawn(app["fx"], x, y, 40, RUBBLE_COLORS, speed=1.4, life=44, up=0.9, gravity=0.06)
+    if stone["age"] >= PETRIFY_FRAMES:
+        app["petrify"] = None
+
+
+_stone_crabs = {}
+
+
+def stone_crab(picture):
+    """The crab's picture in grey stone: its shading kept, its colours gone."""
+    key = id(picture)
+    if key not in _stone_crabs:
+        stone = pygame.transform.grayscale(picture)
+        stone.fill((150, 146, 138), special_flags=pygame.BLEND_RGB_MULT)  # its shading, softer...
+        stone.fill((96, 92, 84), special_flags=pygame.BLEND_RGB_ADD)      # ...on pale, warm marble, like the statue
+        _stone_crabs[key] = stone
+    return _stone_crabs[key]
+
+
+def draw_petrify(app, screen):
+    """The crab where it stood: its colour drains away into stone, the stone cracks and shivers,
+    and at the end it is gone in a burst of dust (see update_petrify)."""
+    stone = app["petrify"]
+    if stone is None or stone["room"] != view(app)["room"] or stone["age"] >= PETRIFY_BURST:
+        return
+    picture = sprites.image("crab")
+    body = player_rect(stone["pos"])
+    if picture is None:
+        pygame.draw.rect(screen, RUBBLE_COLORS[1], body)
+        return
+    small = pygame.transform.scale(picture, (CRAB_PICTURE_SIZE, CRAB_PICTURE_SIZE))
+    if stone["facing"][0] < 0:
+        small = pygame.transform.flip(small, True, False)
+    shiver = 0
+    if stone["age"] >= PETRIFY_CRACK:
+        shiver = (stone["age"] // 2) % 3 - 1  # cracked: it trembles before it bursts
+    place = small.get_rect(midbottom=(body.centerx + shiver, body.bottom + 2))
+    screen.blit(small, place)
+    grey = stone_crab(small).copy()
+    grey.set_alpha(min(255, 255 * stone["age"] // PETRIFY_CRACK))  # the colour drains away
+    screen.blit(grey, place)
+    if stone["age"] >= PETRIFY_CRACK:
+        cracks = 1 + 3 * (stone["age"] - PETRIFY_CRACK) // (PETRIFY_BURST - PETRIFY_CRACK)
+        for index in range(cracks):
+            x = place.left + 4 + round(scenery.hash01(index, 3, 21) * (place.width - 8))
+            y = place.top + 5 + round(scenery.hash01(index, 7, 21) * (place.height - 10))
+            pygame.draw.line(screen, RUBBLE_COLORS[2], (x, y), (x + 3 - 2 * (index % 2) * 3, y + 4), 1)
+            pygame.draw.line(screen, RUBBLE_COLORS[2], (x, y), (x - 2, y - 3), 1)
 
 
 # --- The statue crumbling, and the claw that breaks the screen ---------------------------
@@ -2188,12 +2295,15 @@ def reset_crab(app):
     app["downed"] = {}
     app["revive"] = {}
     app["hidden"] = {}
-    app["dash_trail"] = None
+    app["afterimages"] = []
+    app["beams"] = []
+    app["petrify"] = None
     app["crumble"] = 0
     app["shatter"] = None
     app["partner_reviving"] = False
     state = app["state"]
     app["seen"] = {"awake": state is not None and engine.crab_awake(state), "downed": set(),
+                   "abilities": {} if state is None else abilities_used(state),
                    "out": 0 if state is None else state["flags"]["out_player"],
                    "caught": state is not None and state["ending"] == "caught", "crab_at": None}
 
@@ -2375,13 +2485,23 @@ def apply_ability(app, number):
 
 
 def dash(app):
-    """Flash sprints DASH_TILES tiles the way they face: stopped by anything solid, and through
-    an open door or a portal on the way (a shut door stops them, and says why)."""
+    """Flash sprints DASH_TILES tiles the way they face, in DASH_FRAMES frames (see dash_step)."""
     player = local_player(app)
-    dx, dy = player["facing"]
-    start = player_rect(player["pos"]).center
-    room = view(app)["room"]
-    left = DASH_TILES * TILE
+    player["dash"] = DASH_FRAMES
+    player["dash_way"] = player["facing"]
+    sounds.play("dash")
+
+
+def dash_step(app):
+    """One frame of Flash's dash: a few pixels at a time, stopped by anything solid, and through
+    an open door or a portal on the way (a shut door stops them, and says why). The tiles of the
+    floor only count where the dash ends."""
+    player = local_player(app)
+    dx, dy = player["dash_way"]
+    player["dash"] -= 1
+    player["moving"] = True
+    player["walk"] += 1
+    left = DASH_TILES * TILE // DASH_FRAMES
     while left > 0:
         step = min(DASH_STEP, left)
         left -= step
@@ -2393,27 +2513,140 @@ def dash(app):
             if door != player["touching"]:
                 player["touching"] = door
                 go_through(app, door)
-            break
+            player["dash"] = 0
+            return
         portal = portal_touched(seen, player["pos"])
         if portal is not None:
             go_through_portal(app, portal)
-            break
+            player["dash"] = 0
+            return
         if player["pos"] == before:
-            break  # against something solid
-    app["dash_trail"] = {"room": room, "from": start, "to": player_rect(player["pos"]).center,
-                         "frames": DASH_TRAIL_FRAMES}
-    if view(app)["room"] != room:
-        app["dash_trail"] = None  # through the door at once (alone or on the host): nothing to show there
+            player["dash"] = 0  # against something solid
+            return
 
 
-def draw_dash_trail(app, screen):
-    """The yellow streak Flash leaves behind, fading."""
-    trail = app["dash_trail"]
-    if trail is None or trail["room"] != view(app)["room"]:
+def dashing(app, number):
+    """True while player `number` is in the middle of Flash's dash."""
+    return app["players"][number - 1]["dash"] > 0
+
+
+def abilities_used(state):
+    """Which player has used their ability: number -> True or False."""
+    return {number: state["flags"]["ability_used_" + str(number)] for number in (1, 2)}
+
+
+def ability_news(app):
+    """On every computer: an ability has just been used, here or on the other computer. Show it:
+    the ray of the wizard's spell, and the burst of Flash's start."""
+    state = app["state"]
+    if state is None:
         return
-    width = 1 + 4 * trail["frames"] // DASH_TRAIL_FRAMES
-    pygame.draw.line(screen, COLORS["highlight"], trail["from"], trail["to"], width)
-    pygame.draw.line(screen, COLORS["text"], trail["from"], trail["to"], 1)
+    used = abilities_used(state)
+    for number, now in used.items():
+        if not now or app["seen"].get("abilities", {}).get(number, False) or number > len(app["players"]):
+            continue
+        character = engine.character_of(state, number)
+        if engine.player_room(state, number) != view(app)["room"]:
+            continue  # elsewhere on the ship: nothing to see here
+        body = player_rect(app["players"][number - 1]["pos"])
+        if character == "wizard":
+            start_beam(app, number)
+        elif character == "flash" and effects.FX["wand"]:
+            effects.spawn(app["fx"], body.centerx, body.centery, 16, DASH_SPARKS, speed=1.6, life=18)
+    app["seen"]["abilities"] = used
+
+
+def start_beam(app, number):
+    """The wizard's spell: a ray from the wand to the crab, if it is in the room; otherwise the
+    way the wizard faces, as far as a wall (the spell finds the crab wherever it is)."""
+    player = app["players"][number - 1]
+    room = engine.player_room(app["state"], number)
+    body = player_rect(player["pos"])
+    fx, fy = player["facing"]
+    start = (body.centerx + fx * 7, body.centery - 6 + fy * 4)  # the tip of the wand
+    crab = app["crab"]
+    if crab is not None and crab["room"] == room:
+        end = crab_rect(crab).center
+    else:
+        end = start
+        walls = wall_rects(room)
+        for _ in range(BEAM_REACH // 4):
+            ahead = (end[0] + fx * 4, end[1] + fy * 4)
+            if pygame.Rect(ahead[0] - 1, ahead[1] - 1, 2, 2).collidelist(walls) != -1:
+                break
+            end = ahead
+    app["beams"].append({"room": room, "from": start, "to": end, "age": 0})
+    sounds.play("zap")
+    if effects.FX["wand"]:
+        effects.spawn(app["fx"], end[0], end[1], 24, BEAM_COLORS, speed=1.4, life=26, up=0.3)
+
+
+def update_ability_effects(app):
+    """The afterimages of a dash and the rays of a spell: they fade, and a dashing Flash leaves new ones."""
+    for image in app["afterimages"]:
+        image["age"] += 1
+    app["afterimages"] = [image for image in app["afterimages"] if image["age"] < AFTERIMAGE_FRAMES]
+    for beam in app["beams"]:
+        beam["age"] += 1
+    app["beams"] = [beam for beam in app["beams"] if beam["age"] < BEAM_FRAMES]
+    if app["state"] is None:
+        return
+    for number, player in enumerate(app["players"], start=1):
+        if player["dash"] <= 0 or engine.player_room(app["state"], number) != view(app)["room"]:
+            continue
+        picture = player_picture(app, player)
+        if picture is None:
+            continue
+        glow = picture.copy()
+        glow.fill((255, 226, 90), special_flags=pygame.BLEND_RGB_MULT)  # a copy of Flash, in yellow
+        glow.fill((70, 50, 0), special_flags=pygame.BLEND_RGB_ADD)
+        body = player_rect(player["pos"])
+        app["afterimages"].append({"picture": glow, "feet": (body.centerx, body.bottom + 1), "age": 0})
+        if effects.FX["wand"]:
+            effects.spawn(app["fx"], body.centerx, body.centery, 3, DASH_SPARKS, speed=0.6, life=14)
+
+
+def draw_afterimages(app, screen):
+    """The yellow copies a dashing Flash leaves behind, older ones fainter."""
+    for image in app["afterimages"]:
+        picture = image["picture"]
+        picture.set_alpha(200 - 200 * image["age"] // AFTERIMAGE_FRAMES)
+        screen.blit(picture, picture.get_rect(midbottom=image["feet"]))
+
+
+def beam_points(beam, frame):
+    """The zigzag of a ray: its ends fixed, the points between jumping sideways every few frames."""
+    (x0, y0), (x1, y1) = beam["from"], beam["to"]
+    length = math.hypot(x1 - x0, y1 - y0) or 1.0
+    nx, ny = -(y1 - y0) / length, (x1 - x0) / length
+    count = max(int(length // 10), 1)
+    points = [(x0, y0)]
+    for index in range(1, count):
+        share = index / count
+        jump = (scenery.hash01(index, frame // 3, 5) - 0.5) * 8
+        points.append((x0 + (x1 - x0) * share + nx * jump, y0 + (y1 - y0) * share + ny * jump))
+    points.append((x1, y1))
+    return points
+
+
+def draw_beams(app, screen):
+    """The rays of the wizard's spell: a violet zigzag with a white core, thinner as it fades,
+    and a ring that opens where it strikes."""
+    for beam in app["beams"]:
+        if beam["room"] != view(app)["room"]:
+            continue
+        left = 1 - beam["age"] / BEAM_FRAMES
+        points = [(round(x), round(y)) for x, y in beam_points(beam, app["frame"])]
+        if len(points) >= 2:
+            if effects.FX["lights"]:
+                for point in points[::2]:
+                    effects.glow(screen, point, 8, (40, 20, 70), left)
+            pygame.draw.lines(screen, BEAM_COLORS[0], False, points, max(1, round(5 * left)))
+            pygame.draw.lines(screen, BEAM_COLORS[1], False, points, max(1, round(3 * left)))
+            pygame.draw.lines(screen, BEAM_COLORS[2], False, points, 1)
+        ring = 3 + beam["age"] // 2
+        if left > 0.3:
+            pygame.draw.circle(screen, BEAM_COLORS[1], (round(beam["to"][0]), round(beam["to"][1])), ring, 1)
 
 
 def ability_hint(app):
@@ -2450,7 +2683,7 @@ def draw_ability_hint(app, screen):
 def player_info(player):
     """What the other computer needs to draw a player."""
     return {"pos": list(player["pos"]), "facing": list(player["facing"]), "moving": player["moving"],
-            "walk": player["walk"]}
+            "walk": player["walk"], "dash": player["dash"]}
 
 
 def take_player_info(player, info):
@@ -2459,6 +2692,7 @@ def take_player_info(player, info):
     player["facing"] = tuple(info["facing"])
     player["moving"] = bool(info["moving"])
     player["walk"] = int(info["walk"])
+    player["dash"] = int(info.get("dash", 0))
 
 
 def send(app, message):
@@ -3680,10 +3914,12 @@ def draw_room(app, screen):
     for player in app["players"]:
         if same_room(app, player):
             draw_downed_bars(app, screen, player)
-    draw_dash_trail(app, screen)
+    draw_petrify(app, screen)
     for thing in standing:
         if thing["id"] not in drawn:
             draw_standing(app, screen, thing)
+    draw_afterimages(app, screen)
+    draw_beams(app, screen)
     # The effects on top: barriers dissolving, the key welding, particles, dust, and the light.
     for thing in things:
         if thing["kind"] == "anvil" and effects.FX["anvil"] and not engine.key_fused(state):
@@ -4361,17 +4597,62 @@ def character_lines(app, character):
     return lines
 
 
+DIFFICULTY_BOX = (108, 112)   # each of the two frames of the choice of the crab
+DIFFICULTY_TOP = 46           # where they start, from the top of the screen
+DIFFICULTY_GAP = 12           # the sea between them
+DIFFICULTY_BACKS = {"easy": (22, 44, 70), "hard": (54, 14, 20)}  # the inside of each frame: sea, or blood
+_portraits = {}
+
+
+def claw_portrait(fierce, opening):
+    """The claw in a frame of the choice of the crab, made once for each way it can be open."""
+    key = (fierce, round(opening, 2))
+    if key not in _portraits:
+        _portraits[key] = claw.portrait((DIFFICULTY_BOX[0] - 8, DIFFICULTY_BOX[1] - 26), fierce, opening)
+    return _portraits[key]
+
+
+def difficulty_boxes():
+    """The two frames of the choice of the crab, side by side: difficulty -> rect."""
+    left = (WIDTH - 2 * DIFFICULTY_BOX[0] - DIFFICULTY_GAP) // 2
+    return {difficulty: pygame.Rect(left + index * (DIFFICULTY_BOX[0] + DIFFICULTY_GAP), DIFFICULTY_TOP,
+                                    *DIFFICULTY_BOX)
+            for index, difficulty in enumerate(story.DIFFICULTIES)}
+
+
 def draw_difficulty_choice(app, screen):
-    """The choice of the crab of a game for two, over the calm sea of the title, and what the highlighted one does."""
+    """The choice of the crab of a game for two, over the calm sea of the title: two frames side by
+    side, a common crab's claw for the easy one and the red claw of the end for the hard one. The
+    highlighted one blinks and slowly opens and shuts its jaws; the other is dark. Under them, what
+    the highlighted crab does."""
     draw_sea(app, screen, screen.get_rect(), calm=True)
     font = app["fonts"]["text"]
-    draw_text(screen, app["fonts"]["title"], story.MESSAGES["choose_difficulty"], COLORS["text"], (WIDTH // 2, 36),
+    draw_text(screen, app["fonts"]["title"], story.MESSAGES["choose_difficulty"], COLORS["text"], (WIDTH // 2, 22),
               "center", True)
-    draw_menu(app, screen, 84)
     entries = menu_entries(app)
-    text = story.DIFFICULTIES[entries[app["menu_index"] % len(entries)]]["text"]
-    for index, line in enumerate(wrap(text, WIDTH - 32, text_width(font))):
-        draw_text(screen, font, line, COLORS["text"], (WIDTH // 2, 136 + index * font.get_linesize()), "center", True)
+    chosen = entries[app["menu_index"] % len(entries)]
+    for difficulty, frame in difficulty_boxes().items():
+        here = difficulty == chosen
+        pygame.draw.rect(screen, DIFFICULTY_BACKS[difficulty], frame)
+        if here and difficulty == "hard" and effects.FX["lights"]:
+            effects.glow(screen, (frame.centerx, frame.top + 46), 40, (90, 10, 10),
+                         effects.pulse(app["frame"], 0.08, 0.5, 1.0))  # it beats, like blood
+        opening = 0.2 + 0.12 * math.sin(app["frame"] * 0.07) if here else 0.2
+        picture = claw_portrait(difficulty == "hard", round(opening * 20) / 20)
+        screen.blit(picture, picture.get_rect(midtop=(frame.centerx, frame.top + 4)))
+        name = story.MESSAGES["menu_" + difficulty]
+        draw_text(screen, app["fonts"]["text"], name, COLORS["highlight"] if here else COLORS["dim_text"],
+                  (frame.centerx, frame.bottom - 16), "center", True)
+        blink = (app["frame"] // 24) % 2 == 1
+        border = COLORS["highlight"] if here and not blink else COLORS["dim_text"]
+        pygame.draw.rect(screen, border, frame, 2 if here else 1)
+        if not here:
+            shade(screen, frame.inflate(-2, -2), 130)
+    text = story.DIFFICULTIES[chosen]["text"]
+    top = DIFFICULTY_TOP + DIFFICULTY_BOX[1] + 8
+    for index, line in enumerate(wrap(text, WIDTH - 24, text_width(font))):
+        draw_text(screen, font, line, COLORS["text"], (WIDTH // 2, top + index * font.get_linesize()), "center", True)
+    draw_lines_at_bottom(app, screen, story.MESSAGES["choose_hint"])
 
 
 def draw_mode_choice(app, screen):

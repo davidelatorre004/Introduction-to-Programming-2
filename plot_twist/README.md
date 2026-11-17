@@ -77,7 +77,7 @@ Some help:
 
 Two people can play together on two computers connected to the same network (the same Wi‑Fi). Each one has their own screen and moves on their own.
 
-1. On the first computer: **New game**, then **Host game for 2**, then how the crab hunts: **Easy** or **Hard** (see below). The screen shows "Your address: …", for example `192.168.1.23`.
+1. On the first computer: **New game**, then **Host game for 2**, then how the crab hunts: two frames side by side, a common crab's claw for **Easy** and the red claw for **Hard** (see below). Left and Right to choose, E to confirm. The screen shows "Your address: …", for example `192.168.1.23`.
 2. On the second computer: **Join game**, type that address (digits and dots only) and press Enter.
 3. Now both players choose their character, at the same time, each on their own screen. A character the other player has already confirmed is dark and cannot be taken.
 4. The game starts on both screens as soon as both have chosen.
@@ -92,22 +92,23 @@ Some help:
 
 | Character | Ability |
 |---|---|
-| Wizard | Space: the crab is stunned and stands still for 5 seconds, whatever room it is in |
+| Wizard | Space: a ray from the wand stuns the crab, which stands still for 5 seconds, whatever room it is in |
 | Nurse | Always on: she helps a player who is down get up in 1 second instead of 4 |
 | Ghost | Space: for 5 seconds the crab cannot see you and goes for the other player. If the other player is down or out, the crab runs away from you |
-| Flash | Space: a dash of 5 tiles in the direction you face. It stops against obstacles and goes through open doors and portals |
+| Flash | Space: a dash of 8 tiles in the direction you face, leaving yellow afterimages. It stops against obstacles, goes through open doors and portals, and the crab cannot catch you while you dash |
 
 The Space ability works only once per game: the bottom left corner says so as long as it is available. If you use it while the crab is still a statue, it is wasted.
 
-**The crab (two players only).** As soon as you solve the cabin, the whole ship shakes: the crab statue on the deck trembles, breaks into pieces, and the crab comes out to hunt you. The rubble stays there until the end.
-- It is slower than you. How it hunts depends on the difficulty the host chose:
+**The crab (two players only).** As soon as you solve the cabin, the whole ship shakes: the crab statue on the deck trembles, breaks into pieces, and the crab comes out to hunt you. The rubble stays there until the end: you can walk behind the pile, only its base blocks the way.
+- It is slower than you (the easy one a little less slow). How it hunts depends on the difficulty the host chose:
   - **Hard:** it always knows where you are. It chases the nearest player along the shortest way, and if nobody is in its room it follows you through the open doors.
   - **Easy:** it hunts like the ghosts of an arcade maze. It only sees its own room. It decides where to go only in the middle of a tile, never turns back unless the way ends, and picks the way that looks nearest to you in a straight line, so obstacles can send it the long way round. Every 20 seconds it gives up for 7 seconds and goes to the top right corner of the room. If it sees nobody, it heads for a door of its room chosen at random and looks in the next room.
 - If it touches you, you go down and cannot move. Your partner has one minute to help you up: they must stand next to you and hold **E** for 4 seconds (the green bar shows how much is left).
 - If nobody helps you up in time, you are out until the end of the game, and your items pass to your partner. While you are out you watch your partner play.
 - If the crab catches both of you, even when one of you is already out, the game is lost: a giant claw snaps shut on the screen and breaks it to pieces, and then comes the third ending, "Caught by the crab".
 - A strategy: one player keeps the crab busy while the other solves the puzzles.
-- When you fuse the two halves of the key, the crab turns back to stone and vanishes in a cloud of dust.
+- When you fuse the two halves of the key, the crab turns back to stone where it stands: its colour drains away, the stone cracks and trembles, and it bursts into a cloud of dust.
+- When one of you reaches an ending, the other one sees it at once too, whatever is on their screen.
 
 ## 5. The goal (no spoilers)
 

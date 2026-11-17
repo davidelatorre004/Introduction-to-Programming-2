@@ -246,3 +246,42 @@ def test_the_limb_can_be_painted_pushed_aside_and_off_the_screen():
     assert pushed.get_at((x + 4, y - 3)) == still.get_at((x, y))
     for age in range(0, IMPACT + RETREAT + 3):
         claw.layer(SIZE, pose(age))  # every frame of the sequence, even with the limb outside
+
+
+
+def colours_of(picture):
+    return [picture.get_at((x, y)) for x in range(picture.get_width()) for y in range(picture.get_height())
+            if picture.get_at((x, y)).a]
+
+
+def test_the_two_portraits_are_a_common_claw_and_the_red_one_of_the_end():
+    gentle = claw.portrait((100, 86), fierce=False)
+    fierce = claw.portrait((100, 86), fierce=True)
+    for picture, tones in ((gentle, claw.CORAL), (fierce, claw.RED)):
+        colours = colours_of(picture)
+        assert len(colours) > 900  # a big claw, not a speck
+        used = {tuple(colour)[:3] for colour in colours}
+        assert {tones["outline"], tones["base"], tones["shadow"], tones["light"]} <= used  # four tones, shaded
+        assert used <= set(tones.values())  # hard pixels: nothing but the shell's own tones
+    assert claw.CORAL["base"] != claw.RED["base"]
+    assert colours_of(gentle)[0] is not None
+
+
+def test_the_fierce_claw_has_spikes_and_sharp_teeth_the_gentle_one_round_ones():
+    assert claw.FIERCE["spikes"] > 0 and claw.GENTLE["spikes"] == 0
+    assert claw.FIERCE["jaw"] > claw.GENTLE["jaw"] and claw.FIERCE["curl"] > claw.GENTLE["curl"]  # longer, hooked
+    assert max(claw.GENTLE["hand"]) > max(claw.FIERCE["hand"])  # a round, thick palm
+    fierce = claw.portrait((100, 86), fierce=True)
+    gentle = claw.portrait((100, 86), fierce=False)
+    assert pygame.mask.from_surface(fierce).count() != pygame.mask.from_surface(gentle).count()
+
+
+def test_a_portrait_opens_and_shuts_its_jaws():
+    shut = pygame.mask.from_surface(claw.portrait((100, 86), True, 0.05))
+    open_ = pygame.mask.from_surface(claw.portrait((100, 86), True, 0.35))
+    assert shut.overlap_area(open_, (0, 0)) < max(shut.count(), open_.count())
+
+
+def test_the_giant_claw_keeps_its_red_shell():
+    assert claw.RED == {"outline": claw.OUTLINE, "shadow": claw.SHADOW, "base": claw.BASE, "light": claw.LIGHT,
+                        "plate": claw.PLATE, "tooth": claw.TOOTH}
