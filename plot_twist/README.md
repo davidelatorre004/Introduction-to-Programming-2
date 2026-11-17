@@ -77,9 +77,10 @@ Some help:
 
 Two people can play together on two computers connected to the same network (the same Wi‑Fi). Each one has their own screen and moves on their own.
 
-1. On the first computer: **New game**, then **Host game for 2**, then choose your character. The screen shows "Your address: …", for example `192.168.1.23`.
-2. On the second computer: **Join game**, type that address (digits and dots only) and press Enter. Then choose your character.
-3. The game starts on both screens.
+1. On the first computer: **New game**, then **Host game for 2**, then how the crab hunts: **Easy** or **Hard** (see below). The screen shows "Your address: …", for example `192.168.1.23`.
+2. On the second computer: **Join game**, type that address (digits and dots only) and press Enter.
+3. Now both players choose their character, at the same time, each on their own screen. A character the other player has already confirmed is dark and cannot be taken.
+4. The game starts on both screens as soon as both have chosen.
 
 Some help:
 - Each player has their own inventory. To give an item to the other player, walk up to them and press E: "Give to partner: …".
@@ -87,7 +88,7 @@ Some help:
 - The game is saved only on the computer that hosts it. To resume it, choose **Resume** on that computer; then the other player joins again with Join game.
 - If the second computer cannot find the game, check that both computers are on the same network. Also check that the firewall of the first one lets the game in (port 50555).
 
-**The characters.** At the start you choose one of four characters. Alone, only the look changes. In a game for two each player chooses their own on their own screen (the player who joins cannot take the host's), and each one has an ability:
+**The characters.** At the start you choose one of four characters. Alone, only the look changes. In a game for two each player chooses their own on their own screen, once both computers are connected (two players cannot take the same one), and each one has an ability:
 
 | Character | Ability |
 |---|---|
@@ -99,7 +100,9 @@ Some help:
 The Space ability works only once per game: the bottom left corner says so as long as it is available. If you use it while the crab is still a statue, it is wasted.
 
 **The crab (two players only).** As soon as you solve the cabin, the whole ship shakes: the crab statue on the deck trembles, breaks into pieces, and the crab comes out to hunt you. The rubble stays there until the end.
-- It chases the nearest player and is slower than you. If nobody is in its room, it follows you through the open doors.
+- It is slower than you. How it hunts depends on the difficulty the host chose:
+  - **Hard:** it always knows where you are. It chases the nearest player along the shortest way, and if nobody is in its room it follows you through the open doors.
+  - **Easy:** it hunts like the ghosts of an arcade maze. It only sees its own room. It decides where to go only in the middle of a tile, never turns back unless the way ends, and picks the way that looks nearest to you in a straight line, so obstacles can send it the long way round. Every 20 seconds it gives up for 7 seconds and goes to the top right corner of the room. If it sees nobody, it heads for a door of its room chosen at random and looks in the next room.
 - If it touches you, you go down and cannot move. Your partner has one minute to help you up: they must stand next to you and hold **E** for 4 seconds (the green bar shows how much is left).
 - If nobody helps you up in time, you are out until the end of the game, and your items pass to your partner. While you are out you watch your partner play.
 - If the crab catches both of you, even when one of you is already out, the game is lost: a giant claw snaps shut on the screen and breaks it to pieces, and then comes the third ending, "Caught by the crab".

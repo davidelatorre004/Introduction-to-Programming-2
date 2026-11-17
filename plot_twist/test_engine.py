@@ -1658,6 +1658,35 @@ def test_player_two_chooses_any_character_but_player_ones():
     assert not engine.choose_partner_character(alone, "wizard")[1]["ok"]
 
 
+def test_both_players_choose_their_characters_at_once():
+    state = engine.new_game(two_players=True)
+    before = copy.deepcopy(state)
+    chosen, outcome = engine.choose_characters(state, "flash", "ghost")
+    assert outcome["ok"] and engine.character_of(chosen, 1) == "flash" and engine.character_of(chosen, 2) == "ghost"
+    assert reopen(chosen) == chosen and state == before
+    for first, second in (("flash", "flash"), ("flash", "blue"), (None, "ghost")):
+        same, outcome = engine.choose_characters(state, first, second)
+        assert not outcome["ok"] and same is state
+    assert not engine.choose_characters(engine.new_game(), "flash", "ghost")[1]["ok"]  # alone: no partner
+
+
+def test_a_game_for_two_remembers_how_its_crab_hunts():
+    assert engine.crab_difficulty(engine.new_game()) == "hard"
+    assert engine.crab_difficulty(engine.new_game(two_players=True)) == "hard"  # the crab of always
+    for difficulty in story.DIFFICULTIES:
+        state, outcome = engine.start_new_game(None, two_players=True, difficulty=difficulty)
+        assert outcome["ok"] and engine.crab_difficulty(state) == difficulty
+        assert reopen(state) == state
+    with pytest.raises(ValueError):
+        engine.new_game(two_players=True, difficulty="impossible")
+    old = restorable(flags={"two_players": True})  # saved before there was a choice: the hard crab
+    assert engine.crab_difficulty(engine.restore_state(old)) == "hard"
+    for wrong in ("medium", 1, None):
+        assert engine.restore_state(restorable(flags={"crab_difficulty": wrong})) is None, wrong
+    for info in story.DIFFICULTIES.values():
+        assert info["name"] and info["text"]
+
+
 def test_two_players_with_the_same_character_is_not_a_valid_save():
     same = restorable(flags={"two_players": True, "character": "flash", "partner_character": "flash"})
     assert engine.restore_state(same) is None

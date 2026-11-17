@@ -28,6 +28,17 @@ CHARACTERS = {
               "power": {"label": "Dash", "text": "A lightning dash!"}},
 }
 
+# How the crab hunts in a game for two, chosen by the player who hosts it ("text" is what the
+# choice screen says about it). Hard is the crab of always; easy is a crab like the ghosts of
+# an arcade maze: it only sees its own room, turns only where the floor lets it, never back,
+# and now and then wanders off to a corner.
+DIFFICULTIES = {
+    "easy": {"name": "Easy",
+             "text": "The crab only sees its own room. It turns only at crossings, never back, and now and then wanders off to a corner."},
+    "hard": {"name": "Hard",
+             "text": "The crab always knows where you are, and takes the shortest way to you, through the whole ship."},
+}
+
 # What the game remembers about the player's progress and choices, with the
 # value each flag has at the start of a new game.
 FLAGS = {
@@ -42,6 +53,9 @@ FLAGS = {
     "ability_used_2": False,
     # A game for two players: player 2 is the other character.
     "two_players": False,
+    # In a game for two, how the crab hunts (one of DIFFICULTIES). Games saved before
+    # there was a choice had the hard one.
+    "crab_difficulty": "hard",
     # In a game for two, the room player 2 is in ("room" in the state is player 1's).
     "partner_room": "deck",
     # In a game for two, the player the crab has knocked out for good (1 or 2), or 0:
@@ -1753,13 +1767,17 @@ MESSAGES = {
     "choose_character": "Choose your character",
     "choose_character_p1": "Player 1: choose",
     "choose_character_p2": "Player 2: choose",
-    "character_taken": "Taken by player 1",
+    "character_taken": "Taken by the other player",
+    "choose_waiting": "Waiting for the other player to choose...",
+    "choose_difficulty": "How does the crab hunt?",
+    "menu_easy": "Easy",
+    "menu_hard": "Hard",
+    "lobby_difficulty": "Crab: {difficulty}",
     "abilities_for_two": "Abilities only work in a game for two.",
     "ability_used": "You have already used your ability.",
     "hint_ability": "Space: {label}",
     "hint_nurse": "Nurse: quick help",
     "ability_wasted": "Nothing happens: the crab is still a statue",
-    "lobby_choosing": "Player 2 is choosing a character",
     # A game for two, on two computers on the same network: one hosts, the other joins.
     "menu_join_game": "Join game",
     "lobby_title": "Waiting for player 2",

@@ -1452,8 +1452,13 @@ def test_the_mode_menu_offers_one_or_two_players(app):
     screen = pygame.Surface((main.WIDTH, main.HEIGHT))
     main.draw(app, screen)
     press(app, pygame.K_DOWN, pygame.K_RETURN)
-    assert app["scene"] == "character" and app["two_players"]
-    main.draw(app, screen)  # "Player 1: choose"
+    assert app["scene"] == "difficulty" and app["two_players"]  # first the crab, then the other computer
+    main.draw(app, screen)
+    press(app, pygame.K_ESCAPE)
+    assert app["scene"] == "mode" and main.menu_entries(app)[app["menu_index"]] == "two_players"
+    press(app, pygame.K_UP, pygame.K_RETURN)
+    assert app["scene"] == "character" and not app["two_players"]  # alone: the character at once, as before
+    main.draw(app, screen)
     press(app, pygame.K_ESCAPE, pygame.K_ESCAPE)
     assert app["scene"] == "menu" and app["state"] is None
 
@@ -1490,8 +1495,9 @@ def mine(app):
 
 @pytest.fixture
 def two_computers(app, monkeypatch):
-    """A game for two: `app` hosts it (New game, Host game, first character), a second app joins it
-    over the network of this computer. Both have read the opening scene."""
+    """A game for two: `app` hosts it (New game, Host game, the hard crab), a second app joins it
+    over the network of this computer, then the host takes the wizard and the guest the nurse.
+    Both have read the opening scene."""
     monkeypatch.setattr(main, "NET_PORT", 0)  # any free port: the tests never clash with a real game
     press(app, pygame.K_RETURN, pygame.K_DOWN, pygame.K_RETURN, pygame.K_RETURN)
     assert app["scene"] == "lobby"
@@ -1500,8 +1506,10 @@ def two_computers(app, monkeypatch):
     press(guest, pygame.K_DOWN, pygame.K_RETURN)  # "Join game"
     assert guest["scene"] == "join"
     main.join(guest, "127.0.0.1")
-    pump(app, guest, lambda: guest["scene"] == "character")  # the host is the wizard: the guest chooses
-    press(guest, pygame.K_RETURN)  # the first one free: the nurse
+    pump(app, guest, lambda: guest["scene"] == "character" and app["scene"] == "character")  # both choose
+    press(app, pygame.K_RETURN)  # the wizard
+    pump(app, guest, lambda: guest["taken"] == "wizard")
+    press(guest, pygame.K_RETURN)  # the wizard is taken: the first one free, the nurse
     pump(app, guest, lambda: app["scene"] == "play" and guest["scene"] == "play")
     read_all(app)
     read_all(guest)
@@ -1565,47 +1573,93 @@ def test_a_computer_that_cannot_host_says_so(app, monkeypatch):
     assert app["notice"] == ""  # gone at the first key
 
 
-def joining(app, monkeypatch, host_keys=()):
-    """`app` hosts a new game for two (its character chosen with `host_keys`); a second app joins it
-    and is shown the choice of the character. Returns that second app."""
+def joining(app, monkeypatch, difficulty_keys=()):
+    """`app` hosts a new game for two (its crab chosen with `difficulty_keys` from the hard one); a second
+    app joins it, and both are shown the choice of the character. Returns that second app."""
     monkeypatch.setattr(main, "NET_PORT", 0)
-    press(app, pygame.K_RETURN, pygame.K_DOWN, pygame.K_RETURN, *host_keys, pygame.K_RETURN)
+    press(app, pygame.K_RETURN, pygame.K_DOWN, pygame.K_RETURN, *difficulty_keys, pygame.K_RETURN)
+    assert app["scene"] == "lobby"
     monkeypatch.setattr(main, "NET_PORT", app["net"]["host"].port)
     guest = relaunch()
     main.join(guest, "127.0.0.1")
-    pump(app, guest, lambda: guest["scene"] == "character")
+    pump(app, guest, lambda: guest["scene"] == "character" and app["scene"] == "character")
     return guest
 
 
-def test_the_player_who_joins_chooses_any_character_but_the_hosts(app, monkeypatch):
-    guest = joining(app, monkeypatch, host_keys=(pygame.K_RIGHT,))  # the host is the nurse
-    assert guest["taken"] == "nurse" and app["scene"] == "lobby"
-    assert main.character_entries()[guest["menu_index"]] == "wizard"
+def test_both_players_choose_their_character_once_they_are_both_there(app, monkeypatch):
+    guest = joining(app, monkeypatch)
+    assert app["taken"] is None and guest["taken"] is None  # nobody has chosen yet: all four are free
     screen = pygame.Surface((main.WIDTH, main.HEIGHT))
-    main.draw(guest, screen)  # "Player 2: choose", the nurse dark
-    main.draw(app, screen)    # "Player 2 is choosing a character"
-    press(guest, pygame.K_RIGHT)  # over the nurse, to the ghost
-    assert main.character_entries()[guest["menu_index"]] == "ghost"
-    press(guest, pygame.K_LEFT, pygame.K_LEFT)  # back over her, and round to the last
-    assert main.character_entries()[guest["menu_index"]] == "flash"
-    press(guest, pygame.K_RETURN)
+    main.draw(app, screen)    # "Player 1: choose"
+    main.draw(guest, screen)  # "Player 2: choose"
+    press(guest, pygame.K_RIGHT, pygame.K_RETURN)  # the guest is quicker: the nurse
+    pump(app, guest, lambda: app["taken"] == "nurse")
+    assert guest["picked"] == "nurse" and app["scene"] == "character" and guest["scene"] == "character"
+    main.draw(guest, screen)  # "Waiting for the other player to choose..."
+    press(guest, pygame.K_LEFT)
+    assert guest["picked"] == "nurse"  # chosen: it cannot change any more
+    press(app, pygame.K_RIGHT)  # from the wizard over the nurse, taken, to the ghost
+    assert main.character_entries()[app["menu_index"]] == "ghost"
+    press(app, pygame.K_LEFT, pygame.K_LEFT)  # back over her, to the wizard, and round to the last
+    assert main.character_entries()[app["menu_index"]] == "flash"
+    main.draw(app, screen)    # the nurse dark
+    press(app, pygame.K_RETURN)
     pump(app, guest, lambda: app["scene"] == "play" and guest["scene"] == "play")
     for one in (app, guest):
-        assert one["state"]["flags"]["character"] == "nurse" and one["state"]["flags"]["partner_character"] == "flash"
-    assert main.player_picture(guest, mine(guest)) is sprites.image("flash_down_0")
+        assert one["state"]["flags"]["character"] == "flash" and one["state"]["flags"]["partner_character"] == "nurse"
+    assert main.player_picture(guest, mine(guest)) is sprites.image("nurse_down_0")
+    assert main.player_picture(app, mine(app)) is sprites.image("flash_down_0")
     main.end_network(app)
     main.end_network(guest)
 
 
-def test_the_host_refuses_its_own_character_and_asks_again(app, monkeypatch):
+def test_two_players_cannot_take_the_same_character(app, monkeypatch):
     guest = joining(app, monkeypatch)
-    main.send(guest, {"t": "picked", "character": "wizard"})  # the host's own: not through the menu
-    guest["taken"] = None
-    main.set_scene(guest, "join")
-    pump(app, guest, lambda: guest["scene"] == "character")
-    assert guest["taken"] == "wizard" and app["scene"] == "lobby"
+    press(app, pygame.K_RETURN)  # the host takes the wizard...
+    main.send(guest, {"t": "picked", "character": "wizard"})  # ...and the guest asks for it at the same moment
+    guest["picked"] = "wizard"
+    pump(app, guest, lambda: guest["taken"] == "wizard" and guest["picked"] is None)  # refused: choose again
+    assert app["scene"] == "character" and app["taken"] is None
+    assert main.character_entries()[guest["menu_index"]] != "wizard"
+    press(guest, pygame.K_RETURN)
+    pump(app, guest, lambda: app["scene"] == "play" and guest["scene"] == "play")
+    assert app["state"]["flags"]["character"] == "wizard" and app["state"]["flags"]["partner_character"] == "nurse"
     main.end_network(app)
     main.end_network(guest)
+
+
+def test_the_host_chooses_how_the_crab_hunts_and_both_computers_know(app, monkeypatch):
+    guest = joining(app, monkeypatch, difficulty_keys=(pygame.K_UP,))  # from the hard crab up to the easy one
+    assert engine.crab_difficulty(app["lobby"][0]) == "easy"
+    press(app, pygame.K_RETURN)
+    pump(app, guest, lambda: guest["taken"] == "wizard")
+    press(guest, pygame.K_RETURN)
+    pump(app, guest, lambda: app["scene"] == "play" and guest["scene"] == "play")
+    assert engine.crab_difficulty(app["state"]) == engine.crab_difficulty(guest["state"]) == "easy"
+    assert engine.restore_state(save.load_game())["flags"]["crab_difficulty"] == "easy"  # kept for a resumed game
+    main.end_network(app)
+    main.end_network(guest)
+
+
+def test_the_difficulty_screen_says_what_each_crab_does(app):
+    press(app, pygame.K_RETURN, pygame.K_DOWN, pygame.K_RETURN)
+    assert app["scene"] == "difficulty"
+    assert main.menu_entries(app) == ["easy", "hard"] and main.menu_entries(app)[app["menu_index"]] == "hard"
+    assert main.menu_labels(app) == [story.MESSAGES["menu_easy"], story.MESSAGES["menu_hard"]]
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    for _ in range(2):
+        main.draw(app, screen)
+        press(app, pygame.K_UP)
+
+
+def test_the_lobby_says_which_crab_waits(app, monkeypatch):
+    monkeypatch.setattr(main, "NET_PORT", 0)
+    press(app, pygame.K_RETURN, pygame.K_DOWN, pygame.K_RETURN, pygame.K_UP, pygame.K_RETURN)
+    drawn = []
+    monkeypatch.setattr(main, "draw_text", lambda screen, font, text, *rest: drawn.append(text))
+    main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+    assert story.MESSAGES["lobby_difficulty"].format(difficulty="Easy") in drawn
+    main.end_network(app)
 
 
 def test_if_the_player_who_joined_gives_up_the_host_waits_again(app, monkeypatch):
@@ -1613,9 +1667,10 @@ def test_if_the_player_who_joined_gives_up_the_host_waits_again(app, monkeypatch
     press(guest, pygame.K_ESCAPE)
     assert guest["scene"] == "menu" and guest["net"] is None
     pump(app, guest, lambda: app["net"] is not None and app["net"]["conn"] is None and app["scene"] == "lobby")
+    assert app["picked"] is None and app["taken"] is None  # the choice starts again with the next one
     other = relaunch()  # someone else can join now
     main.join(other, "127.0.0.1")
-    pump(app, other, lambda: other["scene"] == "character")
+    pump(app, other, lambda: other["scene"] == "character" and app["scene"] == "character")
     main.end_network(app)
     main.end_network(other)
 
@@ -3566,3 +3621,148 @@ def test_the_atmosphere_keeps_the_room_almost_as_bright(app, monkeypatch):
         lit = scenery.brightness(average(drawn_room(app)))
         monkeypatch.setitem(effects.FX, "atmosphere", False)
         assert lit >= 0.85 * plain, room
+
+
+# --- The easy crab: like the ghosts of an arcade maze ---
+
+
+def easy(app):
+    """The game on screen has the easy crab."""
+    app["state"]["flags"]["crab_difficulty"] = "easy"
+
+
+def test_the_easy_crab_decides_only_in_the_middle_of_a_tile_and_never_turns_back(app):
+    two_playing(app, FIRST_HALF)
+    easy(app)
+    awake_crab(app)
+    p1(app)["pos"] = free_spot(app, 4, 14)
+    app["players"][1]["pos"] = free_spot(app, 18, 3)
+    free = main.free_tiles(app["state"], "deck")
+    turns = 0
+    for _ in range(300):
+        before = app["crab"]["heading"]
+        main.update(app, 0, 0)
+        crab = app["crab"]
+        if app["downed"] or crab["wait"]:
+            break
+        if crab["heading"] != before:
+            turns += 1
+            tile = main.tile_of(crab["pos"])
+            body = main.crab_rect(crab)
+            assert pygame.Vector2(body.center).distance_to(main.tile_rect(*tile).center) <= main.CRAB_SPEED + 1  # a pixel
+            if crab["heading"] == (-before[0], -before[1]):  # back only where the way ends
+                ways = [way for way in main.HEADINGS if (tile[0] + way[0], tile[1] + way[1]) in free]
+                assert ways == [crab["heading"]]
+    assert turns >= 1
+
+
+def test_the_easy_crab_takes_the_way_nearest_its_prey_in_a_straight_line():
+    app = {"crab": dict(main.new_crab(), heading=(1, 0)), "state": engine.new_game(two_players=True),
+           "players": [], "hidden": {}, "downed": {}}
+    target = ("chase", (6, 0))
+    original = main.easy_target
+    try:
+        main.easy_target = lambda app: target
+        free = {(5, 5), (6, 5), (5, 4), (5, 6), (4, 5)}
+        assert main.easy_heading(app, (5, 5), free, {}) == (0, -1)  # up: nearer to (6, 0) than right
+        free = {(5, 5), (5, 6), (4, 5)}
+        assert main.easy_heading(app, (5, 5), free, {}) == (0, 1)   # never back, even toward its prey
+        free = {(5, 5), (4, 5)}
+        assert main.easy_heading(app, (5, 5), free, {}) == (-1, 0)  # a dead end: then it turns back
+        free = {(5, 5), (6, 5), (5, 4)}
+        assert main.easy_heading(app, (5, 5), free, {(5, 4): "door"}) == (1, 0)  # it does not leave its prey
+        target = ("scatter", (5, 0))
+        assert main.easy_heading(app, (5, 5), {(5, 5), (6, 5), (5, 4)}, {}) == (0, -1)
+        target = ("flee", main.tile_rect(5, 1).center)
+        assert main.easy_heading(app, (5, 5), {(5, 5), (6, 5), (5, 4), (5, 6)}, {}) == (0, 1)
+    finally:
+        main.easy_target = original
+
+
+def test_the_easy_crab_catches_a_player_who_stands_still(app):
+    two_playing(app, FIRST_HALF)
+    easy(app)
+    awake_crab(app)
+    p1(app)["pos"] = free_spot(app, 6, 18)
+    app["players"][1]["pos"] = free_spot(app, 18, 3)
+    for _ in range(1500):
+        if app["downed"]:
+            break
+        main.update(app, 0, 0)
+    assert list(app["downed"]) == [1]  # the nearer one
+
+
+def test_now_and_then_the_easy_crab_goes_to_its_corner(app):
+    two_playing(app, FIRST_HALF)
+    easy(app)
+    awake_crab(app)
+    p1(app)["pos"] = free_spot(app, 4, 20)
+    app["players"][1]["pos"] = free_spot(app, 4, 20)
+    assert main.easy_target(app)[0] == "chase"
+    app["crab"]["clock"] = main.EASY_CHASE_FRAMES - 1
+    main.update(app, 0, 0)
+    assert app["crab"]["mode"] == "scatter"
+    assert main.easy_target(app) == ("scatter", main.scatter_corner("deck"))
+    corner = pygame.Vector2(main.tile_rect(*main.scatter_corner("deck")).center)
+    before = corner.distance_to(main.crab_rect(app["crab"]).center)
+    for _ in range(main.EASY_SCATTER_FRAMES - 2):
+        main.update(app, 0, 0)
+    assert corner.distance_to(main.crab_rect(app["crab"]).center) < before - 60
+    for _ in range(3):
+        main.update(app, 0, 0)
+    assert app["crab"]["mode"] == "chase"  # and back to the chase
+
+
+def test_the_easy_crab_does_not_know_where_the_players_are_and_roams(app):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])  # both in the cabin, the crab on the deck
+    easy(app)
+    awake_crab(app)
+    target = main.easy_target(app)
+    assert target[0] == "roam" and app["crab"]["roam"] in ("deck_to_cabin", "deck_to_hold")  # either: at random
+    picks = set()
+    for turn in range(40):
+        app["crab"]["roam_clock"] = main.EASY_ROAM_FRAMES
+        picks.add(main.roam_door(app))
+    assert picks == {"deck_to_cabin", "deck_to_hold"}
+    app["crab"]["roam"] = "deck_to_hold"  # the wrong way, as far as the players are concerned
+    app["crab"]["roam_clock"] = 0
+    for _ in range(3000):
+        main.update(app, 0, 0)
+        if app["crab"]["room"] != "deck":
+            break
+    arrived = app["crab"]
+    assert arrived["room"] == "hold"
+    away = main.TOWARD[story.DOORS["hold_to_deck"]["side"]]
+    assert arrived["heading"] == (-away[0], -away[1])  # into the room, not straight back out
+    assert main.roam_door(app) != "hold_to_deck" or len(main.open_door_tiles(app["state"], "hold")) == 2
+    arrived = app["crab"]
+    door = next(door for door in main.doors_in(arrived["room"]) if story.DOORS[door]["to"] == "deck")
+    away = main.TOWARD[story.DOORS[door]["side"]]
+    assert arrived["heading"] == (-away[0], -away[1])  # into the room, not straight back out
+
+
+def test_the_easy_crab_runs_from_the_hidden_ghost_too(app):
+    two_playing(app, FIRST_HALF)
+    easy(app)
+    as_characters(app, "ghost", "wizard")
+    awake_crab(app)
+    app["downed"] = {2: main.DOWN_FRAMES}
+    app["players"][1]["pos"] = free_spot(app, 18, 3)
+    p1(app)["pos"] = free_spot(app, 6, 14)
+    press(app, pygame.K_SPACE)
+    assert main.easy_target(app)[0] == "flee"
+    before = distance(app["crab"]["pos"], p1(app)["pos"])
+    for _ in range(150):
+        main.update(app, 0, 0)
+    assert distance(app["crab"]["pos"], p1(app)["pos"]) > before + 30
+    assert app["state"]["ending"] is None and 1 not in app["downed"]
+
+
+def test_the_hard_crab_is_the_one_of_always(app):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])
+    assert engine.crab_difficulty(app["state"]) == "hard"
+    awake_crab(app)
+    assert main.crab_target(app) == ("door", "deck_to_cabin")  # it knows where they are
+    for _ in range(30):
+        main.update(app, 0, 0)
+    assert app["crab"]["next"] is None and app["crab"]["clock"] == 0  # the arcade crab's things stay unused

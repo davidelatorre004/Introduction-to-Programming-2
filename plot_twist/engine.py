@@ -38,12 +38,13 @@ STATE_KEYS = {"room", "inventory", "flags", "ending"}
 # --- Starting, restarting and resuming ---------------------------------------
 
 
-def new_game(character=None, two_players=False):
+def new_game(character=None, two_players=False, difficulty=None):
     """Return the state of a brand-new game: on the deck, empty-handed, nothing decided.
 
     `character` is one of story.CHARACTERS; without it, the first one. With
     `two_players`, it is a game for two: player 2 starts as the first character
-    player 1 did not take, until they choose their own (choose_partner_character).
+    player 1 did not take, until they choose their own (choose_characters), and
+    `difficulty` (one of story.DIFFICULTIES; without it, the hard one) is how the crab hunts.
     """
     state = {
         "room": story.START_ROOM,
@@ -57,6 +58,10 @@ def new_game(character=None, two_players=False):
             raise ValueError(f"Unknown character: {character!r}")
         state["flags"]["character"] = character
     state["flags"]["two_players"] = bool(two_players)
+    if difficulty is not None:
+        if difficulty not in story.DIFFICULTIES:
+            raise ValueError(f"Unknown difficulty: {difficulty!r}")
+        state["flags"]["crab_difficulty"] = difficulty
     if state["flags"]["partner_character"] == state["flags"]["character"]:
         state["flags"]["partner_character"] = _another_character(state["flags"]["character"])
     return state
@@ -70,17 +75,17 @@ def _another_character(character):
     raise ValueError("There is only one character")
 
 
-def start_new_game(existing, confirmed=False, character=None, two_players=False):
+def start_new_game(existing, confirmed=False, character=None, two_players=False, difficulty=None):
     """Start a new game, asking for confirmation first if there is progress to lose.
 
     `existing` is the current or saved game, or None if there is none. Without
     confirmation it comes back untouched, with the question to ask the player.
-    `character` is the character chosen for the new game, and `two_players`
-    whether it is a game for two.
+    `character` is the character chosen for the new game, `two_players`
+    whether it is a game for two, and `difficulty` how its crab hunts.
     """
     if existing is not None and not confirmed:
         return _refuse(existing, "needs_confirmation", story.MESSAGES["confirm_restart"])
-    return _accept(new_game(character, two_players), "started", story.MESSAGES["intro"])
+    return _accept(new_game(character, two_players, difficulty), "started", story.MESSAGES["intro"])
 
 
 def menu_options(existing):
@@ -176,6 +181,23 @@ def choose_partner_character(state, character):
     new = copy.deepcopy(state)
     new["flags"]["partner_character"] = character
     return _accept(new, "character_chosen", story.CHARACTERS[character]["name"])
+
+
+def choose_characters(state, first, second):
+    """Both players have chosen, before a game for two starts: player 1 `first`, player 2 `second`,
+    never the same one."""
+    if not state["flags"]["two_players"] or first not in story.CHARACTERS or second not in story.CHARACTERS \
+            or first == second:
+        return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
+    new = copy.deepcopy(state)
+    new["flags"]["character"] = first
+    new["flags"]["partner_character"] = second
+    return _accept(new, "characters_chosen", story.CHARACTERS[first]["name"])
+
+
+def crab_difficulty(state):
+    """How the crab of this game hunts: one of story.DIFFICULTIES."""
+    return state["flags"]["crab_difficulty"]
 
 
 def has_item(state, item):
@@ -1204,6 +1226,8 @@ def _allowed_values(flag):
         values += list(story.CHARACTERS)
     if flag == "character":
         values += list(story.CHARACTERS)
+    if flag == "crab_difficulty":
+        values += list(story.DIFFICULTIES)
     if flag == "two_players":
         values.append(True)
     if flag == "partner_room":
