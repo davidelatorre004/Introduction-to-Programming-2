@@ -2,9 +2,21 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v40](versions/v40.md) - Characters chosen together, and two crabs to choose from (2026-11-17)
+## [v41](versions/v41.md) - A ray, a dash, a crab of stone, and two claws to choose from (2026-11-17)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- The choice of the crab is two frames side by side, chosen with Left and Right: a common crab's claw for the easy one (sandy orange, a round speckled palm, blunt jaws with knobbly teeth) and the red claw of the end of the game for the hard one (long hooked jaws with sharp teeth, a saw of spikes, a glow that beats like blood). The highlighted claw slowly opens and shuts its jaws; the other frame is dark. The claws are drawn by claw.py, with the same shell as the giant claw in other tones (the giant claw is unchanged).
+- The easy crab is faster (0.8 of a player's speed instead of 0.6): blind to other rooms and taking the long way round, it was too slow to be a threat.
+- Flash's dash is longer, 8 tiles instead of 5, and it is animated: it lasts 8 frames, leaves yellow afterimages that fade and a trail of sparks, with a rush of air. While dashing Flash cannot be caught, and the tiles flown over do not count. The other computer sees the dash too.
+- The wizard's spell is a ray: a violet zigzag with a white core from the wand to the crab, a ring and sparks where it strikes, and a crackling sound. If the crab is in another room the ray goes the way the wizard faces, up to the wall, and the spell finds the crab all the same. Both computers see it.
+- When the key is fused the crab turns back to stone where it stands, instead of vanishing at once: its colour drains into pale marble, the stone cracks and trembles, and it bursts into dust, with a grinding sound and then a crumble.
+- The rubble of the statue on the deck blocks only at the base of its pile, no longer its whole 2 x 2 tiles: players and the crab can walk behind it.
+- In a game for two, when one player reaches an ending the other computer shows it at once, whatever is on its screen (the pause menu, the inventory, a text being read). Before, it waited until that player went back to walking. The player who reached it still reads its text first.
+
+## [v40](versions/v40.md) - Characters chosen together, and two crabs to choose from (2026-11-17)
+
+In commit [`726a15d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/726a15d277ee58903b5db8313aaa16392750695c/plot_twist).
 
 - In a game for two, the characters are chosen once both computers are connected: the host chooses the crab, waits for the other computer, then both players choose their character at the same time, each on their own screen. A character the other player has confirmed is dark and cannot be taken; if both ask for the same one at the same moment, the host decides and the other player chooses again. The game starts as soon as both have chosen.
 - The host chooses how the crab hunts, on a new screen after "Host game for 2", which says what each crab does. The waiting screen shows the crab chosen. The choice is kept with the game (a new flag, crab_difficulty): a game resumed keeps its crab, and games saved before there was a choice have the hard one.

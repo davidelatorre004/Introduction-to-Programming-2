@@ -24,7 +24,7 @@ CHARACTERS = {
               "ability": "Vanish: the crab cannot see you for 5 seconds.",
               "power": {"label": "Vanish", "text": "You vanish: the crab cannot see you"}},
     "flash": {"sprite": "flash", "name": "Flash",
-              "ability": "Dash: a lightning sprint of 5 tiles, through doors too.",
+              "ability": "Dash: a lightning sprint of 8 tiles, through doors too.",
               "power": {"label": "Dash", "text": "A lightning dash!"}},
 }
 
