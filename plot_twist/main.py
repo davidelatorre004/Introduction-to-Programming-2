@@ -681,6 +681,9 @@ def new_app(fonts):
         "beams": [],             # the rays of the wizard's spell, while they last (see start_beam)
         "petrify": None,         # the crab turning to stone where it stands, while it lasts (see crab_news)
         "own_ending": False,     # the ending came from this computer's player: they read its text first
+        "steps": {},             # each player's last footstep heard: number -> step of their walk (see footsteps)
+        "charging": False,       # the crab is charging the player on this computer (see crab_audio)
+        "charge_at": -10 ** 6,   # the frame its charge was last heard
         "act_held": False,       # E is held down on this keyboard (to help a player up)
         "partner_reviving": False,  # E is held down on the other computer, as it said
         "seen": {},              # what this computer has already told about the crab (see crab_news)
@@ -1121,6 +1124,8 @@ def go_through(app, door):
 
 def finish_door(app, action, before, state, outcome):
     if not outcome["ok"]:
+        if outcome["event"] in ("locked", "barred", "sealed"):
+            sounds.play("locked")  # a thud on the wood, and the bars or the lock rattle
         say(app, outcome["text"])
         return
     came_from = engine.player_room(before, my_number(app))
@@ -1458,6 +1463,7 @@ def update(app, dx, dy, act=False):
     update_ability_effects(app)
     update_crumble(app)
     update_effects(app)
+    update_audio(app)
     if app["scene"] == "shatter":
         update_shatter(app)  # nothing else happens while the claw breaks the screen
         return
@@ -2859,6 +2865,155 @@ def handle_message(app, message):
             return
         action, before, finish = waiting
         finish(app, action, before, state, message["outcome"])
+
+
+# --- Sound: the rooms, the footsteps, and the crab wherever it is ----------------------------
+#
+# Every room has a quiet sound of its own, looping on channels of its own (sounds.loop): the
+# sea on the deck, muffled inside the ship, water dripping in the damp rooms; and a machine's
+# hum that grows as the player comes near a generator or a portal, from the side it is on.
+# They fade into each other when the player changes room. Footsteps sound like the floor
+# they fall on, or splash in a puddle. The crab's claws click on the floor, louder as it comes
+# nearer, from its side of the screen, faster when it charges; in the next room, through an
+# open door, they are muffled and come from that door. Each computer hears from its own
+# player: nothing of this goes through the network, only what is already there.
+
+SEA_VOLUME = 0.55        # the sea, on the deck
+SEA_INSIDE_VOLUME = 0.3  # ...and from inside the ship
+DRIPS_VOLUME = 0.6       # the water dripping in the damp rooms
+HUM_VOLUME = 0.45        # a machine's hum, right next to it
+HUM_RANGE = 6 * TILE     # how far it is heard
+HUM_OFF = 0.35           # a generator that is off hums less
+STEP_VOLUME = 0.3        # footsteps: soft
+HEAR_RANGE = 16 * TILE   # how far something in the room is still heard, at its quietest
+HEAR_QUIETEST = 0.2      # how quiet that is
+PAN_WIDTH = 0.8          # how far to the side a sound can be put: never all in one ear
+CRAB_VOLUME = 0.8        # the crab's claws, right next to the player
+CLAW_CLICK_EVERY = 16    # frames between two clicks of its claws as it walks...
+CHARGE_CLICK_EVERY = 9   # ...and as it charges
+CHARGE_DISTANCE = 4 * TILE  # it charges when it is this close
+CHARGE_PAUSE = 3 * FPS   # frames before its charge can be heard again
+NEXT_ROOM_VOLUME = 0.35  # its claws in the next room, through the wall
+
+
+def listener(app):
+    """The player whose ears this computer uses: its own, or the partner's it watches once out."""
+    state = app["state"]
+    if engine.is_out(state, my_number(app)) and len(app["players"]) == 2:
+        return app["players"][1 - app["me"]]
+    return local_player(app)
+
+
+def hearing(app, point):
+    """How loud and from where a sound at `point` (room pixels) of the room on screen reaches the
+    listener: (volume, pan). Quieter the farther it is, never silent in the room."""
+    ear = player_rect(listener(app)["pos"]).center
+    distance = math.hypot(point[0] - ear[0], point[1] - ear[1])
+    volume = max(HEAR_QUIETEST, 1 - distance / HEAR_RANGE)
+    pan = max(-1.0, min(1.0, (point[0] - ear[0]) / (WIDTH / 2))) * PAN_WIDTH
+    return volume, pan
+
+
+def ambience(app):
+    """What loops in each slot now: (bed, volume) and (hum, volume, pan), or None outside the game."""
+    state = app["state"]
+    if state is None or engine.is_over(state) or app["scene"] in ("ending", "shatter"):
+        return None, None
+    seen = view(app)
+    room = seen["room"]
+    info = story.ROOMS[room]
+    if info["outdoor"]:
+        bed = ("sea", SEA_VOLUME)
+    elif info.get("damp"):
+        bed = ("drips", DRIPS_VOLUME)
+    else:
+        bed = ("sea_far", SEA_INSIDE_VOLUME)
+    ear = player_rect(listener(app)["pos"]).center
+    hum = None
+    for thing in engine.things_here(seen):
+        if thing["kind"] not in ("switch", "portal"):
+            continue
+        center = thing_rect(thing["id"]).center
+        closeness = 1 - math.hypot(center[0] - ear[0], center[1] - ear[1]) / HUM_RANGE
+        if thing["kind"] == "switch" and thing["status"] != "on":
+            closeness *= HUM_OFF
+        if closeness > 0 and (hum is None or closeness * HUM_VOLUME > hum[1]):
+            pan = max(-1.0, min(1.0, (center[0] - ear[0]) / (WIDTH / 2))) * PAN_WIDTH
+            hum = ("hum", closeness * HUM_VOLUME, pan)
+    return bed, hum
+
+
+def update_audio(app):
+    """Once a frame, on every computer: the loops of the room, the footsteps, the crab."""
+    bed, hum = ambience(app)
+    sounds.loop("bed", *(bed or (None,)))
+    sounds.loop("hum", *(hum or (None,)))
+    sounds.update_loops()
+    if app["state"] is not None:
+        footsteps(app)
+        crab_audio(app)
+
+
+def step_sound(seen, player):
+    """The sound of a footstep: a splash in a puddle, else the floor of the room."""
+    feet = player_rect(player["pos"]).midbottom
+    for thing in engine.things_here(seen):
+        if story.OBJECTS.get(thing["id"], {}).get("picture") == "decor_puddle" \
+                and thing_rect(thing["id"]).inflate(0, 2).collidepoint(feet[0], feet[1] - 1):
+            return "step_puddle"
+    return "step_" + story.ROOMS[seen["room"]]["floor"]
+
+
+def footsteps(app):
+    """A footstep at each step of the walk of a player in the room on screen: the one on this
+    computer in the middle, the other one from where they are."""
+    state = app["state"]
+    seen = view(app)
+    for number, player in enumerate(app["players"], start=1):
+        step = player["walk"] // WALK_STEP_FRAMES
+        last = app["steps"].get(number)
+        app["steps"][number] = step
+        if last is None or step == last or not player["moving"] or player["dash"] > 0:
+            continue
+        if engine.player_room(state, number) != seen["room"] or engine.is_out(state, number):
+            continue
+        volume, pan = (1.0, 0.0) if player is listener(app) else hearing(app, player_rect(player["pos"]).center)
+        sounds.play(step_sound(seen, player), volume * STEP_VOLUME, pan)
+
+
+def door_between(state, room, other):
+    """The open door of `room` that leads to `other`, or None."""
+    for door in doors_in(room):
+        if story.DOORS[door]["to"] == other and engine.door_status(state, door) == "open":
+            return door
+    return None
+
+
+def crab_audio(app):
+    """The crab's claws clicking as it walks: in the room, from where it is, louder and faster
+    as it comes near (a hiss when it charges); in the next room, muffled, from the door."""
+    crab = app["crab"]
+    if crab is None or not crab["moving"] or crab["away"] > 0:
+        app["charging"] = False
+        return
+    seen = view(app)
+    if crab["room"] == seen["room"]:
+        body = crab_rect(crab).center
+        ear = player_rect(listener(app)["pos"]).center
+        charging = math.hypot(body[0] - ear[0], body[1] - ear[1]) < CHARGE_DISTANCE
+        volume, pan = hearing(app, body)
+        if app["frame"] % (CHARGE_CLICK_EVERY if charging else CLAW_CLICK_EVERY) == 0:
+            sounds.play("claw_click", min(1.0, volume * CRAB_VOLUME * (1.25 if charging else 1.0)), pan)
+        if charging and not app["charging"] and app["frame"] - app["charge_at"] >= CHARGE_PAUSE:
+            sounds.play("crab_charge", volume * CRAB_VOLUME, pan)
+            app["charge_at"] = app["frame"]
+        app["charging"] = charging
+        return
+    app["charging"] = False
+    door = door_between(app["state"], seen["room"], crab["room"])
+    if door is not None and app["frame"] % CLAW_CLICK_EVERY == 0:
+        _, pan = hearing(app, door_rect(door).center)
+        sounds.play("claw_click_far", NEXT_ROOM_VOLUME, pan)
 
 
 # --- Visual effects: what happens on screen when something happens in the game -----------
@@ -4760,6 +4915,7 @@ def show(screen, window):
 
 
 def main():
+    pygame.mixer.pre_init(22050, -16, 2, 512)  # the rate the sounds are made at, in stereo, and quick to start
     pygame.init()
     sounds.load()  # silent if the computer has no audio
     fullscreen = False

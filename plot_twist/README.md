@@ -2,7 +2,7 @@
 
 A short 8-bit game: you wake up on the deck of a ship adrift, with a magic wand lying on the floor nearby. You explore the ship, solve puzzles to put a broken key back together, and in the end you choose who to give the wand to. There are three endings.
 
-The game has a few sound effects: keep the sound on.
+The game has sounds made like on an 8-bit console: keep the sound on, with headphones if you can. Every room has a quiet sound of its own (the sea on the deck, water dripping in the dark), the machines hum as you come near, footsteps change with the floor, and in a game for two you hear the crab coming from its side, even from the next room.
 
 What changed in each version: [CHANGELOG.md](CHANGELOG.md), with one page per version in the [versions](versions/) folder.
 

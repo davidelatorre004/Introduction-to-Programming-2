@@ -2,9 +2,19 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v42](versions/v42.md) - The easy crab at its old speed (2026-11-17)
+## [v43](versions/v43.md) - Sound like an 8-bit console: rooms, footsteps, and a crab you can hear coming (2026-11-17)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- A new synthesizer in sounds.py, with the voices of an 8-bit console's sound chip: pulse waves up for 1/8, 1/4 or half of each period, a triangle in 32 steps of 16 levels for the deep notes, and the noise of a 15-bit shift register, in its long mode (a hiss) and its short one (it rings like metal). Every voice has an ADSR envelope moving in 16 steps like the chip's volume, a pitch that can glide (equal steps of pitch), vibrato, tremolo, and one-pole low-pass and high-pass filters (the low-pass can open or close as the sound goes on). Each effect is a few voices layered, mixed with a gentle saturation instead of clipping.
+- Every effect was remade with them, and new ones were added: footsteps on wood, stone, tiles and earth, a splash in a puddle, a thud and a rattle when a door does not open, the crab's claws clicking (and muffled through a wall), its hiss when it charges. Flash's dash is a rush of air that opens; the statue crumbles with a crack, a falling rumble, grinding and pebbles bouncing; the glass shatters with a burst, a ringing hiss and shards tinkling.
+- Quiet loops play on mixer channels of their own: the sea on the deck (it swells and falls), the same sea muffled inside the ship, water dripping with its echo in the damp rooms, and the hum of a machine near the generators and the portals, louder the nearer the player is and from its side. The loops fade into their own start, so there is no click, and when the player changes room the old one fades out as the new one fades in.
+- Sounds come from where they are, in stereo: the other player's footsteps from their side, quieter farther away; the crab's claws from its side of the screen and louder as it comes near, faster with a hiss when it charges; in the next room, through an open door, muffled and from that door. Each computer hears from its own player (from the partner's, once out of the game). The mixer opens at 22050 Hz in stereo, the rate the sounds are made at; making them all takes about half a second when the game starts.
+- Looked at for reference: the sound chip of an 8-bit console in fogleman/nes (its duty table, its triangle, its noise register and its envelope, sweep and filters) and the sound of kitao/pyxel (its four tones, its envelopes and its glide).
+
+## [v42](versions/v42.md) - The easy crab at its old speed (2026-11-17)
+
+In commit [`ebfcc0c`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/ebfcc0cb8ca1e627688b747c5ca04bda45f325b0/plot_twist).
 
 - The easy crab moves again at the speed it had before the previous version, the same as the hard one (0.6 of a player's speed instead of 0.8). How it hunts does not change.
 

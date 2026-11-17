@@ -862,10 +862,24 @@ def in_hold(app):
 
 @pytest.fixture
 def heard(monkeypatch):
-    """The names of the sounds played, in order."""
-    played = []
-    monkeypatch.setattr(sounds, "play", played.append)
+    """The names of the sounds played, in order, but for the footsteps and the clicks of the crab's
+    claws, which go on all the time; `.how` has (name, volume, pan) of every sound, those included."""
+    played = Heard()
+
+    def play(name, volume=1.0, pan=0.0):
+        if name is not None and not name.startswith(("step_", "claw_click")):
+            played.append(name)
+        played.how.append((name, volume, pan))
+    monkeypatch.setattr(sounds, "play", play)
     return played
+
+
+class Heard(list):
+    """The names of the sounds played, and how loud and from where each one was."""
+
+    def __init__(self):
+        super().__init__()
+        self.how = []
 
 
 def lit_tiles(state):
@@ -3935,3 +3949,188 @@ def test_the_choice_of_the_crab_is_two_frames_side_by_side(app):
     press(app, pygame.K_RETURN)
     assert app["difficulty"] == "hard"
     main.end_network(app)
+
+
+
+# --- Sound: the rooms, the footsteps, the crab wherever it is ---
+
+
+@pytest.fixture
+def looped(monkeypatch):
+    """What each loop slot was last asked to play: slot -> (name, volume, pan)."""
+    asked = {}
+    monkeypatch.setattr(sounds, "loop", lambda slot, name, volume=1.0, pan=0.0: asked.__setitem__(slot, (name, volume, pan)))
+    return asked
+
+
+def test_each_room_has_its_quiet_sound(app, looped):
+    for room, bed in (("deck", "sea"), ("cabin", "sea_far"), ("galley", "sea_far"), ("corridor", "drips"),
+                      ("hold", "drips"), ("mine", "drips")):
+        scenery_room(app, room)
+        main.update(app, 0, 0)
+        assert looped["bed"][0] == bed, room
+        assert 0 < looped["bed"][1] <= 0.6
+    assert main.ambience(app)[0][1] == main.DRIPS_VOLUME
+    main.open_main_menu(app)
+    main.update(app, 0, 0)
+    assert looped["bed"][0] is None and looped["hum"][0] is None  # no game: silence
+
+
+def test_the_machines_hum_louder_as_the_player_comes_near_from_their_side(app):
+    scenery_room(app, "cabin")
+    generator = main.thing_rect("generator_d")  # on the right of the cabin
+    p1(app)["pos"] = free_spot(app, 16, 9)
+    near = main.ambience(app)[1]
+    p1(app)["pos"] = free_spot(app, 12, 9)
+    far = main.ambience(app)[1]
+    assert near[0] == far[0] == "hum" and near[1] > far[1] and near[2] > 0  # to the right
+    assert generator.centerx > main.player_rect(free_spot(app, 16, 9)).centerx
+    scenery_room(app, "corridor_end")
+    ring = main.thing_rect("corridor_portal")
+    p1(app)["pos"] = (ring.centerx - main.PLAYER_SIZE // 2, ring.bottom + 4)
+    hum = main.ambience(app)[1]
+    assert hum is not None and hum[1] > 0.5 * main.HUM_VOLUME  # the portal hums too
+
+
+def test_the_room_sounds_fade_into_each_other_at_a_door(app, monkeypatch):
+    monkeypatch.setattr(pygame.mixer, "get_init", lambda: None)
+    sounds.load()
+    sounds._loops.clear()
+    try:
+        scenery_room(app, "deck")
+        for _ in range(sounds.LOOP_FADE_FRAMES + 2):
+            main.update(app, 0, 0)
+        assert sounds.loop_volume("bed", "sea") == pytest.approx(main.SEA_VOLUME)
+        app["state"]["room"] = "cabin"  # through the door
+        main.update(app, 0, 0)
+        assert 0 < sounds.loop_volume("bed", "sea") < main.SEA_VOLUME  # going...
+        assert 0 < sounds.loop_volume("bed", "sea_far")                 # ...as the other one comes
+        for _ in range(sounds.LOOP_FADE_FRAMES + 2):
+            main.update(app, 0, 0)
+        assert sounds.loop_volume("bed", "sea") == 0
+        assert sounds.loop_volume("bed", "sea_far") == pytest.approx(main.SEA_INSIDE_VOLUME)
+    finally:
+        sounds._loops.clear()
+
+
+def walk(app, frames, dx=1, dy=0):
+    for _ in range(frames):
+        main.update(app, dx, dy)
+
+
+def test_footsteps_sound_like_the_floor_and_splash_in_puddles(app, heard):
+    scenery_room(app, "deck", tile=(4, 6))
+    walk(app, 4 * main.WALK_STEP_FRAMES)
+    steps = [how for how in heard.how if how[0].startswith("step_")]
+    assert {name for name, _, _ in steps} == {"step_wood"} and 3 <= len(steps) <= 5  # one each step
+    assert all(volume == main.STEP_VOLUME and pan == 0 for _, volume, pan in steps)
+    heard.how.clear()
+    scenery_room(app, "hold", actions=TINCTURES_FOUND, tile=(3, 3))
+    walk(app, 3 * main.WALK_STEP_FRAMES, 0, 1)
+    assert "step_stone" in {how[0] for how in heard.how}
+    heard.how.clear()
+    scenery_room(app, "corridor")
+    puddle = main.thing_rect("corridor_puddle_1")
+    seen = main.view(app)
+    p1(app)["pos"] = (puddle.centerx - main.PLAYER_SIZE // 2, puddle.bottom - main.PLAYER_SIZE)
+    assert main.step_sound(seen, p1(app)) == "step_puddle"
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    assert main.step_sound(seen, p1(app)) == "step_stone"
+    heard.how.clear()
+    walk(app, 10, 0, 0)
+    assert not any(how[0].startswith("step_") for how in heard.how)  # standing still: silence
+
+
+def test_the_partners_footsteps_come_from_their_side(app, heard):
+    two_playing(app, FIRST_HALF)
+    p1(app)["pos"] = free_spot(app, 3, 10)
+    partner = app["players"][1]
+    partner["pos"] = free_spot(app, 13, 10)
+    main.update(app, 0, 0)
+    for walked in range(1, 3 * main.WALK_STEP_FRAMES):
+        main.take_player_info(partner, dict(main.player_info(partner), moving=True, walk=walked))
+        main.update(app, 0, 0)
+    steps = [how for how in heard.how if how[0] == "step_wood"]
+    assert len(steps) >= 2 and all(pan > 0 and volume < main.STEP_VOLUME for _, volume, pan in steps)
+
+
+def test_a_locked_door_thuds_when_walked_into(app, heard):
+    start_new_game(app)
+    p1(app)["pos"] = main.spawn_in_front_of("deck_to_crab")
+    side = story.DOORS["deck_to_crab"]["side"]
+    dx, dy = main.TOWARD[side]
+    walk(app, 30, dx, dy)
+    assert "locked" in heard
+
+
+def crab_in(app, room, at):
+    crab = main.new_crab()
+    crab.update(room=room, pos=at, wait=0, moving=True)
+    app["crab"] = crab
+
+
+def test_the_crabs_claws_come_from_where_it_is_and_louder_nearer(app, heard, monkeypatch):
+    two_playing(app, FIRST_HALF)
+    monkeypatch.setattr(main, "update_crab", lambda app: None)  # the test moves it
+    p1(app)["pos"] = free_spot(app, 7, 10)
+    app["players"][1]["pos"] = free_spot(app, 7, 20)
+    me = main.player_rect(p1(app)["pos"])
+    crab_in(app, "deck", (me.x + 6 * main.TILE, me.y))
+    for _ in range(main.CLAW_CLICK_EVERY):
+        main.update(app, 0, 0)
+    far = [how for how in heard.how if how[0] == "claw_click"]
+    assert len(far) == 1 and far[0][2] > 0  # on the right
+    crab_in(app, "deck", (me.x - 5 * main.TILE, me.y))
+    heard.how.clear()
+    for _ in range(main.CLAW_CLICK_EVERY):
+        main.update(app, 0, 0)
+    near = [how for how in heard.how if how[0] == "claw_click"]
+    assert near[0][2] < 0 and near[0][1] > far[0][1]  # on the left, nearer: louder
+    app["crab"]["moving"] = False
+    heard.how.clear()
+    main.update(app, 0, 0)
+    for _ in range(main.CLAW_CLICK_EVERY):
+        main.update(app, 0, 0)
+    assert heard.how == []  # standing still: silent
+
+
+def test_when_the_crab_charges_its_claws_click_faster_with_a_hiss(app, heard, monkeypatch):
+    two_playing(app, FIRST_HALF)
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    p1(app)["pos"] = free_spot(app, 7, 10)
+    app["players"][1]["pos"] = free_spot(app, 7, 20)
+    me = main.player_rect(p1(app)["pos"])
+    crab_in(app, "deck", (me.x + 2 * main.TILE, me.y))
+    frames = 4 * main.CLAW_CLICK_EVERY
+    for _ in range(frames):
+        main.update(app, 0, 0)
+    clicks = [how for how in heard.how if how[0] == "claw_click"]
+    assert len(clicks) > frames // main.CLAW_CLICK_EVERY
+    assert heard.count("crab_charge") == 1  # once, not every frame
+
+
+def test_in_the_next_room_the_crab_is_heard_muffled_from_the_door(app, heard, monkeypatch):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    p1(app)["pos"] = free_spot(app, 4, 9)
+    crab_in(app, "deck", main.spawn_in_front_of("deck_to_cabin"))
+    for _ in range(main.CLAW_CLICK_EVERY):
+        main.update(app, 0, 0)
+    far = [how for how in heard.how if how[0].startswith("claw_click")]
+    assert [name for name, _, _ in far] == ["claw_click_far"] and far[0][1] == main.NEXT_ROOM_VOLUME
+    door = main.door_rect("cabin_to_deck")
+    assert (far[0][2] > 0) == (door.centerx > main.player_rect(p1(app)["pos"]).centerx)
+    crab_in(app, "hold", main.spawn_at_entry("hold"))  # two rooms away: nothing
+    heard.how.clear()
+    for _ in range(main.CLAW_CLICK_EVERY):
+        main.update(app, 0, 0)
+    assert not any(how[0].startswith("claw_click") for how in heard.how)
+
+
+def test_the_listener_is_the_partner_once_this_player_is_out(app):
+    two_playing(app, FIRST_HALF)
+    assert main.listener(app) is p1(app)
+    app["state"] = engine.knock_out(app["state"], 1)[0]
+    assert main.listener(app) is app["players"][1]
+    volume, pan = main.hearing(app, main.player_rect(app["players"][1]["pos"]).center)
+    assert volume == 1.0 and pan == 0.0
