@@ -2,9 +2,18 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v43](versions/v43.md) - Sound like an 8-bit console: rooms, footsteps, and a crab you can hear coming (2026-11-17)
+## [v44](versions/v44.md) - A crab with legs, claws and burning eyes (2026-11-17)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- The crab that hunts the players is drawn pixel by pixel, no longer a small copy of the crab of the final room: a new module, crab.py, paints it in any pose at the size of the small screen, and keeps each pose it painted. Its shell has five tones (a very dark red, almost violet, outline; a deep shadow underneath; crimson; coral where the light falls, on the top; a pale glint), a dither where the light turns to shadow, a seam across its back, a row of spines along the front of each side and two small horns. Its eyes stand on stalks, with a pupil that looks at its prey and a glint. Its claws are on arms in segments, banded where they join, with a round palm and two fingers.
+- It is animated part by part. Its three legs on each side walk in two groups over four pictures, like a crab's; its claws open and shut in rhythm as it chases, and gape as it shivers when a player is close, about to lunge; standing still it breathes, the shell rising by a pixel while the legs stay on the floor. Stunned by the wizard its eyes droop under the stars.
+- It is anchored to the floor by a wide oval shadow; its legs kick up foam on the wet deck and in the damp rooms, and dust elsewhere, as it runs. When it hunts its eyes burn red with a glow that beats, and when it is about to lunge they leave red streaks behind. It is bigger than before (40 by 30 pixels with its legs and claws) and hits the same as before: its body has not changed. When the key is fused, this crab is the one that turns to stone.
+- Looked at for reference: the enemies of clear-code-projects/Zelda (an animation for each state, its frame restarting when the state changes, a flicker) and the examples of kitao/pyxel (pictures chosen from the frame count, each enemy a little out of step with the others).
+
+## [v43](versions/v43.md) - Sound like an 8-bit console: rooms, footsteps, and a crab you can hear coming (2026-11-17)
+
+In commit [`1f83eb3`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/1f83eb31f481f64046a729aa5690d9e2f1dd5b2c/plot_twist).
 
 - A new synthesizer in sounds.py, with the voices of an 8-bit console's sound chip: pulse waves up for 1/8, 1/4 or half of each period, a triangle in 32 steps of 16 levels for the deep notes, and the noise of a 15-bit shift register, in its long mode (a hiss) and its short one (it rings like metal). Every voice has an ADSR envelope moving in 16 steps like the chip's volume, a pitch that can glide (equal steps of pitch), vibrato, tremolo, and one-pole low-pass and high-pass filters (the low-pass can open or close as the sound goes on). Each effect is a few voices layered, mixed with a gentle saturation instead of clipping.
 - Every effect was remade with them, and new ones were added: footsteps on wood, stone, tiles and earth, a splash in a puddle, a thud and a rattle when a door does not open, the crab's claws clicking (and muffled through a wall), its hiss when it charges. Flash's dash is a rush of air that opens; the statue crumbles with a crack, a falling rumble, grinding and pebbles bouncing; the glass shatters with a burst, a ringing hiss and shards tinkling.

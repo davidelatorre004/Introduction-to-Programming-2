@@ -23,6 +23,7 @@ import random
 import pygame
 
 import claw
+import crab as crab_look
 import effects
 import engine
 import net
@@ -684,6 +685,7 @@ def new_app(fonts):
         "steps": {},             # each player's last footstep heard: number -> step of their walk (see footsteps)
         "charging": False,       # the crab is charging the player on this computer (see crab_audio)
         "charge_at": -10 ** 6,   # the frame its charge was last heard
+        "crab_trail": [],        # where the crab's burning eyes were in the last frames of a charge
         "act_held": False,       # E is held down on this keyboard (to help a player up)
         "partner_reviving": False,  # E is held down on the other computer, as it said
         "seen": {},              # what this computer has already told about the crab (see crab_news)
@@ -1464,6 +1466,7 @@ def update(app, dx, dy, act=False):
     update_crumble(app)
     update_effects(app)
     update_audio(app)
+    update_crab_looks(app)
     if app["scene"] == "shatter":
         update_shatter(app)  # nothing else happens while the claw breaks the screen
         return
@@ -1561,7 +1564,16 @@ def move_player(app, player, dx, dy):
 # Now and then it gives up the chase and goes to its corner of the room for a while.
 
 CRAB_SPEED = PLAYER_SPEED * 0.6    # pixels per frame: slower than the players
-CRAB_PICTURE_SIZE = 20             # the crab's sprite, shrunk from the 2 x 2 tiles of the one in its room
+CRAB_LEG_FRAMES = 5                # frames each of the 4 pictures of its walk lasts
+CRAB_CLAW_RHYTHM = (0.0, 0.25, 0.5, 0.25)  # how open its claws are as it chases, one after the other...
+CRAB_CLAW_BEAT = 7                 # ...each for this many frames
+CRAB_BREATH_FRAMES = 70            # standing still, it breathes in and out in this many frames
+CRAB_SHADOW = (28, 8)              # the wide oval under it, on the floor
+CRAB_DUST_EVERY = 6                # frames between two puffs from its legs as it runs
+CRAB_DUST = [(190, 166, 130), (150, 130, 104), (214, 198, 170)]   # dust, on a dry floor
+CRAB_FOAM = [(236, 244, 248), (196, 220, 236), (160, 196, 218)]   # foam, on a wet one
+CRAB_EYE_GLOW = (90, 20, 8)        # the red glow of its eyes when it hunts
+CRAB_TRAIL_FRAMES = 6              # how long the red streaks of its eyes stay behind when it charges
 CRAB_WAKE_FRAMES = 3 * FPS         # still for a moment after waking: time to understand and run
 CRAB_TRANSIT_FRAMES = FPS          # between two rooms, out of sight
 CRAB_ARRIVE_FRAMES = FPS // 2      # still for a moment after coming through a door
@@ -2102,18 +2114,12 @@ def draw_petrify(app, screen):
     stone = app["petrify"]
     if stone is None or stone["room"] != view(app)["room"] or stone["age"] >= PETRIFY_BURST:
         return
-    picture = sprites.image("crab")
-    body = player_rect(stone["pos"])
-    if picture is None:
-        pygame.draw.rect(screen, RUBBLE_COLORS[1], body)
-        return
-    small = pygame.transform.scale(picture, (CRAB_PICTURE_SIZE, CRAB_PICTURE_SIZE))
-    if stone["facing"][0] < 0:
-        small = pygame.transform.flip(small, True, False)
+    small = crab_look.picture(crab_look.pose(legs=1, claws=0.0, eyes="calm", look=stone["facing"]))
     shiver = 0
     if stone["age"] >= PETRIFY_CRACK:
         shiver = (stone["age"] // 2) % 3 - 1  # cracked: it trembles before it bursts
-    place = small.get_rect(midbottom=(body.centerx + shiver, body.bottom + 2))
+    x, y = crab_place({"pos": stone["pos"]})
+    place = small.get_rect(topleft=(x + shiver, y))
     screen.blit(small, place)
     grey = stone_crab(small).copy()
     grey.set_alpha(min(255, 255 * stone["age"] // PETRIFY_CRACK))  # the colour drains away
@@ -2302,6 +2308,7 @@ def reset_crab(app):
     app["hidden"] = {}
     app["afterimages"] = []
     app["beams"] = []
+    app["crab_trail"] = []
     app["petrify"] = None
     app["crumble"] = 0
     app["shatter"] = None
@@ -2337,39 +2344,109 @@ def can_move(app):
     return number not in app["downed"] and not engine.is_out(app["state"], number)
 
 
-def crab_picture(app):
-    """The crab's sprite, shrunk once to its size on the deck, facing where it walks."""
-    picture = sprites.image("crab")
-    if picture is None:
+def crab_target_player(app):
+    """The player the crab is after in its room, the nearest one it can see, or None."""
+    crab = app["crab"]
+    state = app["state"]
+    body = pygame.Vector2(crab_rect(crab).center)
+    here = [number for number in hunted_players(app) if engine.player_room(state, number) == crab["room"]]
+    if not here:
         return None
-    small = SMALL_CRABS.get(id(picture))
-    if small is None:
-        small = pygame.transform.scale(picture, (CRAB_PICTURE_SIZE, CRAB_PICTURE_SIZE))
-        SMALL_CRABS[id(picture)] = small
-    if app["crab"]["facing"][0] < 0:
-        small = pygame.transform.flip(small, True, False)
-    return small
+    return min(here, key=lambda number: body.distance_to(player_rect(app["players"][number - 1]["pos"]).center))
 
 
-SMALL_CRABS = {}
+def crab_telegraph(app):
+    """True when the crab is about to lunge: hunting, and a player is within CHARGE_DISTANCE."""
+    crab = app["crab"]
+    target = crab_target_player(app)
+    if target is None or crab["stun"] > 0:
+        return False
+    body = crab_rect(crab).center
+    other = player_rect(app["players"][target - 1]["pos"]).center
+    return math.hypot(other[0] - body[0], other[1] - body[1]) < CHARGE_DISTANCE
+
+
+def crab_pose(app):
+    """How the crab looks now (see crab.py): its legs walk while it moves; its claws open and shut
+    as it chases, and gape when it is about to lunge; it breathes when it stands still; its eyes
+    burn when it hunts, and droop when the wizard has stunned it."""
+    crab = app["crab"]
+    if crab["stun"] > 0:
+        return crab_look.pose(legs=1, claws=0.0, breath=(app["frame"] // (CRAB_BREATH_FRAMES * 2)) % 2,
+                              eyes="dazed", look=(0, 1))
+    target = crab_target_player(app)
+    legs = (crab["walk"] // CRAB_LEG_FRAMES) % 4 if crab["moving"] else 1
+    breath = 0 if crab["moving"] else (app["frame"] // (CRAB_BREATH_FRAMES // 2)) % 2
+    if target is None:
+        return crab_look.pose(legs, 0.25, breath, "calm", crab["facing"])
+    body = crab_rect(crab).center
+    other = player_rect(app["players"][target - 1]["pos"]).center
+    look = (sign(other[0] - body[0]), sign(other[1] - body[1]))
+    if crab_telegraph(app):
+        claws = 1.0  # gaping: it is about to lunge
+    elif crab["moving"]:
+        claws = CRAB_CLAW_RHYTHM[(app["frame"] // CRAB_CLAW_BEAT) % len(CRAB_CLAW_RHYTHM)]
+    else:
+        claws = 0.25
+    return crab_look.pose(legs, claws, breath, "hunt", look)
+
+
+def crab_place(crab):
+    """Where the crab's picture goes: its legs on the floor at the bottom of its body, its shell over the middle."""
+    body = crab_rect(crab)
+    return (body.centerx - crab_look.CENTER[0], body.bottom + 1 - crab_look.FEET)
+
+
+def update_crab_looks(app):
+    """On every computer, once a frame: the dust or foam its legs kick up as it runs, and the red
+    streaks its burning eyes leave behind when it is about to lunge."""
+    for streak in app["crab_trail"]:
+        streak["age"] += 1
+    app["crab_trail"] = [streak for streak in app["crab_trail"] if streak["age"] < CRAB_TRAIL_FRAMES]
+    crab = app["crab"]
+    if app["state"] is None or crab is None or crab["away"] > 0 or crab["room"] != view(app)["room"]:
+        return
+    if crab["moving"] and effects.FX["dust"] and app["frame"] % CRAB_DUST_EVERY == 0:
+        info = story.ROOMS[crab["room"]]
+        colors = CRAB_FOAM if info["outdoor"] or info.get("damp") or crab["room"] == "crab_room" else CRAB_DUST
+        body = crab_rect(crab)
+        side = 1 if (app["frame"] // CRAB_DUST_EVERY) % 2 else -1  # one side, then the other
+        effects.spawn(app["fx"], body.centerx + side * 14, body.bottom, 3, colors, speed=0.5, life=16, up=0.5,
+                      gravity=0.04)
+    if crab["moving"] and crab_telegraph(app):
+        x, y = crab_place(crab)
+        points = [(x + px, y + py) for px, py in crab_look.eye_points(crab_pose(app))]
+        app["crab_trail"].append({"room": crab["room"], "points": points, "age": 0})
 
 
 def draw_crab(app, screen):
+    """The crab: a wide shadow on the floor under it, the crab in its pose, a shiver when it is
+    about to lunge, the glow and the streaks of its burning eyes, and stars when it is stunned."""
     crab = app["crab"]
     body = crab_rect(crab)
-    picture = crab_picture(app)
-    hop = 1 if crab["moving"] and (crab["walk"] // WALK_STEP_FRAMES) % 2 else 0  # the legs scuttle
-    if picture is None:
-        pygame.draw.rect(screen, COLORS["seal"], body)
-        return
-    screen.blit(picture, picture.get_rect(midbottom=(body.centerx, body.bottom + 2 - hop)))
+    shadow = shadow_picture(CRAB_SHADOW)
+    screen.blit(shadow, shadow.get_rect(center=(body.centerx + 1, body.bottom - 1)))
+    crab_pose_now = crab_pose(app)
+    x, y = crab_place(crab)
+    if crab_telegraph(app):
+        x += 1 if (app["frame"] // 2) % 2 else -1  # it shivers, ready to lunge
+    for streak in app["crab_trail"]:
+        if streak["room"] == crab["room"]:
+            fade = 1 - streak["age"] / CRAB_TRAIL_FRAMES
+            color = tuple(round(channel * fade) for channel in crab_look.HUNT_EYE)
+            for point in streak["points"]:
+                screen.fill(color, (point[0], point[1], 2, 1), special_flags=pygame.BLEND_RGB_ADD)
+    screen.blit(crab_look.picture(crab_pose_now), (x, y))
+    if crab_pose_now["eyes"] == "hunt" and effects.FX["lights"]:
+        for px, py in crab_look.eye_points(crab_pose_now):
+            effects.glow(screen, (x + px, y + py), 5, CRAB_EYE_GLOW, effects.pulse(app["frame"], 0.15, 0.6, 1.0))
     if crab["stun"] > 0:  # stunned by the wizard: three stars turn above its head
         for star in range(3):
             angle = app["frame"] * 0.15 + star * 2 * math.pi / 3
-            x = body.centerx + round(8 * math.cos(angle))
-            y = body.top - 12 + round(3 * math.sin(angle))
-            pygame.draw.rect(screen, COLORS["highlight"], (x - 1, y - 1, 3, 3))
-            pygame.draw.rect(screen, COLORS["text"], (x, y, 1, 1))
+            sx = body.centerx + round(8 * math.cos(angle))
+            sy = y + 2 + round(3 * math.sin(angle))
+            pygame.draw.rect(screen, COLORS["highlight"], (sx - 1, sy - 1, 3, 3))
+            pygame.draw.rect(screen, COLORS["text"], (sx, sy, 1, 1))
 
 
 def crab_here(app):

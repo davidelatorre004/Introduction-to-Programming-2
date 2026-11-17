@@ -4134,3 +4134,126 @@ def test_the_listener_is_the_partner_once_this_player_is_out(app):
     assert main.listener(app) is app["players"][1]
     volume, pan = main.hearing(app, main.player_rect(app["players"][1]["pos"]).center)
     assert volume == 1.0 and pan == 0.0
+
+
+# --- The crab's looks: its pose, its shadow, the dust of its legs, its burning eyes ---
+
+
+def crab_on_deck(app, monkeypatch, player_at=(3, 18), crab_moving=True):
+    """A game for two on the deck with the crab awake, moved only by the test."""
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    p1(app)["pos"] = free_spot(app, *player_at)
+    app["players"][1]["pos"] = free_spot(app, 13, 3)
+    app["crab"]["moving"] = crab_moving
+    return app["crab"]
+
+
+def test_the_crab_walks_its_legs_and_works_its_claws_as_it_chases(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch)
+    legs, claws = set(), set()
+    for walked in range(0, 4 * main.CRAB_LEG_FRAMES * 2):
+        crab["walk"] = walked
+        app["frame"] = walked * 2
+        pose = main.crab_pose(app)
+        legs.add(pose["legs"])
+        claws.add(pose["claws"])
+        assert pose["eyes"] == "hunt"
+    assert legs == {0, 1, 2, 3} and claws == set(main.CRAB_CLAW_RHYTHM)
+    assert main.crab_pose(app)["look"][0] == -1  # it looks at its prey, on its left
+
+
+def test_the_crab_gapes_and_shivers_before_it_lunges(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch)
+    body = main.crab_rect(crab)
+    p1(app)["pos"] = (body.x - 2 * main.TILE, body.y)
+    assert main.crab_telegraph(app) and main.crab_pose(app)["claws"] == 1.0
+    places = set()
+    for frame in range(4):
+        app["frame"] = frame
+        screen = pygame.Surface(main.room_surface("deck").get_size())
+        main.draw_room(app, screen)
+        places.add(app["frame"] // 2 % 2)
+    assert places == {0, 1}
+    app["hidden"] = {1: 100, 2: 100}  # nobody to see: no lunge, calm eyes
+    assert not main.crab_telegraph(app) and main.crab_pose(app)["eyes"] == "calm"
+
+
+def test_standing_still_the_crab_breathes_and_stunned_it_is_dazed(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch, crab_moving=False)
+    breaths = {main.crab_pose(app | {"frame": frame})["breath"] for frame in range(main.CRAB_BREATH_FRAMES)}
+    assert breaths == {0, 1} and main.crab_pose(app)["legs"] == 1
+    crab["stun"] = 50
+    pose = main.crab_pose(app)
+    assert pose["eyes"] == "dazed" and pose["claws"] == 0.0
+
+
+def test_a_wide_shadow_anchors_the_crab_to_the_floor(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch, crab_moving=False)
+    body = main.crab_rect(crab)
+    under = (body.centerx - 6, body.bottom - 1)  # below the shell, between its legs
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    with_crab = sum(screen.get_at(under)[:3])
+    app["crab"] = None
+    main.draw_room(app, screen)
+    assert with_crab < sum(screen.get_at(under)[:3])
+    assert main.CRAB_SHADOW[0] > 2 * main.PLAYER_SIZE
+
+
+def test_its_legs_kick_up_foam_on_the_wet_deck_and_dust_indoors(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch)
+    app["fx"]["particles"].clear()
+    for _ in range(main.CRAB_DUST_EVERY * 2):
+        main.update(app, 0, 0)
+    colours = {one["color"] for one in app["fx"]["particles"]}
+    assert colours and colours <= set(main.CRAB_FOAM)
+    crab["moving"] = False
+    app["fx"]["particles"].clear()
+    for _ in range(main.CRAB_DUST_EVERY * 2):
+        main.update(app, 0, 0)
+    assert not app["fx"]["particles"]
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])
+    crab_in(app, "cabin", main.spawn_in_front_of("cabin_to_deck"))
+    app["fx"]["particles"].clear()
+    for _ in range(main.CRAB_DUST_EVERY * 2):
+        main.update(app, 0, 0)
+    assert {one["color"] for one in app["fx"]["particles"]} & set(main.CRAB_DUST)
+
+
+def test_its_burning_eyes_glow_and_leave_streaks_when_it_charges(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch)
+    body = main.crab_rect(crab)
+    p1(app)["pos"] = (body.x - 2 * main.TILE, body.y)
+    for _ in range(3):
+        main.update(app, 0, 0)
+    assert app["crab_trail"] and all(streak["room"] == "deck" for streak in app["crab_trail"])
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    x, y = main.crab_place(crab)
+    for px, py in main.crab_look.eye_points(main.crab_pose(app)):
+        reds = [screen.get_at((x + px + shiver, y + py))[:3] for shiver in (-1, 0, 1)]  # it shivers by a pixel
+        assert any(r > 200 and r > b + 100 for r, g, b in reds)  # burning red
+    p1(app)["pos"] = free_spot(app, 3, 20)
+    for _ in range(main.CRAB_TRAIL_FRAMES + 1):
+        main.update(app, 0, 0)
+    assert app["crab_trail"] == []  # far again: the streaks fade away
+
+
+def test_the_crab_turns_to_stone_in_its_new_looks(app):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    main.update(app, 0, 0)
+    state = play_two(KEY_FUSED)
+    state["room"], state["flags"]["partner_room"] = "deck", "deck"
+    app["state"] = state
+    main.update(app, 0, 0)
+    stone = app["petrify"]
+    stone["age"] = main.PETRIFY_CRACK - 1
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    x, y = main.crab_place({"pos": stone["pos"]})
+    cx, cy = main.crab_look.CENTER
+    r, g, b = screen.get_at((x + cx, y + cy))[:3]
+    assert max(r, g, b) - min(r, g, b) < 40  # grey: the whole crab, in stone
