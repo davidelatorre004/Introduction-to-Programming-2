@@ -625,7 +625,7 @@ def new_app(fonts):
     app = {
         "running": True,
         "fonts": fonts,
-        "scene": "menu",         # "menu", "confirm", "mode", "character", "lobby", "join", "play", "actions",
+        "scene": "menu",         # "menu", "confirm", "mode", "difficulty", "character", "lobby", "join", "play", "actions",
                                  # "inventory", "pause" or "ending"
         "menu_index": 0,         # the highlighted entry of the menu on screen
         "existing": None,        # the saved game found when the main menu opened, or None
@@ -642,6 +642,7 @@ def new_app(fonts):
         "character_back": "menu",  # the scene Esc goes back to from the choice of the character
         "mode_back": "menu",     # the scene Esc goes back to from the choice of the mode
         "two_players": False,    # the mode chosen for the new game, until it starts
+        "difficulty": "hard",    # how the crab of the new game for two hunts (story.DIFFICULTIES), until it starts
         "frame": 0,              # frames since the game started, for everything that moves on screen
         "scene_frames": 0,       # frames since the current scene started
         "fade": 0,               # frames left before the room is out of the dark
@@ -656,7 +657,8 @@ def new_app(fonts):
         "join_text": "",         # the address typed on the "Join game" screen
         "join_error": "",        # why the last try to join failed
         "notice": "",            # a line on the title screen: why the last game for two ended
-        "taken": None,           # on the computer that joined, choosing a character: the one player 1 took
+        "taken": None,           # choosing the characters of a game for two: the one the other player took, or None
+        "picked": None,          # ...and the one this player took, or None while they are still choosing
         "crab": None,            # the crab of a game for two while it is awake (see new_crab), or None
         "downed": {},            # the players the crab has knocked down: number -> frames left before they are out
         "revive": {},            # the help given to each of them: number -> frames E has been held so far
@@ -712,6 +714,7 @@ def open_main_menu(app):
     end_network(app)
     app["me"] = 0
     app["taken"] = None
+    app["picked"] = None
     app["crumble"] = 0     # no animation of the last game left running
     app["shatter"] = None
     app["players"] = [new_player()]
@@ -739,6 +742,8 @@ def menu_entries(app):
         return ["new_game", "main_menu"]
     if scene == "mode":
         return ["one_player", "two_players"]
+    if scene == "difficulty":
+        return list(story.DIFFICULTIES)
     if scene == "actions":
         return app["actions"]
     return []
@@ -775,9 +780,15 @@ def choose(app, entry):
         set_scene(app, app["confirm_back"])
     elif entry == "join_game":
         open_join(app)
-    elif entry == "one_player" or entry == "two_players":
-        app["two_players"] = entry == "two_players"
+    elif entry == "one_player":
+        app["two_players"] = False
         choose_character(app, "mode")  # Esc on the characters comes back to the mode
+    elif entry == "two_players":
+        app["two_players"] = True
+        set_scene(app, "difficulty", menu_index=list(story.DIFFICULTIES).index("hard"))  # the crab of always
+    elif entry in story.DIFFICULTIES:
+        app["difficulty"] = entry
+        host_new_game(app)
 
 
 def go_back(app):
@@ -790,12 +801,14 @@ def go_back(app):
     elif scene == "ending":
         open_main_menu(app)
     elif scene == "character":
-        if app["taken"] is not None:
-            open_main_menu(app)  # the player who joined gives up: the host goes back to waiting
+        if app["net"] is not None:
+            open_main_menu(app)  # a game for two: the one who gives up leaves it (the host waits again)
         else:
             set_scene(app, app["character_back"])
     elif scene == "mode":
         set_scene(app, app["mode_back"])
+    elif scene == "difficulty":
+        set_scene(app, "mode", menu_index=1)
     elif scene == "lobby" or scene == "join":
         open_main_menu(app)
 
@@ -852,22 +865,59 @@ def move_character_choice(app, step):
     app["menu_index"] = index
 
 
-def pick_partner_character(app, taken):
-    """On the computer that joined: the host says which character is taken; this player chooses another."""
-    app["taken"] = taken
+def open_choice_for_two(app):
+    """Both computers are connected: each player chooses their character on their own screen, at the same time."""
+    app["taken"] = None
+    app["picked"] = None
     set_scene(app, "character")
-    if character_entries()[0] == taken:
+
+
+def take_character(app, taken):
+    """The other player has taken a character (or None: not yet). This player cannot take it:
+    if they had, the host refused theirs, and they choose again."""
+    app["taken"] = taken
+    if app["picked"] is not None and app["picked"] == taken:
+        app["picked"] = None
+    if app["picked"] is None and character_entries()[app["menu_index"]] == taken:
         move_character_choice(app, 1)
 
 
-def start_with_character(app, character):
-    """The character is chosen: the new game replaces the progress and starts."""
-    state, outcome = engine.start_new_game(progress(app), confirmed=True, character=character,
-                                           two_players=app["two_players"])
-    if app["two_players"]:
-        open_lobby(app, state, outcome["text"])  # first the other computer joins
+def pick_character_for_two(app, character):
+    """This player takes a character in a game for two, unless the other one has it. The host checks
+    and starts the game once both have chosen; the computer that joined asks the host."""
+    if app["picked"] is not None or character == app["taken"]:
+        return
+    app["picked"] = character
+    if is_host(app):
+        send(app, {"t": "pick", "taken": character})
+        start_when_both_chose(app)
     else:
-        begin_game(app, state, outcome["text"])
+        send(app, {"t": "picked", "character": character})
+
+
+def start_when_both_chose(app):
+    """The host: once both players have their character, the game for two starts."""
+    if app["picked"] is None or app["taken"] is None or app["lobby"] is None:
+        return
+    state, opening_text = app["lobby"]
+    chosen, outcome = engine.choose_characters(state, app["picked"], app["taken"])
+    if outcome["ok"]:
+        app["lobby"] = (chosen, opening_text)
+        start_for_two(app)
+
+
+def start_with_character(app, character):
+    """Alone: the character is chosen, the new game replaces the progress and starts."""
+    state, outcome = engine.start_new_game(progress(app), confirmed=True, character=character)
+    begin_game(app, state, outcome["text"])
+
+
+def host_new_game(app):
+    """A new game for two, with the crab chosen: it replaces the progress, then waits for the other
+    computer. The characters are chosen once both are there."""
+    state, outcome = engine.start_new_game(progress(app), confirmed=True, two_players=True,
+                                           difficulty=app["difficulty"])
+    open_lobby(app, state, outcome["text"])
 
 
 def begin_game(app, state, opening_text):
@@ -877,6 +927,8 @@ def begin_game(app, state, opening_text):
     """
     app["state"] = state
     app["dialog"] = []
+    app["taken"] = None
+    app["picked"] = None
     set_up_players(app)
     place_at_entry(app)
     reset_crab(app)
@@ -1278,19 +1330,18 @@ def inventory_keys(app):
 def handle_character_key(app, key):
     """Keys on the choice of the character: left and right to move, E or Enter to choose, Esc to go back."""
     entries = character_entries()
-    if key in LEFT_KEYS:
+    if key in LEFT_KEYS and app["picked"] is None:
         move_character_choice(app, -1)
-    elif key in RIGHT_KEYS:
+    elif key in RIGHT_KEYS and app["picked"] is None:
         move_character_choice(app, 1)
-    elif key in confirm_keys(app) and app["taken"] is not None:
-        send(app, {"t": "picked", "character": entries[app["menu_index"]]})  # the host starts the game
-        app["taken"] = None
-        app["join_error"] = story.MESSAGES["joining"]
-        set_scene(app, "join")
-    elif key in confirm_keys(app):
-        start_with_character(app, entries[app["menu_index"]])
     elif key == pygame.K_ESCAPE:
         go_back(app)
+    elif app["picked"] is not None:
+        return  # chosen: waiting for the other player
+    elif key in confirm_keys(app) and app["net"] is not None:
+        pick_character_for_two(app, entries[app["menu_index"]])
+    elif key in confirm_keys(app):
+        start_with_character(app, entries[app["menu_index"]])
 
 
 def handle_join_key(app, key):
@@ -1461,6 +1512,16 @@ def move_player(app, player, dx, dy):
 #
 # The host moves the crab and keeps the timers; the computer that joined only draws
 # what the host sends. Nothing of this is saved, only who is out of the game.
+#
+# The host also chooses how the crab hunts (engine.crab_difficulty). Hard is the crab
+# described above: it always knows where everyone is and takes the shortest way.
+# Easy is a crab like the ghosts of an arcade maze (move_easy_crab): it walks from the
+# middle of one tile to the middle of the next, decides only there, never turns back
+# unless the way ends, and picks the way whose next tile is nearest to its target in a
+# straight line, which can take it the long way round. It only sees its own room: with
+# nobody there it roams, heading for a door of the room taken at random (not the one
+# toward the players: it does not know where they are), and looks in the next room.
+# Now and then it gives up the chase and goes to its corner of the room for a while.
 
 CRAB_SPEED = PLAYER_SPEED * 0.6    # pixels per frame: slower than the players
 CRAB_PICTURE_SIZE = 20             # the crab's sprite, shrunk from the 2 x 2 tiles of the one in its room
@@ -1478,6 +1539,12 @@ DASH_STEP = 4                      # pixels at a time, so the dash stops at wall
 DASH_TRAIL_FRAMES = 12             # how long the streak of the dash stays on screen
 
 
+EASY_CHASE_FRAMES = 20 * FPS      # the easy crab chases this long...
+EASY_SCATTER_FRAMES = 7 * FPS      # ...then goes to its corner this long, and so on
+HEADINGS = [(0, -1), (-1, 0), (0, 1), (1, 0)]  # the ways the easy crab can go, in the order it prefers on a tie
+EASY_ROAM_FRAMES = 20 * FPS        # roaming, the easy crab gives up a door it has not reached in this time
+
+
 RUBBLE_COLORS = [(232, 226, 210), (190, 184, 168), (96, 96, 112)]  # the marble of the statue, in pieces
 
 
@@ -1487,7 +1554,12 @@ def new_crab():
     body = pygame.Rect(0, 0, PLAYER_SIZE, PLAYER_SIZE)
     body.midtop = (statue.centerx, statue.bottom + 2)
     return {"room": "deck", "pos": (body.x, body.y), "facing": (0, 1), "moving": False, "walk": 0,
-            "wait": CRAB_WAKE_FRAMES, "away": 0, "stun": 0}
+            "wait": CRAB_WAKE_FRAMES, "away": 0, "stun": 0,
+            # Only for the easy crab: the way it goes, the tile it walks to, chasing or going to its
+            # corner and for how long, the door it roams to when it sees nobody and for how long,
+            # and how many doors it has taken at random.
+            "heading": (0, 1), "next": None, "mode": "chase", "clock": 0,
+            "roam": None, "roam_clock": 0, "turns": 0}
 
 
 def is_host(app):
@@ -1621,6 +1693,9 @@ def step_crab(crab, goal, solids):
 
 def move_crab(app):
     """One frame of the crab: toward its target, through a door if that is the way."""
+    if engine.crab_difficulty(app["state"]) == "easy":
+        move_easy_crab(app)
+        return
     crab = app["crab"]
     state = app["state"]
     crab["moving"] = False
@@ -1653,6 +1728,130 @@ def move_crab(app):
     if tile == start and target[0] == "door":
         goal = door_rect(target[1]).center
     step_crab(crab, goal, solid_rects(seen))
+
+
+def open_door_tiles(state, room):
+    """The tiles of the open doors of a room: tile -> door."""
+    tiles = {}
+    for door in doors_in(room):
+        if engine.door_status(state, door) == "open":
+            col, row, width, height = door_tiles(door)
+            for dx in range(width):
+                for dy in range(height):
+                    tiles[(col + dx, row + dy)] = door
+    return tiles
+
+
+def scatter_corner(room):
+    """The easy crab's corner of a room, where it goes when it gives up the chase: the top right."""
+    columns, _ = room_size(room)
+    return (columns - 2, 1)
+
+
+def easy_target(app):
+    """What the easy crab heads for now: ("chase", tile) the nearest player it sees in its room,
+    ("scatter", tile) its corner, ("flee", point) away from a hidden player, or ("roam", tile) the
+    middle of the door it has taken at random, when it sees nobody."""
+    crab = app["crab"]
+    state = app["state"]
+    here = [number for number in hunted_players(app) if engine.player_room(state, number) == crab["room"]]
+    if not here:
+        for number in app["hidden"]:
+            if number in active_players(app) and engine.player_room(state, number) == crab["room"]:
+                return ("flee", player_rect(app["players"][number - 1]["pos"]).center)
+        door = roam_door(app)  # it cannot see anyone: it does not know where they are
+        if door is None:
+            return ("wait", None)
+        col, row, _, _ = door_tiles(door)
+        return ("roam", (col, row))
+    if crab["mode"] == "scatter":
+        return ("scatter", scatter_corner(crab["room"]))
+    center = pygame.Vector2(crab_rect(crab).center)
+    nearest = min(here, key=lambda number: center.distance_to(player_rect(app["players"][number - 1]["pos"]).center))
+    return ("chase", tile_of(app["players"][nearest - 1]["pos"]))
+
+
+def roam_door(app):
+    """The door the easy crab roams to when it sees nobody: one of the open doors of its room, taken at
+    random (better not the one it came in by), and another one if it has not got there in a while."""
+    crab = app["crab"]
+    open_doors = sorted(set(open_door_tiles(app["state"], crab["room"]).values()))
+    if crab["roam"] in open_doors and crab["roam_clock"] < EASY_ROAM_FRAMES:
+        return crab["roam"]
+    if not open_doors:
+        crab["roam"] = None
+        return None
+    choices = [door for door in open_doors if door != crab["roam"]] or open_doors
+    crab["turns"] += 1
+    crab["roam"] = choices[int(scenery.hash01(len(crab["room"]), crab["turns"], 11) * len(choices)) % len(choices)]
+    crab["roam_clock"] = 0
+    return crab["roam"]
+
+
+def easy_heading(app, tile, free, doors):
+    """Where the easy crab goes from the middle of `tile`: never back unless the way ends there;
+    toward its target in a straight line (or away from it), through a door only the one it roams to."""
+    crab = app["crab"]
+    target = easy_target(app)
+    if target[0] == "wait":
+        return None
+    through = crab["roam"] if target[0] == "roam" else None  # otherwise it keeps its prey in sight
+    ways = [way for way in HEADINGS if (tile[0] + way[0], tile[1] + way[1]) in free
+            and doors.get((tile[0] + way[0], tile[1] + way[1])) in (None, through)]
+    back = (-crab["heading"][0], -crab["heading"][1])
+    ways = [way for way in ways if way != back] or ways
+    if not ways:
+        return None
+
+    def distance(way):
+        middle = pygame.Vector2(tile_rect(tile[0] + way[0], tile[1] + way[1]).center)
+        if target[0] == "flee":
+            return -middle.distance_to(target[1])
+        return middle.distance_to(tile_rect(*target[1]).center)
+    return min(ways, key=distance)  # on a tie, the first of HEADINGS
+
+
+def move_easy_crab(app):
+    """One frame of the easy crab: to the middle of the next tile; there, it decides where to go next."""
+    crab = app["crab"]
+    state = app["state"]
+    crab["moving"] = False
+    crab["clock"] += 1
+    crab["roam_clock"] += 1
+    if crab["clock"] >= (EASY_CHASE_FRAMES if crab["mode"] == "chase" else EASY_SCATTER_FRAMES):
+        crab["mode"] = "scatter" if crab["mode"] == "chase" else "chase"
+        crab["clock"] = 0
+    free = free_tiles(state, crab["room"])
+    doors = open_door_tiles(state, crab["room"])
+    solids = solid_rects(room_state(state, crab["room"]))
+    if crab["next"] is None or tuple(crab["next"]) not in free:
+        crab["next"] = tile_of(crab["pos"])  # first to the middle of the tile it is on
+    tile = tuple(crab["next"])
+    goal = tile_rect(*tile).center
+    body = crab_rect(crab)
+    if math.hypot(goal[0] - body.centerx, goal[1] - body.centery) > CRAB_SPEED:
+        step_crab(crab, goal, solids)
+        if not crab["moving"]:
+            crab["next"] = None  # something in the way: it starts again from where it is
+        return
+    crab["pos"] = (crab["pos"][0] + goal[0] - body.centerx, crab["pos"][1] + goal[1] - body.centery)
+    if tile in doors:
+        door = doors[tile]
+        go_through_crab(crab, door)
+        back = return_door(story.DOORS[door]["to"], story.DOORS[door]["room"])
+        if back is not None:
+            away = TOWARD[story.DOORS[back]["side"]]
+            crab["heading"] = (-away[0], -away[1])  # into the new room
+        crab["next"] = None
+        crab["roam"] = back  # in the new room it takes another door, better not the way back
+        crab["roam_clock"] = EASY_ROAM_FRAMES
+        return
+    heading = easy_heading(app, tile, free, doors)
+    if heading is None:
+        return
+    crab["heading"] = heading
+    crab["next"] = (tile[0] + heading[0], tile[1] + heading[1])
+    step_crab(crab, tile_rect(*crab["next"]).center, solids)
 
 
 def farthest_tile(free, start, point, room):
@@ -2292,6 +2491,8 @@ def open_lobby(app, state, opening_text):
     app["net"] = {"role": "host", "host": host, "conn": None, "pending": {}, "next_id": 0, "sent_state": None,
                   "address": net.local_address()}
     app["lobby"] = (state, opening_text)
+    app["taken"] = None
+    app["picked"] = None
     set_scene(app, "lobby")
 
 
@@ -2330,7 +2531,8 @@ def pump_network(app):
         if opening_text is None:
             start_for_two(app)  # a game resumed: the characters are the ones of the first time
         else:
-            send(app, {"t": "pick", "taken": state["flags"]["character"]})  # first the other player chooses
+            send(app, {"t": "pick", "taken": None})  # both choose their character now
+            open_choice_for_two(app)
     for message in connection["conn"].poll():
         handle_message(app, message)
         if app["net"] is None:
@@ -2372,17 +2574,19 @@ def handle_message(app, message):
     """One message from the other computer."""
     kind = message.get("t")
     connection = app["net"]
-    if kind == "pick" and connection["role"] == "client" and message.get("taken") in story.CHARACTERS:
-        pick_partner_character(app, message["taken"])
+    if kind == "pick" and connection["role"] == "client" and (message.get("taken") in story.CHARACTERS
+                                                                 or message.get("taken") is None):
+        if app["scene"] != "character":
+            open_choice_for_two(app)  # the host is there: time to choose
+        take_character(app, message["taken"])
         return
     if kind == "picked" and connection["role"] == "host" and app["lobby"] is not None:
-        state, opening_text = app["lobby"]
-        chosen, outcome = engine.choose_partner_character(state, message.get("character"))
-        if outcome["ok"]:
-            app["lobby"] = (chosen, opening_text)
-            start_for_two(app)
-        else:
-            send(app, {"t": "pick", "taken": state["flags"]["character"]})  # not that one: choose again
+        character = message.get("character")
+        if character not in story.CHARACTERS or character == app["picked"]:
+            send(app, {"t": "pick", "taken": app["picked"]})  # not that one: choose again
+            return
+        take_character(app, character)
+        start_when_both_chose(app)
         return
     if kind == "start" and connection["role"] == "client":
         state = engine.restore_state(message.get("state"))
@@ -4077,8 +4281,10 @@ def draw_lobby(app, screen):
               (WIDTH // 2, 96), "center", True)
     dots = "." * ((app["frame"] // 20) % 4)  # something moves: the game is waiting, not stuck
     draw_text(screen, font, dots, COLORS["text"], (WIDTH // 2, 112), "center", True)
-    if app["net"] is not None and app["net"]["conn"] is not None:  # joined, and choosing a character
-        draw_text(screen, font, story.MESSAGES["lobby_choosing"], COLORS["text"], (WIDTH // 2, 128), "center", True)
+    if app["lobby"] is not None:
+        difficulty = story.DIFFICULTIES[engine.crab_difficulty(app["lobby"][0])]["name"]
+        draw_text(screen, font, story.MESSAGES["lobby_difficulty"].format(difficulty=difficulty), COLORS["text"],
+                  (WIDTH // 2, 128), "center", True)
     draw_lines_at_bottom(app, screen, story.MESSAGES["lobby_hint"])
 
 
@@ -4115,10 +4321,8 @@ def draw_character_choice(app, screen):
     draw_sea(app, screen, screen.get_rect(), calm=True)
     font = app["fonts"]["text"]
     title = "choose_character"
-    if app["taken"] is not None:
-        title = "choose_character_p2"
-    elif app["two_players"]:
-        title = "choose_character_p1"
+    if app["net"] is not None:
+        title = "choose_character_p1" if is_host(app) else "choose_character_p2"
     draw_text(screen, app["fonts"]["title"], story.MESSAGES[title], COLORS["text"], (WIDTH // 2, 30), "center", True)
     entries = character_entries()
     first = WIDTH // 2 - (len(entries) - 1) * CHARACTER_GAP // 2
@@ -4129,17 +4333,19 @@ def draw_character_choice(app, screen):
         frame.center = center
         pygame.draw.rect(screen, COLORS["box"], frame)
         chosen = index == app["menu_index"]
-        border = COLORS["highlight"] if chosen and (app["frame"] // 24) % 2 == 0 else COLORS["dim_text"]
+        blink = app["picked"] is None and (app["frame"] // 24) % 2 == 1  # once taken, it stops blinking
+        border = COLORS["highlight"] if chosen and not blink else COLORS["dim_text"]
         pygame.draw.rect(screen, border, frame, 2 if chosen else 1)
         if picture is not None:
             big = pygame.transform.scale(picture, (picture.get_width() * CHARACTER_ZOOM, picture.get_height() * CHARACTER_ZOOM))
             screen.blit(big, big.get_rect(center=center))
         if character == app["taken"]:
-            shade(screen, frame.inflate(-2, -2), 170)  # taken by player 1
+            shade(screen, frame.inflate(-2, -2), 170)  # taken by the other player
     for index, line in enumerate(character_lines(app, entries[app["menu_index"]])):
         color = COLORS["highlight"] if index == 0 else COLORS["text"]
         draw_text(screen, font, line, color, (WIDTH // 2, CHOICE_TEXT_TOP + index * font.get_linesize()), "center", True)
-    draw_lines_at_bottom(app, screen, story.MESSAGES["choose_hint"])
+    hint = story.MESSAGES["choose_waiting"] if app["picked"] is not None else story.MESSAGES["choose_hint"]
+    draw_lines_at_bottom(app, screen, hint)
 
 
 def character_lines(app, character):
@@ -4150,9 +4356,22 @@ def character_lines(app, character):
     info = story.CHARACTERS[character]
     font = app["fonts"]["text"]
     lines = [info["name"]] + wrap(info["ability"], WIDTH - 24, text_width(font))
-    if not app["two_players"] and app["taken"] is None:
+    if not app["two_players"] and app["net"] is None:
         lines += wrap(story.MESSAGES["abilities_for_two"], WIDTH - 24, text_width(font))
     return lines
+
+
+def draw_difficulty_choice(app, screen):
+    """The choice of the crab of a game for two, over the calm sea of the title, and what the highlighted one does."""
+    draw_sea(app, screen, screen.get_rect(), calm=True)
+    font = app["fonts"]["text"]
+    draw_text(screen, app["fonts"]["title"], story.MESSAGES["choose_difficulty"], COLORS["text"], (WIDTH // 2, 36),
+              "center", True)
+    draw_menu(app, screen, 84)
+    entries = menu_entries(app)
+    text = story.DIFFICULTIES[entries[app["menu_index"] % len(entries)]]["text"]
+    for index, line in enumerate(wrap(text, WIDTH - 32, text_width(font))):
+        draw_text(screen, font, line, COLORS["text"], (WIDTH // 2, 136 + index * font.get_linesize()), "center", True)
 
 
 def draw_mode_choice(app, screen):
@@ -4208,6 +4427,8 @@ def draw(app, screen):
         draw_character_choice(app, screen)
     elif scene == "mode":
         draw_mode_choice(app, screen)
+    elif scene == "difficulty":
+        draw_difficulty_choice(app, screen)
     elif scene == "lobby":
         draw_lobby(app, screen)
     elif scene == "join":

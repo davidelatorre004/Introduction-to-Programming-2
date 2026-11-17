@@ -2,9 +2,19 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v39](versions/v39.md) - The colour of the light in every room (2026-11-16)
+## [v40](versions/v40.md) - Characters chosen together, and two crabs to choose from (2026-11-17)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- In a game for two, the characters are chosen once both computers are connected: the host chooses the crab, waits for the other computer, then both players choose their character at the same time, each on their own screen. A character the other player has confirmed is dark and cannot be taken; if both ask for the same one at the same moment, the host decides and the other player chooses again. The game starts as soon as both have chosen.
+- The host chooses how the crab hunts, on a new screen after "Host game for 2", which says what each crab does. The waiting screen shows the crab chosen. The choice is kept with the game (a new flag, crab_difficulty): a game resumed keeps its crab, and games saved before there was a choice have the hard one.
+- Hard is the crab of always: it knows where everyone is and takes the shortest way, through the whole ship.
+- Easy hunts like the ghosts of an arcade maze. It walks from the middle of one tile to the middle of the next and decides only there; it never turns back unless the way ends; it takes the way whose next tile is nearest to its prey in a straight line, so obstacles can send it the long way round. It only sees its own room: with nobody there it heads for a door of the room taken at random (better not the one it came in by) and looks in the next room. Every 20 seconds of chase it gives up for 7 and goes to the top right corner of its room. It runs from the hidden ghost like the hard one, and the abilities work on both.
+- Alone, nothing changes: the mode, then the character, then the game.
+
+## [v39](versions/v39.md) - The colour of the light in every room (2026-11-16)
+
+In commit [`f60292c`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/f60292c472be5de120baa292c4dd13b4a2e253fe/plot_twist).
 
 - Every room has the colour of its light, multiplied into it (a lightmap with BLEND_RGB_MULT): cold and stormy on the deck, warm wood in the cabin, amber in the galley, violet and a little spectral in the infirmary and by the portals, cool and damp in the hold, the green of the sea in the crab's room, earth in the mine.
 - The light changes colour around what it comes from: warmer around stoves, lanterns, candles and lit generators, more violet around portals and crystals, bluer around the cauldron. On the deck, now and then, distant lightning brightens everything for an instant.
