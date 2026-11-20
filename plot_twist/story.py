@@ -196,16 +196,19 @@ ROOMS = {
         "floor": "wood",
         "name": "Helm",
         "description": (
-            "The ship's wheel turns slowly on its own. Through the windows, only fog. "
+            "The ship's wheel turns slowly on its own. Ahead, the bow of the ship cuts through the waves. "
             "On the floor, a faint ring of purple light."
         ),
         "outdoor": False,
         "entry": (11, 8),
+        # Its top wall is open on the sea: two rows of waves and the bow of the ship, behind a
+        # railing. Nobody can go out there: they are as solid as a wall.
+        "view": "sea",
     },
     "east_room": {
         "floor": "wood",
         "name": "Empty room",
-        "description": "An empty room. Marks on the floor show where furniture used to stand.",
+        "description": "A room lined all round with bookshelves of dark wood, veined with red. In the middle, nothing but the floor.",
         "outdoor": False,
         "entry": (2, 5),
     },
@@ -1085,19 +1088,19 @@ OBJECTS = {
         "done_text": None, "reactions": {},
     },
     "helm_wheel": {
-        "kind": "decor", "name": "Ship's wheel", "room": "helm", "pos": (13, 5),
+        "kind": "decor", "name": "Ship's wheel", "room": "helm", "pos": (7, 2), "shift": (8, 0),  # in the middle
         "picture": "decor_wheel", "solid": True,
         "look_text": "The wheel turns by itself, a little at a time. It will not obey you.",
         "done_text": None, "reactions": {},
     },
     "helm_table": {
-        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (13, 1),
+        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (13, 2),
         "picture": "decor_table", "solid": True,
         "look_text": "A compass whose needle spins and spins.",
         "done_text": None, "reactions": {},
     },
     "helm_shelf": {
-        "kind": "decor", "name": "Bookshelf", "room": "helm", "pos": (14, 1),
+        "kind": "decor", "name": "Bookshelf", "room": "helm", "pos": (14, 2),
         "picture": "decor_bookshelf", "solid": True,
         "look_text": "Signal flags, folded with care.",
         "done_text": None, "reactions": {},
@@ -1506,7 +1509,7 @@ OBJECTS = {
         "done_text": None, "reactions": {},
     },
     "helm_table_2": {
-        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (1, 1),
+        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (1, 2),
         "picture": "decor_table", "solid": True,
         "look_text": "Charts of a coast nobody on board has ever seen.",
         "done_text": None, "reactions": {},
@@ -1596,6 +1599,21 @@ OBJECTS = {
         "done_text": None, "reactions": {},
     },
 }
+
+# The bookshelves all round the empty room to the right of the cabin, against its walls:
+# every tile of its edge but those in front of the door to the cabin (on the left).
+_EAST_COLUMNS, _EAST_ROWS = 16, 12
+_EAST_DOOR_ROWS = (4, 5, 6, 7)  # the door is on rows 5 and 6: a tile more on each side, to walk in
+for _col in range(1, _EAST_COLUMNS - 1):
+    for _row in range(1, _EAST_ROWS - 1):
+        _edge = _col in (1, _EAST_COLUMNS - 2) or _row in (1, _EAST_ROWS - 2)
+        if _edge and not (_col == 1 and _row in _EAST_DOOR_ROWS):
+            OBJECTS[f"east_shelf_{_col}_{_row}"] = {
+                "kind": "decor", "name": "Bookshelf", "room": "east_room", "pos": (_col, _row),
+                "picture": "decor_bookshelf_red", "solid": True,
+                "look_text": "Dark wood, veined with red, and books with red spines. Not one has a title.",
+                "done_text": None, "reactions": {},
+            }
 
 # Circuits of generators. When every switch of a circuit is on at the same time,
 # the circuit is complete: "solved_flag" becomes true and "solved_text" is shown.

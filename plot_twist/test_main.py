@@ -1217,8 +1217,14 @@ def test_walking_into_the_portal_leads_to_the_mine_and_back(app):
     assert p1(app)["pos"] == main.spawn_by_portal("mine_portal")
     assert app["banner"] == story.ROOMS["mine"]["name"]
     assert engine.restore_state(save.load_game())["room"] == "mine"  # saved at once
+    assert p1(app)["facing"] == main.PORTAL_EXIT  # turned away from the portal...
+    arrived = p1(app)["pos"]
+    for _ in range(main.PORTAL_STEP_OUT + 20):
+        main.update(app, 0, -1)  # ...walking out by itself, and the key still held does not take it back
+    assert app["state"]["room"] == "mine" and p1(app)["pos"][1] > arrived[1]
+    main.update(app, 0, 0)  # the key let go, and pressed again: now it goes back in
     walk_until(app, lambda x, y: app["state"]["room"] == "corridor_end", lambda x, y: (0, -1), limit=60)
-    assert p1(app)["pos"] == main.spawn_by_portal("corridor_portal")
+    assert p1(app)["pos"] == main.spawn_by_portal("corridor_portal") and p1(app)["facing"] == main.PORTAL_EXIT
 
 
 def test_arriving_by_a_portal_lands_on_free_floor():
@@ -1248,6 +1254,8 @@ def test_the_mine_portal_takes_the_player_to_the_helm_and_not_back(app, heard):
     assert heard == ["ding"]
     assert engine.restore_state(save.load_game())["room"] == "helm"
     saved = save.load_game()
+    for _ in range(main.PORTAL_STEP_OUT):
+        main.update(app, 0, 0)  # out of the ring by itself
     walk_until(app, lambda x, y: main.portal_touched(app["state"], p1(app)["pos"]) == "helm_portal",
                lambda x, y: (0, -1), limit=60)  # straight back into the ring
     for _ in range(30):
@@ -4477,5 +4485,78 @@ def test_every_dash_bursts_into_sparks(app):
 def test_flash_keeps_the_lightning_wings_on_the_ears_from_behind():
     for step in range(3):
         rows = sprites.SPRITES[f"flash_up_{step}"]
-        assert rows[10][0] == rows[10][15] == "y" and rows[9][1] == rows[11][14] == "y"
-    assert [row[:2] for row in sprites.SPRITES["flash_up_0"][9:12]] == [row[:2] for row in sprites.SPRITES["flash_down_0"][9:12]]
+        wing = [(x, y) for y in range(6, 14) for x in (0, 1) if rows[y][x] in "yY"]
+        assert len(wing) >= 7  # bigger than the three pixels seen from the front
+        assert all(rows[y][15 - x] in "yY" for x, y in wing)  # the same on both ears
+
+
+# --- The empty room's bookshelves, the helm open on the sea, the late storm ---
+
+
+def test_bookshelves_of_red_veined_wood_line_the_empty_room_but_its_door(app):
+    shelves = {info["pos"] for info in story.OBJECTS.values()
+               if info["room"] == "east_room" and info.get("picture") == "decor_bookshelf_red"}
+    columns, rows = main.room_size("east_room")
+    edge = {(col, row) for col in range(1, columns - 1) for row in range(1, rows - 1)
+            if col in (1, columns - 2) or row in (1, rows - 2)}
+    door_col, door_row, _, height = main.door_tiles("east_room_to_cabin")
+    way_in = {(1, row) for row in range(door_row - 1, door_row + height + 1)}
+    assert shelves == edge - way_in
+    assert all(story.OBJECTS[name]["solid"] for name in story.OBJECTS if name.startswith("east_shelf"))
+    picture = sprites.SPRITES["decor_bookshelf_red"]
+    assert "R" in picture[1] and sum(row.count("R") for row in picture) > 20  # veined with red
+    state = engine.new_game()
+    state["room"] = "east_room"
+    assert main.is_free_floor(state, main.spawn_at_entry("east_room"))
+    anvil = main.thing_rect("anvil")
+    assert anvil.inflate(2 * main.TILE, 2 * main.TILE).collidelist(
+        [main.thing_rect(name) for name in story.OBJECTS if name.startswith("east_shelf")]) == -1  # room around it
+
+
+def test_the_helm_opens_on_the_sea_and_the_bow_behind_a_railing(app):
+    state = engine.new_game()
+    state["room"] = "helm"
+    columns, _ = main.room_size("helm")
+    view = main.tile_rect(0, 0, columns, main.VIEW_ROWS)
+    assert any(wall.contains(view) for wall in main.wall_rects("helm"))  # nobody walks out there
+    for name, info in story.OBJECTS.items():
+        if info["room"] == "helm":
+            assert info["pos"][1] >= main.VIEW_ROWS, name
+    for name, info in story.ITEMS.items():
+        if info["room"] == "helm":
+            assert info["pos"][1] >= main.VIEW_ROWS, name
+    screen = pygame.Surface(main.room_surface("helm").get_size())
+    main.draw_sea_view(app, screen, "helm")
+    sea = pygame.transform.average_color(screen, pygame.Rect(view.left, view.top, 40, 20))
+    assert sea[2] > sea[0] + 40  # the waves, at the side: blue
+    left, tip, right = main.bow_shape(view)
+    assert tip[0] == view.centerx and tip[1] < view.centery
+    middle = screen.get_at((tip[0] + 2, view.top + 16))[:3]
+    assert middle == sprites.PALETTE["B"]  # wood, in the middle above the railing: the bow
+
+
+def test_the_wheel_stands_at_the_top_in_the_middle_of_the_helm():
+    wheel = main.thing_rect("helm_wheel")
+    columns, _ = main.room_size("helm")
+    assert wheel.centerx == main.tile_rect(0, 0, columns, 1).centerx
+    assert wheel.top == main.tile_rect(0, main.VIEW_ROWS).top  # right below the railing
+
+
+def test_lightning_flashes_a_little_more_often_once_the_key_is_fused(app, monkeypatch):
+    monkeypatch.setitem(effects.FX, "atmosphere", True)
+    def flashes(actions):
+        two_playing(app, actions)
+        app["state"]["room"] = "deck"
+        app["state"]["flags"]["partner_room"] = "deck"
+        count = 0
+        for frame in range(0, 6000, 1):
+            if frame % main.STORM_EVERY_LATE in main.STORM_FRAMES or frame % main.STORM_EVERY in main.STORM_FRAMES:
+                app["frame"] = frame
+                calm = pygame.Surface((20, 20))
+                calm.fill((100, 100, 100))
+                main.draw_atmosphere(app, calm, main.view(app), [])
+                count += calm.get_at((5, 5))[2] > 120
+        return count
+    early, late = flashes(FIRST_HALF), flashes(KEY_FUSED)
+    assert early < late < early * 1.4  # more often, but only a little
+    assert main.STORM_EVERY_LATE < main.STORM_EVERY

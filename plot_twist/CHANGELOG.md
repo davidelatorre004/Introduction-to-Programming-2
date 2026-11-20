@@ -2,9 +2,19 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v46](versions/v46.md) - Flash dashes three times, with a bolt for each (2026-11-20)
+## [v47](versions/v47.md) - Bookshelves, a helm open on the sea, and portals you walk out of (2026-11-20)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- The empty room to the right of the cabin is lined all round with bookshelves of dark wood veined with red, their books mostly red: every tile along its walls, but the four in front of the door to the cabin, so the way in stays free. The anvil still appears in the middle.
+- The top wall of the helm is open on the sea: two rows of stormy waves, the bow of the ship cutting through them with foam along its sides, and a wooden railing in front that casts its shadow on the floor. Nobody can go out there: those rows are as solid as a wall (a new "view" of a room in story.py). The ship's wheel stands right below the railing, in the middle of the room (an object can now be shifted by a few pixels off the grid); the chart tables and the bookshelf that stood on the first row moved down by one.
+- Out of a portal, a player now comes out turned away from it: they appear below the portal they arrive at, facing down, walk out a few steps by themselves, and the key they were holding going in is ignored until they let it go. Before, holding the key took them straight back into the portal.
+- The distant lightning on the deck flashes a little more often in the last part of the game, once the key is fused: every 6.5 seconds instead of 7.8.
+- Flash's lightning wings seen from behind are bigger, two pixels wide and six tall on each side, so they stand out against the red cowl and the floor.
+
+## [v46](versions/v46.md) - Flash dashes three times, with a bolt for each (2026-11-20)
+
+In commit [`ab46f98`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/ab46f98bb9c262f37a98fa0c5e9192327546b403/plot_twist).
 
 - Flash can dash three times a game instead of once. The player who is Flash sees three lightning bolts in the bottom left corner of their screen, next to "Space: Dash": each dash turns one from yellow to black (with a pale edge, so it shows on the dark sea too), and the banner says how many are left. Once all three are used only the black bolts stay. The other characters still use their ability once.
 - Each use of an ability is counted in a new flag for each player (ability_count_1 and ability_count_2, from 0 to 3), kept with the game; ability_used_ still says when it is used up. A game saved before keeps its ability used up if it was. Every dash shows its burst of sparks, on both computers, not only the first.
