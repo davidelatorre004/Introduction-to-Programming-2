@@ -23,7 +23,7 @@ What changed in each version: [CHANGELOG.md](CHANGELOG.md), with one page per ve
 
 ## 2. Download the game
 
-The game is in the `plot_twist` folder of the repository, on the `main` branch. The repository is private: GitHub will ask you to sign in with your account.
+The game is in the `plot_twist` folder of the repository, on the `main` branch. The repository is public: no account is needed to download it.
 
 **With git.** In the terminal, from the folder where you want to put the game (the one the terminal opens in is fine too):
 ```

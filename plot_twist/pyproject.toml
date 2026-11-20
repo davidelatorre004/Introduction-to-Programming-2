@@ -5,6 +5,11 @@ description = "Plot Twist — a short 8-bit mystery on a ship lost at sea (Intro
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pygame==2.6.1",
+]
+
+[dependency-groups]
+# Only to run the tests; uv installs it with them (uv run pytest), the game does not need it.
+dev = [
     "pytest==9.1.1",
 ]
 
