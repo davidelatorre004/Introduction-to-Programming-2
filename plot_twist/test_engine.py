@@ -1909,17 +1909,45 @@ def two_as(character, partner, steps=()):
 
 
 def test_an_ability_works_once_in_a_game_for_two_and_is_remembered():
-    state = two_as("wizard", "flash")
+    state = two_as("wizard", "ghost")
     assert engine.can_use_ability(state, 1) and engine.can_use_ability(state, 2)
     before = copy.deepcopy(state)
     used, outcome = engine.perform(state, ABILITY, 2)
     assert state == before
-    assert outcome == {"ok": True, "event": "ability", "text": story.CHARACTERS["flash"]["power"]["text"]}
+    assert outcome == {"ok": True, "event": "ability", "text": story.CHARACTERS["ghost"]["power"]["text"]}
     assert not engine.can_use_ability(used, 2) and engine.can_use_ability(used, 1)  # each their own
     assert reopen(used) == used  # used up for good, also after reopening the game
     again, outcome = engine.perform(used, ABILITY, 2)
     assert not outcome["ok"] and outcome["event"] == "ability_used" and again is used
     assert engine.perform(used, ABILITY, 1)[1]["ok"]
+
+
+def test_flash_can_dash_three_times_in_a_game():
+    state = two_as("wizard", "flash")
+    assert engine.ability_uses(state, 2) == 3 and engine.ability_uses(state, 1) == 1
+    texts = []
+    for left in (2, 1, 0):
+        state, outcome = engine.perform(state, ABILITY, 2)
+        assert outcome["ok"] and engine.abilities_left(state, 2) == left
+        assert state["flags"]["ability_used_2"] == (left == 0)  # used up only after the third
+        assert reopen(state) == state  # kept with the game
+        texts.append(outcome["text"])
+    assert texts == [story.MESSAGES["dashes_left"].format(left=2), story.MESSAGES["dashes_left"].format(left=1),
+                     story.MESSAGES["dashes_none"]]
+    again, outcome = engine.perform(state, ABILITY, 2)
+    assert not outcome["ok"] and outcome["event"] == "ability_used" and again is state
+    assert engine.abilities_left(state, 1) == 1  # the other player's are their own
+
+
+def test_the_dashes_used_go_through_the_save_and_nothing_else_does():
+    for count in (0, 1, 2, 3):
+        assert engine.restore_state(restorable(flags={"ability_count_2": count})) is not None
+    for wrong in (4, -1, "two", None):
+        assert engine.restore_state(restorable(flags={"ability_count_2": wrong})) is None, wrong
+    old = restorable(flags={"two_players": True, "partner_character": "flash", "ability_used_2": True})
+    assert engine.abilities_left(engine.restore_state(old), 2) == 0  # saved before: its one dash is gone
+    nurse = two_as("wizard", "nurse")
+    assert engine.ability_uses(nurse, 2) == 0 and engine.abilities_left(nurse, 2) == 0
 
 
 def test_alone_there_are_no_abilities():
@@ -1997,7 +2025,7 @@ def test_the_heart_is_wasted_when_nobody_is_out():
 
 
 def test_an_ability_already_used_does_not_come_back_with_the_heart():
-    state = engine.perform(two_as("wizard", "flash", GET_KEY), ABILITY, 2)[0]
+    state = engine.perform(two_as("wizard", "ghost", GET_KEY), ABILITY, 2)[0]
     state = in_the_mine(engine.knock_out(state, 2)[0], 1)
     after = engine.perform(state, act("pick_up", "heart"), 1)[0]
     assert not engine.is_out(after, 2) and not engine.can_use_ability(after, 2)

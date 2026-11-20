@@ -95,9 +95,9 @@ Some help:
 | Wizard | Space: a ray from the wand stuns the crab, which stands still for 5 seconds, whatever room it is in |
 | Nurse | Always on: she helps a player who is down get up in 1 second instead of 4 |
 | Ghost | Space: for 5 seconds the crab cannot see you and goes for the other player. If the other player is down or out, the crab runs away from you |
-| Flash | Space: a dash of 8 tiles in the direction you face, leaving yellow afterimages. It stops against obstacles, goes through open doors and portals, and the crab cannot catch you while you dash |
+| Flash | Space: a dash of 8 tiles in the direction you face, leaving yellow afterimages, three times a game: three bolts in the bottom left corner show the dashes left, and turn from yellow to black as you use them. It stops against obstacles, goes through open doors and portals, and the crab cannot catch you while you dash |
 
-The Space ability works only once per game: the bottom left corner says so as long as it is available. If you use it while the crab is still a statue, it is wasted.
+The Space ability works only once per game (Flash's three times): the bottom left corner says so as long as it is available. If you use it while the crab is still a statue, it is wasted.
 
 **The crab (two players only).** As soon as you solve the cabin, the whole ship shakes: the crab statue on the deck trembles, breaks into pieces, and the crab comes out to hunt you. The rubble stays there until the end: you can walk behind the pile, only its base blocks the way.
 - When it hunts within the reach of Flash's dash, the music of a chase starts, faster when it is close. A faint red halo surrounds it, and when it is about to come in from the next room, its red glow shows in the dark of that doorway.

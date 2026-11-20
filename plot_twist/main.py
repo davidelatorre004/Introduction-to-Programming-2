@@ -2713,8 +2713,8 @@ def dashing(app, number):
 
 
 def abilities_used(state):
-    """Which player has used their ability: number -> True or False."""
-    return {number: state["flags"]["ability_used_" + str(number)] for number in (1, 2)}
+    """How many times each player has used their ability: number -> a count."""
+    return {number: state["flags"]["ability_count_" + str(number)] for number in (1, 2)}
 
 
 def ability_news(app):
@@ -2725,8 +2725,8 @@ def ability_news(app):
         return
     used = abilities_used(state)
     for number, now in used.items():
-        if not now or app["seen"].get("abilities", {}).get(number, False) or number > len(app["players"]):
-            continue
+        if now <= app["seen"].get("abilities", {}).get(number, 0) or number > len(app["players"]):
+            continue  # not used again since the last frame
         character = engine.character_of(state, number)
         if engine.player_room(state, number) != view(app)["room"]:
             continue  # elsewhere on the ship: nothing to see here
@@ -2848,10 +2848,58 @@ def ability_hint(app):
     return (story.MESSAGES["hint_ability"].format(label=label), COLORS["highlight"])
 
 
+BOLT = ["..kkk",   # one of Flash's dashes, in the bottom left corner: a lightning bolt
+        ".kyyk",
+        ".kyk.",
+        "kyykk",
+        "kyyyk",
+        ".kyk.",
+        ".kk..",
+        "kk..."]
+BOLT_GAP = 7         # from one bolt to the next
+BOLT_OFF = (16, 14, 20)       # a bolt already used: black...
+BOLT_OFF_EDGE = (128, 126, 140)  # ...with a pale edge, to be seen on the dark sea too
+
+
+def dash_bolts(app):
+    """Flash's dashes in a game for two, for the player on this computer: (left, all), or None for
+    another character, alone, or out of the game."""
+    state = app["state"]
+    number = my_number(app)
+    if not state["flags"]["two_players"] or engine.is_out(state, number) \
+            or engine.ability_uses(state, number) <= 1:
+        return None
+    return engine.abilities_left(state, number), engine.ability_uses(state, number)
+
+
+def draw_bolt(screen, left, top, lit):
+    """One bolt: yellow while that dash is still there, black once it is used."""
+    for y, row in enumerate(BOLT):
+        for x, letter in enumerate(row):
+            if letter == ".":
+                continue
+            if lit:
+                color = COLORS["highlight"] if letter == "y" else COLORS["black"]
+            else:
+                color = BOLT_OFF if letter == "y" else BOLT_OFF_EDGE
+            screen.set_at((left + x, top + y), color)
+
+
 def draw_ability_hint(app, screen):
+    """The bottom left corner: what Space does, while it does something; for Flash, a bolt for each
+    of the three dashes, yellow while it is there and black once used."""
     hint = ability_hint(app)
+    bolts = dash_bolts(app)
+    x = 4
+    if bolts is not None:
+        left, total = bolts
+        top = HEIGHT - 12
+        for index in range(total):
+            draw_bolt(screen, x, top, index < left)
+            x += BOLT_GAP
+        x += 3
     if hint is not None:
-        draw_text(screen, app["fonts"]["text"], hint[0], hint[1], (4, HEIGHT - 12), "left", True)
+        draw_text(screen, app["fonts"]["text"], hint[0], hint[1], (x, HEIGHT - 12), "left", True)
 
 
 # --- Two computers: hosting, joining, and keeping the two games in step ---------------------

@@ -28,8 +28,8 @@ CHARACTERS = {
               "ability": "Vanish: the crab cannot see you for 5 seconds.",
               "power": {"label": "Vanish", "text": "You vanish: the crab cannot see you"}},
     "flash": {"sprite": "flash", "name": "Flash",
-              "ability": "Dash: a lightning sprint of 8 tiles, through doors too.",
-              "power": {"label": "Dash", "text": "A lightning dash!"}},
+              "ability": "Dash: a lightning sprint of 8 tiles, through doors too. Three times a game.",
+              "power": {"label": "Dash", "text": "A lightning dash!", "uses": 3}},
 }
 
 # How the crab hunts in a game for two, chosen by the player who hosts it ("text" is what the
@@ -55,6 +55,10 @@ FLAGS = {
     # In a game for two, each player's ability (Space) works once: True once it is used.
     "ability_used_1": False,
     "ability_used_2": False,
+    # How many times each player has used their ability: Flash can dash three times, the others
+    # use theirs once ("uses" in CHARACTERS). Once they are all used, "ability_used_" is True.
+    "ability_count_1": 0,
+    "ability_count_2": 0,
     # A game for two players: player 2 is the other character.
     "two_players": False,
     # In a game for two, how the crab hunts (one of DIFFICULTIES). Games saved before
@@ -1779,6 +1783,8 @@ MESSAGES = {
     "lobby_difficulty": "Crab: {difficulty}",
     "abilities_for_two": "Abilities only work in a game for two.",
     "ability_used": "You have already used your ability.",
+    "dashes_left": "A lightning dash! {left} left",
+    "dashes_none": "A lightning dash! That was the last one",
     "hint_ability": "Space: {label}",
     "hint_nurse": "Nurse: quick help",
     "ability_wasted": "Nothing happens: the crab is still a statue",
@@ -2109,19 +2115,32 @@ def crab_catches_everyone(state):
     return _accept(new, "ending", story.MESSAGES["crab_ending"])
 
 
+def ability_uses(state, player=1):
+    """How many times `player`'s character can use its ability in a game: three dashes for Flash,
+    once for the others, never for one whose ability is always on (the nurse)."""
+    power = story.CHARACTERS[character_of(state, player)]["power"]
+    return 0 if power is None else power.get("uses", 1)
+
+
+def abilities_left(state, player=1):
+    """How many more times `player` can use their ability in this game (0 once it is used up)."""
+    if state["flags"]["ability_used_" + str(player)]:
+        return 0
+    return max(ability_uses(state, player) - state["flags"]["ability_count_" + str(player)], 0)
+
+
 def can_use_ability(state, player=1):
-    """True if `player` still has the ability used with Space: in a game for two, once, and not for
-    a character whose ability is always on. Not after an ending, nor once out of the game."""
+    """True if `player` still has the ability used with Space: in a game for two, as many times as
+    their character can (once, three times for Flash), and not for a character whose ability is
+    always on. Not after an ending, nor once out of the game."""
     if not state["flags"]["two_players"] or is_over(state) or is_out(state, player):
         return False
-    if story.CHARACTERS[character_of(state, player)]["power"] is None:
-        return False
-    return not state["flags"]["ability_used_" + str(player)]
+    return abilities_left(state, player) > 0
 
 
 def use_ability(state, player=1):
-    """`player` uses their ability: it is used up for the whole game. What it does on screen
-    (stunning the crab, vanishing, dashing) is main.py's part."""
+    """`player` uses their ability once: once it has been used as many times as it can, it is used up
+    for the whole game. What it does on screen (stunning the crab, vanishing, dashing) is main.py's part."""
     if not state["flags"]["two_players"]:
         return _refuse(state, "nothing_happens", story.MESSAGES["abilities_for_two"])
     if not can_use_ability(state, player):
@@ -2129,8 +2148,15 @@ def use_ability(state, player=1):
             return _refuse(state, "ability_used", story.MESSAGES["ability_used"])
         return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
     new = copy.deepcopy(state)
-    new["flags"]["ability_used_" + str(player)] = True
-    return _accept(new, "ability", story.CHARACTERS[character_of(state, player)]["power"]["text"])
+    count = new["flags"]["ability_count_" + str(player)] + 1
+    new["flags"]["ability_count_" + str(player)] = count
+    if count >= ability_uses(state, player):
+        new["flags"]["ability_used_" + str(player)] = True
+    text = story.CHARACTERS[character_of(state, player)]["power"]["text"]
+    if ability_uses(state, player) > 1:
+        left = abilities_left(new, player)
+        text = story.MESSAGES["dashes_left"].format(left=left) if left else story.MESSAGES["dashes_none"]
+    return _accept(new, "ability", text)
 
 
 def item_place(state, item):
@@ -3071,6 +3097,9 @@ def _allowed_values(flag):
             values.append(True)
     if flag in ("ability_used_1", "ability_used_2"):
         values.append(True)
+    if flag in ("ability_count_1", "ability_count_2"):
+        values += list(range(1, max(info["power"].get("uses", 1) if info["power"] else 0
+                                    for info in story.CHARACTERS.values()) + 1))
     if flag == "partner_character":
         values += list(story.CHARACTERS)
     if flag == "character":
@@ -5875,8 +5904,8 @@ def dashing(app, number):
 
 
 def abilities_used(state):
-    """Which player has used their ability: number -> True or False."""
-    return {number: state["flags"]["ability_used_" + str(number)] for number in (1, 2)}
+    """How many times each player has used their ability: number -> a count."""
+    return {number: state["flags"]["ability_count_" + str(number)] for number in (1, 2)}
 
 
 def ability_news(app):
@@ -5887,8 +5916,8 @@ def ability_news(app):
         return
     used = abilities_used(state)
     for number, now in used.items():
-        if not now or app["seen"].get("abilities", {}).get(number, False) or number > len(app["players"]):
-            continue
+        if now <= app["seen"].get("abilities", {}).get(number, 0) or number > len(app["players"]):
+            continue  # not used again since the last frame
         character = engine.character_of(state, number)
         if engine.player_room(state, number) != view(app)["room"]:
             continue  # elsewhere on the ship: nothing to see here
@@ -6010,10 +6039,58 @@ def ability_hint(app):
     return (story.MESSAGES["hint_ability"].format(label=label), COLORS["highlight"])
 
 
+BOLT = ["..kkk",   # one of Flash's dashes, in the bottom left corner: a lightning bolt
+        ".kyyk",
+        ".kyk.",
+        "kyykk",
+        "kyyyk",
+        ".kyk.",
+        ".kk..",
+        "kk..."]
+BOLT_GAP = 7         # from one bolt to the next
+BOLT_OFF = (16, 14, 20)       # a bolt already used: black...
+BOLT_OFF_EDGE = (128, 126, 140)  # ...with a pale edge, to be seen on the dark sea too
+
+
+def dash_bolts(app):
+    """Flash's dashes in a game for two, for the player on this computer: (left, all), or None for
+    another character, alone, or out of the game."""
+    state = app["state"]
+    number = my_number(app)
+    if not state["flags"]["two_players"] or engine.is_out(state, number) \
+            or engine.ability_uses(state, number) <= 1:
+        return None
+    return engine.abilities_left(state, number), engine.ability_uses(state, number)
+
+
+def draw_bolt(screen, left, top, lit):
+    """One bolt: yellow while that dash is still there, black once it is used."""
+    for y, row in enumerate(BOLT):
+        for x, letter in enumerate(row):
+            if letter == ".":
+                continue
+            if lit:
+                color = COLORS["highlight"] if letter == "y" else COLORS["black"]
+            else:
+                color = BOLT_OFF if letter == "y" else BOLT_OFF_EDGE
+            screen.set_at((left + x, top + y), color)
+
+
 def draw_ability_hint(app, screen):
+    """The bottom left corner: what Space does, while it does something; for Flash, a bolt for each
+    of the three dashes, yellow while it is there and black once used."""
     hint = ability_hint(app)
+    bolts = dash_bolts(app)
+    x = 4
+    if bolts is not None:
+        left, total = bolts
+        top = HEIGHT - 12
+        for index in range(total):
+            draw_bolt(screen, x, top, index < left)
+            x += BOLT_GAP
+        x += 3
     if hint is not None:
-        draw_text(screen, app["fonts"]["text"], hint[0], hint[1], (4, HEIGHT - 12), "left", True)
+        draw_text(screen, app["fonts"]["text"], hint[0], hint[1], (x, HEIGHT - 12), "left", True)
 
 
 # --- Two computers: hosting, joining, and keeping the two games in step ---------------------
@@ -12041,7 +12118,8 @@ CHARACTER_LOOKS = {
               "patches": {"down": {9: ".y............y.", 10: "y..............y", 11: ".y............y.",
                                    15: ".....oooooo.....", 16: "...oo...........", 17: "........y.......",
                                    18: ".......yy.......", 19: ".......y........", 20: ".....yyyyyy....."},
-                          "up": {15: ".....oooooo.....", 16: "......oo........", 17: "......oo........",
+                          "up": {9: ".y............y.", 10: "y..............y", 11: ".y............y.",  # the wings, from behind too
+                                 15: ".....oooooo.....", 16: "......oo........", 17: "......oo........",
                                  18: ".......o........", 20: ".....yyyyyy....."},
                           "right": {9: "...y............", 10: "..y.............", 11: "...y............",
                                     15: "....oooooo......", 17: "......y.........", 18: ".....yy.........",
@@ -14771,17 +14849,45 @@ def two_as(character, partner, steps=()):
 
 
 def test_an_ability_works_once_in_a_game_for_two_and_is_remembered():
-    state = two_as("wizard", "flash")
+    state = two_as("wizard", "ghost")
     assert engine.can_use_ability(state, 1) and engine.can_use_ability(state, 2)
     before = copy.deepcopy(state)
     used, outcome = engine.perform(state, ABILITY, 2)
     assert state == before
-    assert outcome == {"ok": True, "event": "ability", "text": story.CHARACTERS["flash"]["power"]["text"]}
+    assert outcome == {"ok": True, "event": "ability", "text": story.CHARACTERS["ghost"]["power"]["text"]}
     assert not engine.can_use_ability(used, 2) and engine.can_use_ability(used, 1)  # each their own
     assert reopen(used) == used  # used up for good, also after reopening the game
     again, outcome = engine.perform(used, ABILITY, 2)
     assert not outcome["ok"] and outcome["event"] == "ability_used" and again is used
     assert engine.perform(used, ABILITY, 1)[1]["ok"]
+
+
+def test_flash_can_dash_three_times_in_a_game():
+    state = two_as("wizard", "flash")
+    assert engine.ability_uses(state, 2) == 3 and engine.ability_uses(state, 1) == 1
+    texts = []
+    for left in (2, 1, 0):
+        state, outcome = engine.perform(state, ABILITY, 2)
+        assert outcome["ok"] and engine.abilities_left(state, 2) == left
+        assert state["flags"]["ability_used_2"] == (left == 0)  # used up only after the third
+        assert reopen(state) == state  # kept with the game
+        texts.append(outcome["text"])
+    assert texts == [story.MESSAGES["dashes_left"].format(left=2), story.MESSAGES["dashes_left"].format(left=1),
+                     story.MESSAGES["dashes_none"]]
+    again, outcome = engine.perform(state, ABILITY, 2)
+    assert not outcome["ok"] and outcome["event"] == "ability_used" and again is state
+    assert engine.abilities_left(state, 1) == 1  # the other player's are their own
+
+
+def test_the_dashes_used_go_through_the_save_and_nothing_else_does():
+    for count in (0, 1, 2, 3):
+        assert engine.restore_state(restorable(flags={"ability_count_2": count})) is not None
+    for wrong in (4, -1, "two", None):
+        assert engine.restore_state(restorable(flags={"ability_count_2": wrong})) is None, wrong
+    old = restorable(flags={"two_players": True, "partner_character": "flash", "ability_used_2": True})
+    assert engine.abilities_left(engine.restore_state(old), 2) == 0  # saved before: its one dash is gone
+    nurse = two_as("wizard", "nurse")
+    assert engine.ability_uses(nurse, 2) == 0 and engine.abilities_left(nurse, 2) == 0
 
 
 def test_alone_there_are_no_abilities():
@@ -14859,7 +14965,7 @@ def test_the_heart_is_wasted_when_nobody_is_out():
 
 
 def test_an_ability_already_used_does_not_come_back_with_the_heart():
-    state = engine.perform(two_as("wizard", "flash", GET_KEY), ABILITY, 2)[0]
+    state = engine.perform(two_as("wizard", "ghost", GET_KEY), ABILITY, 2)[0]
     state = in_the_mine(engine.knock_out(state, 2)[0], 1)
     after = engine.perform(state, act("pick_up", "heart"), 1)[0]
     assert not engine.is_out(after, 2) and not engine.can_use_ability(after, 2)
@@ -17341,8 +17447,12 @@ def test_flash_dashes_eight_tiles_the_way_they_face_in_a_few_frames(app, heard):
     for _ in range(main.AFTERIMAGE_FRAMES):
         main.update(app, 0, 0)
     assert app["afterimages"] == []
+    for _ in range(2):  # three dashes in all...
+        p1(app)["facing"] = (-1, 0)
+        press(app, pygame.K_SPACE)
+        dash_out(app)
     where = p1(app)["pos"]
-    press(app, pygame.K_SPACE)  # once only
+    press(app, pygame.K_SPACE)  # ...and no more
     dash_out(app)
     assert p1(app)["pos"] == where
 
@@ -19483,6 +19593,59 @@ def test_the_hard_crab_walks_straight_where_it_can():
     start.center = main.tile_rect(2, 2).center
     assert main.straight_way(start.topleft, main.tile_rect(2, 6).center, wall)
     assert not main.straight_way(start.topleft, main.tile_rect(8, 2).center, wall)
+
+
+# --- Flash: three dashes, three bolts in the corner, wings seen from behind ---
+
+
+def bolt_colours(app):
+    """The colour in the middle of each bolt in the bottom left corner."""
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+    return [tuple(screen.get_at((4 + index * main.BOLT_GAP + 2, main.HEIGHT - 12 + 4)))[:3] for index in range(3)]
+
+
+def test_flash_sees_a_bolt_for_each_dash_left_yellow_then_black(app):
+    flash_game(app)
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    assert main.dash_bolts(app) == (3, 3)
+    assert bolt_colours(app) == [main.COLORS["highlight"]] * 3
+    for left in (2, 1, 0):
+        p1(app)["facing"] = (1, 0) if left % 2 else (-1, 0)
+        press(app, pygame.K_SPACE)
+        dash_out(app)
+        assert main.dash_bolts(app) == (left, 3)
+        assert bolt_colours(app) == [main.COLORS["highlight"]] * left + [main.BOLT_OFF] * (3 - left)
+    assert main.ability_hint(app) is None  # all used: only the black bolts are left
+
+
+def test_only_flash_has_bolts_and_only_on_their_own_screen(app):
+    flash_game(app)
+    as_characters(app, "wizard", "flash")  # the other player is Flash
+    assert main.dash_bolts(app) is None
+    app["state"] = engine.new_game("flash")
+    assert main.dash_bolts(app) is None  # alone, no abilities
+
+
+def test_every_dash_bursts_into_sparks(app):
+    flash_game(app)
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    main.update(app, 0, 0)  # the first frame in the room clears the effects of the one before
+    bursts = 0
+    for side in ((1, 0), (-1, 0)):
+        app["fx"]["particles"].clear()
+        p1(app)["facing"] = side
+        press(app, pygame.K_SPACE)
+        main.update(app, 0, 0)
+        bursts += any(one["color"] in main.DASH_SPARKS for one in app["fx"]["particles"])
+    assert bursts == 2  # not only the first one
+
+
+def test_flash_keeps_the_lightning_wings_on_the_ears_from_behind():
+    for step in range(3):
+        rows = sprites.SPRITES[f"flash_up_{step}"]
+        assert rows[10][0] == rows[10][15] == "y" and rows[9][1] == rows[11][14] == "y"
+    assert [row[:2] for row in sprites.SPRITES["flash_up_0"][9:12]] == [row[:2] for row in sprites.SPRITES["flash_down_0"][9:12]]
 
 
 ================================================================================

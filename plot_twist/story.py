@@ -24,8 +24,8 @@ CHARACTERS = {
               "ability": "Vanish: the crab cannot see you for 5 seconds.",
               "power": {"label": "Vanish", "text": "You vanish: the crab cannot see you"}},
     "flash": {"sprite": "flash", "name": "Flash",
-              "ability": "Dash: a lightning sprint of 8 tiles, through doors too.",
-              "power": {"label": "Dash", "text": "A lightning dash!"}},
+              "ability": "Dash: a lightning sprint of 8 tiles, through doors too. Three times a game.",
+              "power": {"label": "Dash", "text": "A lightning dash!", "uses": 3}},
 }
 
 # How the crab hunts in a game for two, chosen by the player who hosts it ("text" is what the
@@ -51,6 +51,10 @@ FLAGS = {
     # In a game for two, each player's ability (Space) works once: True once it is used.
     "ability_used_1": False,
     "ability_used_2": False,
+    # How many times each player has used their ability: Flash can dash three times, the others
+    # use theirs once ("uses" in CHARACTERS). Once they are all used, "ability_used_" is True.
+    "ability_count_1": 0,
+    "ability_count_2": 0,
     # A game for two players: player 2 is the other character.
     "two_players": False,
     # In a game for two, how the crab hunts (one of DIFFICULTIES). Games saved before
@@ -1775,6 +1779,8 @@ MESSAGES = {
     "lobby_difficulty": "Crab: {difficulty}",
     "abilities_for_two": "Abilities only work in a game for two.",
     "ability_used": "You have already used your ability.",
+    "dashes_left": "A lightning dash! {left} left",
+    "dashes_none": "A lightning dash! That was the last one",
     "hint_ability": "Space: {label}",
     "hint_nurse": "Nurse: quick help",
     "ability_wasted": "Nothing happens: the crab is still a statue",

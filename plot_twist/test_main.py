@@ -2280,8 +2280,12 @@ def test_flash_dashes_eight_tiles_the_way_they_face_in_a_few_frames(app, heard):
     for _ in range(main.AFTERIMAGE_FRAMES):
         main.update(app, 0, 0)
     assert app["afterimages"] == []
+    for _ in range(2):  # three dashes in all...
+        p1(app)["facing"] = (-1, 0)
+        press(app, pygame.K_SPACE)
+        dash_out(app)
     where = p1(app)["pos"]
-    press(app, pygame.K_SPACE)  # once only
+    press(app, pygame.K_SPACE)  # ...and no more
     dash_out(app)
     assert p1(app)["pos"] == where
 
@@ -4422,3 +4426,56 @@ def test_the_hard_crab_walks_straight_where_it_can():
     start.center = main.tile_rect(2, 2).center
     assert main.straight_way(start.topleft, main.tile_rect(2, 6).center, wall)
     assert not main.straight_way(start.topleft, main.tile_rect(8, 2).center, wall)
+
+
+# --- Flash: three dashes, three bolts in the corner, wings seen from behind ---
+
+
+def bolt_colours(app):
+    """The colour in the middle of each bolt in the bottom left corner."""
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+    return [tuple(screen.get_at((4 + index * main.BOLT_GAP + 2, main.HEIGHT - 12 + 4)))[:3] for index in range(3)]
+
+
+def test_flash_sees_a_bolt_for_each_dash_left_yellow_then_black(app):
+    flash_game(app)
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    assert main.dash_bolts(app) == (3, 3)
+    assert bolt_colours(app) == [main.COLORS["highlight"]] * 3
+    for left in (2, 1, 0):
+        p1(app)["facing"] = (1, 0) if left % 2 else (-1, 0)
+        press(app, pygame.K_SPACE)
+        dash_out(app)
+        assert main.dash_bolts(app) == (left, 3)
+        assert bolt_colours(app) == [main.COLORS["highlight"]] * left + [main.BOLT_OFF] * (3 - left)
+    assert main.ability_hint(app) is None  # all used: only the black bolts are left
+
+
+def test_only_flash_has_bolts_and_only_on_their_own_screen(app):
+    flash_game(app)
+    as_characters(app, "wizard", "flash")  # the other player is Flash
+    assert main.dash_bolts(app) is None
+    app["state"] = engine.new_game("flash")
+    assert main.dash_bolts(app) is None  # alone, no abilities
+
+
+def test_every_dash_bursts_into_sparks(app):
+    flash_game(app)
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    main.update(app, 0, 0)  # the first frame in the room clears the effects of the one before
+    bursts = 0
+    for side in ((1, 0), (-1, 0)):
+        app["fx"]["particles"].clear()
+        p1(app)["facing"] = side
+        press(app, pygame.K_SPACE)
+        main.update(app, 0, 0)
+        bursts += any(one["color"] in main.DASH_SPARKS for one in app["fx"]["particles"])
+    assert bursts == 2  # not only the first one
+
+
+def test_flash_keeps_the_lightning_wings_on_the_ears_from_behind():
+    for step in range(3):
+        rows = sprites.SPRITES[f"flash_up_{step}"]
+        assert rows[10][0] == rows[10][15] == "y" and rows[9][1] == rows[11][14] == "y"
+    assert [row[:2] for row in sprites.SPRITES["flash_up_0"][9:12]] == [row[:2] for row in sprites.SPRITES["flash_down_0"][9:12]]

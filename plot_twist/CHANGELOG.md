@@ -2,9 +2,17 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v45](versions/v45.md) - The crab's chase music, its red warning, and a crab that no longer gets stuck (2026-11-20)
+## [v46](versions/v46.md) - Flash dashes three times, with a bolt for each (2026-11-20)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- Flash can dash three times a game instead of once. The player who is Flash sees three lightning bolts in the bottom left corner of their screen, next to "Space: Dash": each dash turns one from yellow to black (with a pale edge, so it shows on the dark sea too), and the banner says how many are left. Once all three are used only the black bolts stay. The other characters still use their ability once.
+- Each use of an ability is counted in a new flag for each player (ability_count_1 and ability_count_2, from 0 to 3), kept with the game; ability_used_ still says when it is used up. A game saved before keeps its ability used up if it was. Every dash shows its burst of sparks, on both computers, not only the first.
+- Flash's lightning wings at the ears now show from behind too: they were missing when Flash faced away from the player.
+
+## [v45](versions/v45.md) - The crab's chase music, its red warning, and a crab that no longer gets stuck (2026-11-20)
+
+In commit [`94728ec`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/94728ecc67426e7bdf8b8881ed2c35f6dbd27f67/plot_twist).
 
 - When the crab hunts within the reach of Flash's dash (8 tiles) of the player, a chase plays on a loop of its own: a deep triangle ostinato in E leaning on its tritone, a hissing hi-hat and a snare, a stab of the tritone at each bar. When the crab is close enough to lunge it is faster (180 beats a minute instead of 140), with a nervous pulse over it. It goes on two seconds after the crab has gone, then fades; meanwhile the sound of the room is quieter. Stunned, the crab hunts nobody: no chase.
 - The crab has a faint red halo, stronger when it hunts. When it comes near a door from the next room (within 5 tiles), its red glow beats in the dark of that doorway, stronger as it comes, and fully as it comes through: the players on the other side know it is coming. Both are drawn over the darkness, so they show in the dark rooms too.
