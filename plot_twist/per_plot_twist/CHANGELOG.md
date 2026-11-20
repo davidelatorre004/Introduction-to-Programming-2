@@ -1,0 +1,436 @@
+# Plot Twist: what changed in each version
+
+Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
+
+## [v48](versions/v48.md) - A storm that grows with the puzzles, and seagulls before it (2026-11-20)
+
+On the `main` branch.
+
+- One storm grows through the whole game, in a new module, weather.py. The opening bolt is its first sign; the calm lasts until the player walks into the cabin. With the first puzzle (the generators) the sky darkens bit by bit, clouds gather and drift over the deck, and far lightning flashes now and then, with no thunder. With the second (the tiles of the hold) the rain starts, light at first, slanted more and more by the wind, and the thunder follows the flashes. During the third (the remedy) it keeps growing with every tincture found and poured in, and it is at its worst when only the last one is left: heavy diagonal rain, puddles on the deck, bolts across the sky, near thunder that shakes the ship. It then stays at its worst until the end.
+- The storm follows the puzzles of story.py (circuits, floor puzzles, potion puzzles), whatever their order, and moves there slowly (from calm to its worst in 8 seconds). It never goes back: a puzzle that starts over does not calm it. A saved game resumes in its own weather.
+- On the deck the whole storm is seen and heard. Inside the ship it is the darker light, the flashes through the portholes, the rain and the wind muffled by the deck above, a muffled thunder, and, in the heavy rain, drops leaking from the ceiling. The mine, deep in the rock, feels nothing. The waves move faster and the lantern on the deck swings more as the wind grows.
+- New sounds, made in code like the others: a far thunder, a near one and one heard from inside, and loops for the rain and the wind (two new loop slots, "rain" and "wind").
+- Before the rain, seagulls fly over the deck in a fixed pattern that repeats: a V of three to the left high up, two to the right in the middle, three to the left low down, one to the right, one flight every five seconds. They fly on the deck, not on the screen, so they leave the view when the player walks. Once it rains no new flight comes.
+- The flashes are short and never too bright. F10 turns on soft lightning: paler flashes, one flicker, no shaking, and a paler opening bolt too.
+- The old regular flash of distant lightning on the deck is used only when the storm is switched off (FX["weather"]); the tests switch the storm off, like the atmosphere, and test_weather.py turns it back on.
+
+## [v47](versions/v47.md) - Bookshelves, a helm open on the sea, and portals you walk out of (2026-11-20)
+
+In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- The empty room to the right of the cabin is lined all round with bookshelves of dark wood veined with red, their books mostly red: every tile along its walls, but the four in front of the door to the cabin, so the way in stays free. The anvil still appears in the middle.
+- The top wall of the helm is open on the sea: two rows of stormy waves, the bow of the ship cutting through them with foam along its sides, and a wooden railing in front that casts its shadow on the floor. Nobody can go out there: those rows are as solid as a wall (a new "view" of a room in story.py). The ship's wheel stands right below the railing, in the middle of the room (an object can now be shifted by a few pixels off the grid); the chart tables and the bookshelf that stood on the first row moved down by one.
+- Out of a portal, a player now comes out turned away from it: they appear below the portal they arrive at, facing down, walk out a few steps by themselves, and the key they were holding going in is ignored until they let it go. Before, holding the key took them straight back into the portal.
+- The distant lightning on the deck flashes a little more often in the last part of the game, once the key is fused: every 6.5 seconds instead of 7.8.
+- Flash's lightning wings seen from behind are bigger, two pixels wide and six tall on each side, so they stand out against the red cowl and the floor.
+
+## [v46](versions/v46.md) - Flash dashes three times, with a bolt for each (2026-11-20)
+
+In commit [`ab46f98`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/ab46f98bb9c262f37a98fa0c5e9192327546b403/plot_twist).
+
+- Flash can dash three times a game instead of once. The player who is Flash sees three lightning bolts in the bottom left corner of their screen, next to "Space: Dash": each dash turns one from yellow to black (with a pale edge, so it shows on the dark sea too), and the banner says how many are left. Once all three are used only the black bolts stay. The other characters still use their ability once.
+- Each use of an ability is counted in a new flag for each player (ability_count_1 and ability_count_2, from 0 to 3), kept with the game; ability_used_ still says when it is used up. A game saved before keeps its ability used up if it was. Every dash shows its burst of sparks, on both computers, not only the first.
+- Flash's lightning wings at the ears now show from behind too: they were missing when Flash faced away from the player.
+
+## [v45](versions/v45.md) - The crab's chase music, its red warning, and a crab that no longer gets stuck (2026-11-20)
+
+In commit [`94728ec`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/94728ecc67426e7bdf8b8881ed2c35f6dbd27f67/plot_twist).
+
+- When the crab hunts within the reach of Flash's dash (8 tiles) of the player, a chase plays on a loop of its own: a deep triangle ostinato in E leaning on its tritone, a hissing hi-hat and a snare, a stab of the tritone at each bar. When the crab is close enough to lunge it is faster (180 beats a minute instead of 140), with a nervous pulse over it. It goes on two seconds after the crab has gone, then fades; meanwhile the sound of the room is quieter. Stunned, the crab hunts nobody: no chase.
+- The crab has a faint red halo, stronger when it hunts. When it comes near a door from the next room (within 5 tiles), its red glow beats in the dark of that doorway, stronger as it comes, and fully as it comes through: the players on the other side know it is coming. Both are drawn over the darkness, so they show in the dark rooms too.
+- The crab no longer sinks into the barrels in the top left corner of the deck, nor into anything else: it bumps into things with a footprint as wide as a tile, wider than its body (it still catches the players with its body, as before), and it finds its way with that footprint, going through doors by their middle. If it ever has somewhere to go but cannot move for half a second, it gets itself loose, back to the middle of the nearest tile where it fits. A player down never stands in its way: it walks over them.
+- Its movements are smoother: its claws no longer jump from one opening to the next but move toward it a little each frame, opening and shutting in a wave as it chases (painted in 8 steps instead of 4); it gapes when a player comes within 4 tiles and stops only when they are a tile farther, so it does not flicker at the edge; its shiver before a lunge is slower; and the hard crab walks straight to the farthest tile of its way it can reach in a straight line, instead of from tile to tile.
+- The sea is quieter: 0.35 on the deck instead of 0.55, 0.22 inside the ship instead of 0.3. The water drips less: three drops every six seconds instead of four every three, at 0.35 instead of 0.6. Loops made of short hits now sound the same all the way round: the hits at their start come again after their end, which fades into the start.
+
+## [v44](versions/v44.md) - A crab with legs, claws and burning eyes (2026-11-17)
+
+In commit [`c0ae12d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/c0ae12d2754a187f7718a518556a38b55f934973/plot_twist).
+
+- The crab that hunts the players is drawn pixel by pixel, no longer a small copy of the crab of the final room: a new module, crab.py, paints it in any pose at the size of the small screen, and keeps each pose it painted. Its shell has five tones (a very dark red, almost violet, outline; a deep shadow underneath; crimson; coral where the light falls, on the top; a pale glint), a dither where the light turns to shadow, a seam across its back, a row of spines along the front of each side and two small horns. Its eyes stand on stalks, with a pupil that looks at its prey and a glint. Its claws are on arms in segments, banded where they join, with a round palm and two fingers.
+- It is animated part by part. Its three legs on each side walk in two groups over four pictures, like a crab's; its claws open and shut in rhythm as it chases, and gape as it shivers when a player is close, about to lunge; standing still it breathes, the shell rising by a pixel while the legs stay on the floor. Stunned by the wizard its eyes droop under the stars.
+- It is anchored to the floor by a wide oval shadow; its legs kick up foam on the wet deck and in the damp rooms, and dust elsewhere, as it runs. When it hunts its eyes burn red with a glow that beats, and when it is about to lunge they leave red streaks behind. It is bigger than before (40 by 30 pixels with its legs and claws) and hits the same as before: its body has not changed. When the key is fused, this crab is the one that turns to stone.
+- Looked at for reference: the enemies of clear-code-projects/Zelda (an animation for each state, its frame restarting when the state changes, a flicker) and the examples of kitao/pyxel (pictures chosen from the frame count, each enemy a little out of step with the others).
+
+## [v43](versions/v43.md) - Sound like an 8-bit console: rooms, footsteps, and a crab you can hear coming (2026-11-17)
+
+In commit [`1f83eb3`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/1f83eb31f481f64046a729aa5690d9e2f1dd5b2c/plot_twist).
+
+- A new synthesizer in sounds.py, with the voices of an 8-bit console's sound chip: pulse waves up for 1/8, 1/4 or half of each period, a triangle in 32 steps of 16 levels for the deep notes, and the noise of a 15-bit shift register, in its long mode (a hiss) and its short one (it rings like metal). Every voice has an ADSR envelope moving in 16 steps like the chip's volume, a pitch that can glide (equal steps of pitch), vibrato, tremolo, and one-pole low-pass and high-pass filters (the low-pass can open or close as the sound goes on). Each effect is a few voices layered, mixed with a gentle saturation instead of clipping.
+- Every effect was remade with them, and new ones were added: footsteps on wood, stone, tiles and earth, a splash in a puddle, a thud and a rattle when a door does not open, the crab's claws clicking (and muffled through a wall), its hiss when it charges. Flash's dash is a rush of air that opens; the statue crumbles with a crack, a falling rumble, grinding and pebbles bouncing; the glass shatters with a burst, a ringing hiss and shards tinkling.
+- Quiet loops play on mixer channels of their own: the sea on the deck (it swells and falls), the same sea muffled inside the ship, water dripping with its echo in the damp rooms, and the hum of a machine near the generators and the portals, louder the nearer the player is and from its side. The loops fade into their own start, so there is no click, and when the player changes room the old one fades out as the new one fades in.
+- Sounds come from where they are, in stereo: the other player's footsteps from their side, quieter farther away; the crab's claws from its side of the screen and louder as it comes near, faster with a hiss when it charges; in the next room, through an open door, muffled and from that door. Each computer hears from its own player (from the partner's, once out of the game). The mixer opens at 22050 Hz in stereo, the rate the sounds are made at; making them all takes about half a second when the game starts.
+- Looked at for reference: the sound chip of an 8-bit console in fogleman/nes (its duty table, its triangle, its noise register and its envelope, sweep and filters) and the sound of kitao/pyxel (its four tones, its envelopes and its glide).
+
+## [v42](versions/v42.md) - The easy crab at its old speed (2026-11-17)
+
+In commit [`ebfcc0c`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/ebfcc0cb8ca1e627688b747c5ca04bda45f325b0/plot_twist).
+
+- The easy crab moves again at the speed it had before the previous version, the same as the hard one (0.6 of a player's speed instead of 0.8). How it hunts does not change.
+
+## [v41](versions/v41.md) - A ray, a dash, a crab of stone, and two claws to choose from (2026-11-17)
+
+In commit [`c11126d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/c11126d54aba61225dc40d03485357c0424b9dab/plot_twist).
+
+- The choice of the crab is two frames side by side, chosen with Left and Right: a common crab's claw for the easy one (sandy orange, a round speckled palm, blunt jaws with knobbly teeth) and the red claw of the end of the game for the hard one (long hooked jaws with sharp teeth, a saw of spikes, a glow that beats like blood). The highlighted claw slowly opens and shuts its jaws; the other frame is dark. The claws are drawn by claw.py, with the same shell as the giant claw in other tones (the giant claw is unchanged).
+- The easy crab is faster (0.8 of a player's speed instead of 0.6): blind to other rooms and taking the long way round, it was too slow to be a threat.
+- Flash's dash is longer, 8 tiles instead of 5, and it is animated: it lasts 8 frames, leaves yellow afterimages that fade and a trail of sparks, with a rush of air. While dashing Flash cannot be caught, and the tiles flown over do not count. The other computer sees the dash too.
+- The wizard's spell is a ray: a violet zigzag with a white core from the wand to the crab, a ring and sparks where it strikes, and a crackling sound. If the crab is in another room the ray goes the way the wizard faces, up to the wall, and the spell finds the crab all the same. Both computers see it.
+- When the key is fused the crab turns back to stone where it stands, instead of vanishing at once: its colour drains into pale marble, the stone cracks and trembles, and it bursts into dust, with a grinding sound and then a crumble.
+- The rubble of the statue on the deck blocks only at the base of its pile, no longer its whole 2 x 2 tiles: players and the crab can walk behind it.
+- In a game for two, when one player reaches an ending the other computer shows it at once, whatever is on its screen (the pause menu, the inventory, a text being read). Before, it waited until that player went back to walking. The player who reached it still reads its text first.
+
+## [v40](versions/v40.md) - Characters chosen together, and two crabs to choose from (2026-11-17)
+
+In commit [`726a15d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/726a15d277ee58903b5db8313aaa16392750695c/plot_twist).
+
+- In a game for two, the characters are chosen once both computers are connected: the host chooses the crab, waits for the other computer, then both players choose their character at the same time, each on their own screen. A character the other player has confirmed is dark and cannot be taken; if both ask for the same one at the same moment, the host decides and the other player chooses again. The game starts as soon as both have chosen.
+- The host chooses how the crab hunts, on a new screen after "Host game for 2", which says what each crab does. The waiting screen shows the crab chosen. The choice is kept with the game (a new flag, crab_difficulty): a game resumed keeps its crab, and games saved before there was a choice have the hard one.
+- Hard is the crab of always: it knows where everyone is and takes the shortest way, through the whole ship.
+- Easy hunts like the ghosts of an arcade maze. It walks from the middle of one tile to the middle of the next and decides only there; it never turns back unless the way ends; it takes the way whose next tile is nearest to its prey in a straight line, so obstacles can send it the long way round. It only sees its own room: with nobody there it heads for a door of the room taken at random (better not the one it came in by) and looks in the next room. Every 20 seconds of chase it gives up for 7 and goes to the top right corner of its room. It runs from the hidden ghost like the hard one, and the abilities work on both.
+- Alone, nothing changes: the mode, then the character, then the game.
+
+## [v39](versions/v39.md) - The colour of the light in every room (2026-11-16)
+
+In commit [`f60292c`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/f60292c472be5de120baa292c4dd13b4a2e253fe/plot_twist).
+
+- Every room has the colour of its light, multiplied into it (a lightmap with BLEND_RGB_MULT): cold and stormy on the deck, warm wood in the cabin, amber in the galley, violet and a little spectral in the infirmary and by the portals, cool and damp in the hold, the green of the sea in the crab's room, earth in the mine.
+- The light changes colour around what it comes from: warmer around stoves, lanterns, candles and lit generators, more violet around portals and crystals, bluer around the cauldron. On the deck, now and then, distant lightning brightens everything for an instant.
+- Soft lights are added around what shines (BLEND_RGB_ADD): lanterns, candles, crystals, stoves, portals and lit generators. They fade in four hard steps, dithered pixel by pixel where two steps meet, like the rest of the pixel art. Flames flicker, crystals and portals pulse slowly.
+- Light comes in through every open door, just inside the room: cold if the door leads to the deck, warm if it leads to another room. Closed doors let none in.
+- Everything stays readable: the light of a room never makes anything darker than 200 out of 255 in brightness, a room keeps at least 85% of its brightness, and the soft lights stay pale. The contact shadows under walls and furniture of the previous version stay as they were.
+- New tools in effects.py (lightmap, tint, soft_light) and a switch in effects.FX, "atmosphere": off, the rooms look as before. A frame costs less than half a millisecond more.
+- Looked at for reference: the examples of Mekire (pygame-samples), which shade a picture by laying a mask over a colour.
+
+## [v38](versions/v38.md) - Floors, walls and furniture with detail (2026-11-16)
+
+In commit [`7dd2b3a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/7dd2b3a3ada62f45de4eaf219e482e57800ff74d/plot_twist).
+
+- Floors no longer repeat the same tile: each room's floor is built from its material (a new "floor" in story.ROOMS: wood, stone, tiles or earth) with details that depend on where they are. Wood: planks of different lengths whose ends never line up, grain, knots, nails at the ends, some planks darker (dithered) or worn lighter. Stone: slabs a little darker or lighter, chips and cracks. Earth: pebbles lit from the top left, cracks. Polished tiles: a few hairlines.
+- Damp rooms (a new "damp": the hold, the corridor, its far end, the mine) get stains of damp, cut from smooth noise into hard bands, dithered where they start; water drips from their ceilings and splashes.
+- The walls have depth: the back wall shows a light top edge, a dark line under it, its face and a darker foot, with streaks of damp in damp rooms; the side and front walls show their lit top with a light edge on the room side. The back wall and the left wall cast a shadow of 4 and 3 pixels on the floor, solid then dithered; on the deck the railing does.
+- Furniture and machines are shaded: lighter where the light falls (top left), darker on the other side, and their black outline becomes a dark shade of the colour inside it, a little bluer. Whatever stands on the floor casts an oval shadow, solid in the middle and dithered around it, a little to the right; items lying on the floor a small one.
+- Small things move: steam rises from the stoves of the galley, the flame of each candle leaps and changes colour, the fire in a stove flickers, a glint runs across puddles now and then.
+- Everything is made with hashes of the coordinates, never with chance: the same room always looks the same. The floors and walls of every room (and each picture of the sea) are built once when the game starts, about a quarter of a second: entering a room never stutters, and a frame costs 3 to 4 ms. New module scenery.py, and two switches in effects.FX, "scenery" and "ambient": off, the rooms look as before.
+- Looked at for reference: the examples of Pyxel (kitao/pyxel): noise cut into hard bands, half-transparency made with a dither, an oval shadow solid inside and dithered outside.
+
+## [v37](versions/v37.md) - Taller characters (2026-11-16)
+
+In commit [`67846af`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/67846af32096e23dda703276431f2acd3e7a4cd6/plot_twist).
+
+- The four characters are 16 x 24 pixels instead of 16 x 16, with bigger heads and eyes: the Wizard has a tall pointed hat with a star (its tip bends back in profile), a white beard and a robe down to the shoes; the Nurse a white cap and uniform with red crosses, and a bun at the back; the Ghost big hollow eyes, a round mouth, a wavy hem and a faint glow around it (its aura); Flash a red cowl with lightning wings at the ears, a bolt on the chest, a gold belt and an orange scarf whose end flies behind while running.
+- The body that bumps into things does not change: still the 12 x 12 square at the feet, inside the bottom 16 x 16 of the picture, so every door and gap lets a player through as before. The rest of the picture rises above it.
+- An oval shadow lies under the feet. Standing still, a character breathes: the body sinks one pixel onto the legs, each player in their own time. Walking, they rise one pixel at every stride, and the shadow stays on the floor.
+- Depth: the room already draws what stands from the back to the front by where the feet are, so the taller head covers the back wall and the furniture behind, and what stands in front covers the character; tests check both. The choice screen makes room for the taller characters.
+- Looked at for reference: the Zelda tutorial of clear-code-projects (its hitbox made smaller than the picture with rect.inflate, and its YSort group). The game already did both, sorting by the feet rather than by the middle, which is what keeps tall and short things right.
+
+## [v36](versions/v36.md) - Dark rooms and light (2026-11-15)
+
+In commit [`bd0db06`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/bd0db06690f6169a06b961c962c00b65e027cbac/plot_twist).
+
+- Three rooms are dark now: the corridor under the hold, its far end, and the mine, the darkest (a new optional "dark" in story.ROOMS, from 1 to 255). The other rooms are drawn exactly as before.
+- What gives light: lanterns (a glow, and a cone thrown down on the floor that sways with them, with a flame that jumps), crystals and the heart of the mine (pulsing), portals, and the players: a glow around each and a cone the way they face. A player who is down gives only a little light; one in another room or out of the game gives none.
+- How: a layer of darkness as big as the room goes over it, with a hole for every light. A hole is clear in the middle and darker ring by ring, in four hard steps, never a smooth fade; a cone does the same along its length. Holes are stamped keeping the clearer of the two for every pixel, so lights next to each other join and none darkens what another lit. The coloured glows that were already there are added on top.
+- The idea of a dark layer with a stepped hole comes from the punch_a_hole sample of Mekire's pygame-samples; it had one light and one hole, so joining several lights and the cones are new here. The tools are in effects.py with a new switch, "darkness": off, the rooms are lit as before. About 3 ms a frame.
+
+## [v35](versions/v35.md) - A real crab's limb (2026-11-15)
+
+In commit [`3a6e8fc`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/3a6e8fc39c47d83b53ee28eb4c503a0bca45e0ef/plot_twist).
+
+- The giant claw that breaks the screen is no longer a plain red arm: it is a crab's limb in three segments, each at an angle to the next: the upper arm from beyond the top right corner, the thick forearm, and the massive hand that holds the two jaws. Dark plated joints, one plate over the other, join them.
+- It moves like a limb. The shoulder stays put and the elbow bends by itself (an arm of two bones): folded out of sight at first, it stretches out as it strikes, and the wrist, cocked back on the way in, snaps forward as the jaws shut.
+- The shell has four tones for a round, armoured look: an almost black outline, a deep shadow on the side away from the light, the crab's red, and a salmon highlight on the edge that faces the light (top left). A dither where shadow and red meet and small grains keep it from looking flat. A saw of chitin spikes runs along the outer edge of the forearm, and small teeth line the inside of each jaw.
+- While the screen is still whole the limb casts a see-through shadow on the game, far from it while the claw is high above and closer as it comes down: at the hit they touch. Then the arm kicks back three pixels along its axis and shivers, and sparks and chips fly from where the jaws shut.
+- Everything is painted with plain polygons straight on the 256x224 screen (new module claw.py): nothing is enlarged or turned, so every pixel stays sharp. The old enlarged jaw picture is gone. Starting or leaving a game clears the sequence as before.
+
+## [v34](versions/v34.md) - The ship shakes, the screen breaks (2026-11-15)
+
+In commit [`1ec60e2`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/1ec60e2aa874ea8d6e4edc3f744df10db01faac3/plot_twist).
+
+- When the crab comes alive the ship shakes for 40 frames, hard at first and then less and less: the room is pushed around on screen, wherever the players are. On the deck the statue trembles and flashes pale, with stones and dust falling around it, for 18 frames; then it bursts into rubble and only then the crab is out. A low, jagged rumble plays with it.
+- When the crab catches both players, the game stops on its last picture and a giant claw, in the crab's reds, comes in from the corner and snaps shut on the middle of the screen (frames 0 to 14). A white flash, a hard shake and a web of cracks follow (15 to 26). Then the picture falls apart along the cracks (27 to 85): each piece drops with gravity, pushed away from the hit, turning, with light on its edges, and the black behind shows. Then the ending screen, as before. No key does anything meanwhile.
+- Three new sounds, made in the code like the others: the rumble of the statue, the dry snap of the claw at the hit, the high crackle of glass when the screen falls apart. For them sounds.py learns noise, like the noise channel of an 8-bit console: a note with a negative frequency.
+- effects.py has the tools (a shake that dies down, the web of cracks, cutting and dropping the pieces) and two new switches, "crumble" and "shatter": switched off, the statue bursts at once and the ending text comes first, as before. Nothing of this is in the game's state: starting or leaving a game resets both sequences.
+
+## [v33](versions/v33.md) - Documentation in English (2026-11-15)
+
+In commit [`0dd5199`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/0dd5199448f9516104167f26e057d01cb565ca78/plot_twist).
+
+- The README (how to install and play, controls, playing on two computers, the characters, the crab, the solution), the design document and the rules for changes (CLAUDE.md) are now in English, like the game. The game itself does not change.
+- The README is also brought up to date: there are three endings, and the solution says how the third one happens.
+- The design document is the original one, from before the code: a note at its top says so, and points to this changelog for how the game is today.
+
+## [v32](versions/v32.md) - Full screen (2026-11-12)
+
+In commit [`0d753b1`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/0d753b11b30c30fd61819c69d9ca1d4e2c885ed9/plot_twist).
+
+- F11 switches between the window and the whole screen. On the whole screen the game is as big as fits in whole multiples of its size, so every pixel stays a sharp square, in the middle, with black around it. The title of the window says so.
+
+## [v31](versions/v31.md) - Lightning, the anvil, the broken statue (2026-11-12)
+
+In commit [`ffff2db`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/ffff2db9eec2636112a823ab8162719556140f90/plot_twist).
+
+- A new game opens with a bolt of lightning: once the opening text is read, it tears the screen from top to bottom for a second, with a flash and thunder, and then the game is on. Not when a game is resumed.
+- The anvil now appears in the middle of the empty room east of the captain's cabin, not in the galley. Until the key is fused, red sparks fly around it and a red glow beats on it.
+- When the crab comes alive its statue bursts, with dust and pieces flying, and what is left on the deck is a heap of stones and broken pieces on the cracked base, as solid as the statue was. It stays there for good: when the key is fused the crab turns to stone and vanishes in a puff of dust.
+
+## [v30](versions/v30.md) - Dropping items, and the heart (2026-11-12)
+
+In commit [`3db9ddb`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/3db9ddbfc5a55eab9310df0ffe8b5dd3c1ffa0f7/plot_twist).
+
+- Q drops the item the player got last (picked up, or handed over by the partner) on the floor where they stand, as many times as there are items. Anyone can pick it up again with E. It works alone too.
+- A dropped item remembers its room and tile (a new flag for each item, dropped_<item>). While a key lies on the floor it opens nothing: drop the first half and the hold is barred again until someone picks it up.
+- The heart of the mine is no longer carried: picking it up uses it at once, and it is gone for good. In a game for two it helps the other player up at once if they are down, and brings them back into the game if they were out, right next to the one who took it. Their items stay with whoever has them, and an ability already used does not come back. With everyone on their feet, or alone, it is wasted.
+
+## [v29](versions/v29.md) - Abilities (2026-11-12)
+
+In commit [`733c53a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/733c53a700d06e20872f9427537169ac4ebd8c2d/plot_twist).
+
+- In a game for two each character has an ability. Space uses it, once in the whole game (it is saved); the corner of the screen says so while it is there. Alone, Space does nothing.
+- Wizard: a spell stuns the crab for 5 seconds, wherever it is: it stands still and harmless, with stars above its head.
+- Nurse: always on, she helps a player up in 1 second. For everyone else it now takes 4 seconds instead of 5.
+- Ghost: for 5 seconds the crab cannot see them (half transparent on both screens) and walks through them. It goes for the other player; if the other one is down or out, it runs as far from the ghost as its room allows, or stays put if the ghost is in another room.
+- Flash: a dash of 5 tiles the way they face. It stops against anything solid, goes through an open door or a portal on its way, passes the crab, and lights only the tile it lands on.
+- An ability used while the crab is still a statue is wasted.
+
+## [v28](versions/v28.md) - Four characters (2026-11-12)
+
+In commit [`218585d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/218585db726df071d1a5b1f64d354c2a3d2d09f1/plot_twist).
+
+- Four characters replace the green and the red one: the Wizard, the Nurse, the Ghost and Flash, each with its own pictures. The choice screen shows all four, with the name and the ability of the one highlighted.
+- In a game for two each player chooses on their own screen: the host before hosting, the player who joins right after joining, any character but the host's (shown dark). The host waits meanwhile; if the other player gives up, it goes back to waiting.
+- Player 2's character is saved with the game (a new flag, partner_character): a game for two that is resumed keeps both characters, with no new choice.
+- The abilities come in the next version: for now a character is only a look. Games saved with the old characters cannot be resumed.
+
+## [v27](versions/v27.md) - The third ending (2026-11-09)
+
+In commit [`bcb170d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/bcb170d196cc593eb61a9f40a18ffdb3f7bf90d1/plot_twist).
+
+- If the crab catches both players (the second while the first is down, or the last one left in the game), the game is over: the third ending, "Caught by the crab", with a giant crab rising behind the ship. It replaces the rule of the previous version (both down: they get up, and the crab goes back to its statue).
+- The ending is saved like the other two, and the ending screen counts three endings. It can only be reached in a game for two.
+- In a game for two the ending screen offers only "Main menu": a new game for two is hosted again from there.
+
+## [v26](versions/v26.md) - The crab hunts (2026-11-09)
+
+In commit [`fa8535a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/fa8535aea978c6ab7042efe24d696339d3fb5a5d/plot_twist).
+
+- In a game for two, the crab statue of the deck comes alive when the cabin is solved, and turns back to stone once the key is fused. Alone, it never moves.
+- It walks toward the nearest player in its room, slower than the players, finding its way around what stands in the room; with nobody in its room, it follows them through the open doors (not through the portals).
+- A player it touches goes down and cannot move. The other one has a minute to help them up, holding E next to them for five seconds: bars show the time left and the help given. If both are down at once, nobody can help: they get up, and the crab goes back to its statue.
+- A player left down for a minute is out until the other finishes: their items pass to the other player, and their screen follows the other one. Who is out is saved (a new flag, out_player); the crab and the players down are not.
+- The host moves the crab and keeps the timers; the computer that joined draws what the host sends, and says when its E is held.
+
+## [v25](versions/v25.md) - Two computers (2026-11-05)
+
+In commit [`7bf0888`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/7bf0888b69a749402ab4d2458a6997c018a27262/plot_twist).
+
+- A game for two is now played on two computers on the same network, each with its own screen. It replaces the two players on one keyboard.
+- New game → "Host game for 2" waits for the other computer and shows this computer's address. On the other one, "Join game" asks for that address (digits and dots) and Enter joins.
+- Each player moves on their own and goes through doors and portals alone: there is no more "Wait for your partner". Each screen shows its own room, the partner only when you share it, and the map shows both.
+- The host keeps the game: the rules run only there, and only there is it saved. The computer that joined asks the host for every action and gets the new game back. Every frame each side says where its player is.
+- Esc opens the menu without stopping the game (the other player keeps playing): Continue, Main menu, Quit. If one computer leaves, the other goes back to the title, which says the connection was lost.
+- A game for two is resumed by the host (Resume), and the other computer joins again.
+- New module net.py: the connection, with the standard library only (messages are lines of JSON). The tests play over a real connection on the same computer.
+
+## [v24](versions/v24.md) - Two players, two inventories (2026-11-05)
+
+In commit [`52d4c1a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/52d4c1af02a0b5d422988c9d1d2e649a11f97a96/plot_twist).
+
+- The rules now know two players apart. Each has their own room: player 1's is "room" in the state, player 2's a new flag `partner_room`. `engine.perform(state, action, player)` plays an action as that player sees the game (`seen_by` swaps the two rooms), so every rule works for both.
+- Each has their own items: a flag `holder_<item>` says who carries each one. Whoever picks an item up carries it, and only they can use it; the two halves fuse only in the hands of one player.
+- Next to the partner, E offers "Give to partner: <item>". The inventory screen shows the items of whoever opened it, and the bar shows both players' items.
+- A room the partner is still in keeps its puzzles going: leaving the hold mid-phase does not start the tiles over, and entering the cabin does not reset the generators the partner is pulling.
+- Alone, nothing changes. This is the first of three steps: next, two computers on the same network, then the crab that chases the players.
+
+## [v23](versions/v23.md) - Two players go through together (2026-11-04)
+
+In commit [`f412fa5`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/f412fa5542635f6ba8c7aa05ad996ec286eb3bce/plot_twist).
+
+- In a game for two, a door is taken only when both players touch the same door, and a portal only when both stand in it. A player alone at a door or in a portal sees "Wait for your partner", once for each time they get there, and waits in the opening instead of walking out of the room.
+- The players arrive side by side: player 1 where a player alone appears, player 2 next to them along the wall of the door (or below the ring of the portal), on whichever side is free floor.
+- The tiles of the hold: any player lights a tile by walking onto it, and the phase starts over only when nobody is left in the zone around the tiles.
+- The rule of the previous version (whoever goes through takes the other along) is gone. Alone, nothing changes.
+
+## [v22](versions/v22.md) - Two players on one keyboard (2026-11-04)
+
+In commit [`14684b2`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/14684b2ee9d168b79b29055af0d3b089dea5139a/plot_twist).
+
+- After New game, a new screen asks "How many players?": 1 player or 2 players. Then the choice of the character, which in a game for two is player 1's; player 2 gets the other one. Esc goes back one screen at a time.
+- A new flag `two_players` records the mode, so it is saved and Resume keeps it; `engine.partner_character()` gives player 2's character.
+- Alone, nothing changes: arrows or WASD, E and I. For two: player 1 has WASD, E (act) and Q (inventory); player 2 the arrows, right Shift (act) and P (inventory). In menus everyone's keys work.
+- Each player moves with their own keys, and they walk through each other. E acts for the player who pressed it. Each has their own sprite, and the lower one is drawn in front. The camera looks half way between them, and the map shows both.
+- For now, whoever walks into a door or a portal takes the other along, next to them.
+
+## [v21](versions/v21.md) - Ready for a second player (refactor only) (2026-11-04)
+
+In commit [`5803a61`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/5803a61cb42cdbb2f6f365cf7b019f812d435e66/plot_twist).
+
+- The first step towards local co-op for two players. The game plays exactly as before.
+- In `main.py` the seven keys of the player (position, facing, touching, walk, moving, on_tile, zones) moved from the interface state into one player dict, made by `new_player()`, kept in the list `app["players"]`.
+- The functions that act on a player (`settle_on_floor`, `floor_triggers`, `player_picture`, `draw_player`) take it as an argument; the others use the first player. `update()` takes a second direction (`dx2`, `dy2`), not used yet.
+- The tests use a helper `p1(app)`; three new tests check the new structure.
+- `CLAUDE.md` holds the rules for every future change.
+
+## [v20](versions/v20.md) - Clues on the left, and a chime for a new one (2026-11-03)
+
+In commit [`bdd8fbe`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/bdd8fbe4e60ea8250229295a7e3e41d0e669c488/plot_twist).
+
+- The inventory screen (I) has two columns: the clues found on the left (or "No clues yet."), the items carried on the right. Same box, same font, same clues in the same order.
+- The list of items can be longer than the box: up and down scroll it one item at a time, small arrows show there is more above or below, and it always opens at the top.
+- When a clue is found, the thing that gave it (the barrel of the hold) glows softly, with four short rays turning around it and twinkles for about a second, and a new light chime plays (`clue` in `sounds.py`). The effect can be switched off with `FX["clues"]` in `effects.py`.
+- Nothing changed in what is found, or when.
+
+## [v19](versions/v19.md) - Visual effects (2026-11-03)
+
+In commit [`937d09f`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/937d09f5e395ce5d3cb09a3844ddd682f0c7a36f/plot_twist).
+
+- A new module, `effects.py`: particles, banded 8-bit glows, pixel-by-pixel dissolves, floor ripples and the portal warp. Each effect can be switched off in its `FX` table, and its timing and size are constants at the top of the file. The rules of the game did not change.
+- Generators: a lamp that is on glows and pulses, and sparks jump from its lever. Lit cables pulse, with a spot of current running along them. When seven generators are on, the last one trembles and blushes red.
+- Barriers: spots of energy run around their edges and they flash now and then; when one opens it dissolves pixel by pixel in one second, crackling with sparks.
+- Cauldron: the liquid changes colour with the recipe (seaweed, brown, bright gold, then clear and glowing), bubbles rise in the same colour, and the blue fire lights the floor around it.
+- Portals: light turns slowly around the ring, the floor sways around it, and going through one ends in a purple warp instead of a dark fade.
+- Tiles of the hold: a lit tile glows and sends out a wave; a mistake throws red sparks and the red blinking lasts a second.
+- Anvil: the two halves fly together above it, meet in a burst of sparks and a white flash, and the fused key builds up pixel by pixel.
+- Wand: a spark climbs up the arm when it is picked up, and its icon in the bar glows.
+- Mood: dust floats in the rooms indoors, lanterns swing and flicker, the crystals of the mine pulse purple. The bad ending flashes white, then red.
+- Map: every visited room has a soft halo, the current one pulses, and once the doctor is at peace a small anvil marks the galley, if the player has been there.
+
+## [v18](versions/v18.md) - E only for what matters (2026-11-03)
+
+In commit [`055d470`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/055d470813e653602a8356e53663c1016a130fb2/plot_twist).
+
+- E acts only on things that matter to the story: items, generators, doors, characters, puzzles, the cauldron, the anvil, portals.
+- Near furniture, or far from everything, E does nothing and the top bar shows no hint. E also reaches past a barrel to what matters behind it.
+- The three notes stay readable: the doctor's notes, the recipe in the galley and the captain's log.
+- This file and the `versions` folder: what changed in every version.
+
+## [v17](versions/v17.md) - More decor, no hints on the map (2026-11-03)
+
+In commit [`716d757`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/716d757c82f9b9c9e258ca639d4791d5d4110d71/plot_twist).
+
+- 53 new pieces of decor in every room: barrels, crates, lanterns, chairs, the captain's desk and log, crystals, puddles, an anchor and a fishing net.
+- The map no longer blinks on the rooms where the anvil or the tinctures wait: they are found by exploring.
+
+## [v16](versions/v16.md) - Choose your character (2026-11-03)
+
+In commit [`3131e3b`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/3131e3bfb002ace15dbdcc56432f98661f86d7fa/plot_twist).
+
+- After New game, a screen shows two characters side by side: left and right to choose, E to start, Esc to go back.
+- They look the same, except for the shirt: green or red. The choice is saved, and Resume keeps it.
+
+## [v15](versions/v15.md) - A calm sea on the title screen (2026-11-03)
+
+In commit [`5740e55`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/5740e5512c0c60a8befe40022b23b54cbcb34233/plot_twist).
+
+- The main menu has the calm blue sea of before again; the deck keeps the storm.
+
+## [v14](versions/v14.md) - Scattered tinctures, a bigger cabin, the heart and a storm (2026-11-03)
+
+In commit [`651350f`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/651350f546bda36c11e383110b5daa1b7456c540/plot_twist).
+
+- The tinctures are items now. The green one is in the infirmary; picking it up makes the other three appear in the galley, the helm and the corridor. A wrong order empties the cauldron but keeps the bottles.
+- The cabin is half as wide and half as long again (24 x 18 tiles), with eight generators in a ring. Two levers still solve it: A, then C.
+- The corridor to the portal is two tiles lower.
+- A crystal heart lies in the mine, and a one-way portal at its far end leads to the helm; the ring in the helm does nothing.
+- The sea is darker and stormy; the good ending keeps the calm sea.
+
+## [v13](versions/v13.md) - The whole code in one file, updated (2026-11-03)
+
+In commit [`59ea0d6`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/59ea0d6391cfc3ae0118e44c4be7bfdb3ef24f77/plot_twist).
+
+- `progetto_completo.txt` brought up to date with the code.
+
+## [v12](versions/v12.md) - The doctor, the corridor, the portal and the map (2026-11-03)
+
+In commit [`74650a2`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/74650a243a3e1df9082f3d08208c79f496e91ab9/plot_twist).
+
+- The infirmary has the doctor's ghost and a cauldron: four tinctures poured in the right order make a remedy. Once the doctor drinks it, the anvil appears in the galley.
+- New rooms: an empty room east of the cabin, a long corridor under the infirmary, its end with a portal, and a mine beyond it.
+- The deck, the corridor and the mine are bigger than the screen: the view follows the player.
+- A small map in the corner shows the rooms visited so far.
+
+## [v11](versions/v11.md) - Phase 1: three new rooms and decor (2026-11-03)
+
+In commit [`2db3acf`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/2db3acf40302f825c564f62e094d165cc74e7611/plot_twist).
+
+- New rooms: the infirmary (west of the hold), the galley (west of the cabin) and the helm.
+- A new kind of object, decor: furniture that only adds atmosphere. Some of it blocks the way, some lies flat on the floor.
+
+## [v10](versions/v10.md) - The whole code in one file (2026-10-19)
+
+In commit [`4d20a02`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/4d20a02a0fb16074a65ba4a99201873d24d0d3f7/plot_twist).
+
+- `progetto_completo.txt`: every .py file of the game, one after the other, each under its name.
+
+## [v09](versions/v09.md) - English (2026-10-06)
+
+In commit [`060027a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/060027a17a8ce871e638360c7ac20b41edc4a7ca/plot_twist).
+
+- Every text of the game is now in English. Rules, saves and tests did not change.
+
+## [v08](versions/v08.md) - The anvil, both doors, bigger characters (2026-10-06)
+
+In commit [`8052186`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/805218685db39a851eb993d1d8674e0e216ef0e8/plot_twist).
+
+- An anvil fuses the two halves into the fused key; the halves are gone for good.
+- The fused key opens both final doors, and opening one no longer seals the other.
+- The crab now covers 2 x 2 tiles and the angel 1 x 2.
+
+## [v07](versions/v07.md) - The tiles of the hold and a key in two halves (2026-10-06)
+
+In commit [`65ba649`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/65ba6499b490925fb9d7ce04a717069880913dc4/plot_twist).
+
+- The cabin gives only the first half of the key; a gate bars the hold until the player carries it.
+- Five numbered tiles in the hold, walked on in three phases (1-5, then 5-3-1, then 1-5-2-4-3). A wrong tile, or walking out of the grating, starts the phase over with a BZZZ.
+- `sounds.py`: sound effects made in code (blip, ding, fanfare, buzz).
+
+## [v06](versions/v06.md) - The generators of the cabin (2026-10-06)
+
+In commit [`67bc2f5`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/67bc2f53342d26cbe49a9533c817b601eddc30cd/plot_twist).
+
+- Four generators A-D: each one flips itself and the two wired to it. All four on dissolves the barrier around the altar and frees the key.
+- The generators go back to their start every time the player walks in, until the puzzle is solved.
+- Cables light up between generators that are both on.
+- Also in this version: a play guide in Italian (`README.md`).
+
+## [v05](versions/v05.md) - 8-bit graphics (2026-10-01)
+
+In commit [`f272761`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/f2727619065f764ce000c62943a4997686a6b7c1/plot_twist).
+
+- `sprites.py` draws every picture as text, one letter per pixel: the player walking in four directions, items, doors, characters, the ship and the room tiles.
+- `pixel_font.py`: an original pixel font.
+- Rooms fade in after a door; both endings are animated (dawn and coast, or the explosion).
+
+## [v04](versions/v04.md) - The E key, the inventory and the endings (2026-10-01)
+
+In commit [`6655a92`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/6655a921f3868ce6cc815c8e455fcdd12f06fad8/plot_twist).
+
+- The top bar shows what E would do near the closest thing; several actions open a small menu.
+- Actions that cannot be undone ask for confirmation first.
+- I opens the inventory, with the clues found.
+- Both endings can be reached on screen, and every accepted action is saved.
+
+## [v03](versions/v03.md) - A window, menus and walking (2026-10-01)
+
+In commit [`e2576bc`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/e2576bc5394e97bb8ba1113787ac324269eb7ffa/plot_twist).
+
+- `main.py` opens the window: a 256 x 224 screen scaled three times.
+- Main menu (Resume only with a valid save; a new game asks before replacing one), pause menu and ending screen.
+- The player walks with the arrows or WASD and goes through a door by walking into it; a closed door says why, once per push.
+- Rooms and things are coloured rectangles for now.
+
+## [v02](versions/v02.md) - Saving and loading (2026-10-01)
+
+In commit [`d36c765`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/d36c765d0998e310372b6b7de94e8a3824abab05/plot_twist).
+
+- `save.py` writes the game as versioned JSON, through a temporary file, so a save is never left half-written.
+- A missing, broken or outdated save file is treated as no save at all.
+- The tests never touch the real save file (`conftest.py`).
+
+## [v01](versions/v01.md) - The rules, without a window (2026-10-01)
+
+In commit [`225b24f`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/225b24f3336e072e4e639f79591d8f1e603a0d76/plot_twist).
+
+- The story as data in `story.py`: five rooms, two items, eight doors, two placeholder puzzles, two endings and every text.
+- The rules in `engine.py`: pure functions on a four-key game state (room, inventory, flags, ending), each returning the new state and an outcome.
+- `test_engine.py` covers the acceptance scenarios A1-A6, the required capabilities PT01-PT05 and the business rules R1-R4.
+- Nothing to see yet: the game is played by the tests only.
