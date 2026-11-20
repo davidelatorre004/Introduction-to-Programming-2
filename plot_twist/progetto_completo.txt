@@ -3185,6 +3185,7 @@ import random
 import pygame
 
 import claw
+import crab as crab_look
 import effects
 import engine
 import net
@@ -3471,26 +3472,30 @@ def player_rect(position):
     return pygame.Rect(round(position[0]), round(position[1]), PLAYER_SIZE, PLAYER_SIZE)
 
 
-def move(position, dx, dy, solids):
+def move(position, dx, dy, solids, widen=0):
     """Move the player by (dx, dy) pixels and return the new position, stopping against solids.
 
     It moves along x first and then along y, so the player slides along a wall
-    instead of sticking to it when walking diagonally.
+    instead of sticking to it when walking diagonally. `widen` pixels more on each
+    side are solid too: the crab's footprint is wider than its body.
     """
     x, y = position
+    if widen:  # the crab: what its footprint already overlaps does not push it (it would push it the wrong way)
+        start = player_rect(position).inflate(2 * widen, 0)
+        solids = [solid for solid in solids if not start.colliderect(solid)]
     if dx != 0:
         x += dx
-        rect = player_rect((x, y))
+        rect = player_rect((x, y)).inflate(2 * widen, 0)
         for solid in solids:
             if rect.colliderect(solid):
                 if dx > 0:
                     rect.right = solid.left
                 else:
                     rect.left = solid.right
-                x = rect.x
+                x = rect.x + widen
     if dy != 0:
         y += dy
-        rect = player_rect((x, y))
+        rect = player_rect((x, y)).inflate(2 * widen, 0)
         for solid in solids:
             if rect.colliderect(solid):
                 if dy > 0:
@@ -3843,6 +3848,13 @@ def new_app(fonts):
         "beams": [],             # the rays of the wizard's spell, while they last (see start_beam)
         "petrify": None,         # the crab turning to stone where it stands, while it lasts (see crab_news)
         "own_ending": False,     # the ending came from this computer's player: they read its text first
+        "steps": {},             # each player's last footstep heard: number -> step of their walk (see footsteps)
+        "charging": False,       # the crab is charging the player on this computer (see crab_audio)
+        "charge_at": -10 ** 6,   # the frame its charge was last heard
+        "crab_trail": [],        # where the crab's burning eyes were in the last frames of a charge
+        "crab_claws": 0.25,      # how open its claws are on this screen: they move toward the pose, a little a frame
+        "crab_lunging": False,   # it is about to lunge (see crab_telegraph)
+        "chase_left": 0,         # frames the music of a chase goes on before it fades (see chase_music)
         "act_held": False,       # E is held down on this keyboard (to help a player up)
         "partner_reviving": False,  # E is held down on the other computer, as it said
         "seen": {},              # what this computer has already told about the crab (see crab_news)
@@ -4283,6 +4295,8 @@ def go_through(app, door):
 
 def finish_door(app, action, before, state, outcome):
     if not outcome["ok"]:
+        if outcome["event"] in ("locked", "barred", "sealed"):
+            sounds.play("locked")  # a thud on the wood, and the bars or the lock rattle
         say(app, outcome["text"])
         return
     came_from = engine.player_room(before, my_number(app))
@@ -4620,6 +4634,8 @@ def update(app, dx, dy, act=False):
     update_ability_effects(app)
     update_crumble(app)
     update_effects(app)
+    update_audio(app)
+    update_crab_looks(app)
     if app["scene"] == "shatter":
         update_shatter(app)  # nothing else happens while the claw breaks the screen
         return
@@ -4717,8 +4733,21 @@ def move_player(app, player, dx, dy):
 # Now and then it gives up the chase and goes to its corner of the room for a while.
 
 CRAB_SPEED = PLAYER_SPEED * 0.6    # pixels per frame: slower than the players
-EASY_CRAB_SPEED = PLAYER_SPEED * 0.8  # the easy crab is blind to other rooms and takes long ways: a little faster
-CRAB_PICTURE_SIZE = 20             # the crab's sprite, shrunk from the 2 x 2 tiles of the one in its room
+CRAB_WIDEN = 2                     # its footprint is this many pixels wider than its body on each side
+CRAB_STUCK_FRAMES = 30             # frames it may stand still with somewhere to go before it gets itself loose
+CRAB_LEG_FRAMES = 5                # frames each of the 4 pictures of its walk lasts
+CRAB_CLAW_PERIOD = 28             # frames its claws take to open and shut once as it chases...
+CRAB_CLAW_CHASE = (0.0, 0.5)       # ...from shut to half open
+CRAB_CLAW_SPEED = 0.08             # how much the opening of its claws can change in a frame: they move, they never jump
+CRAB_SHIVER = (0, 1, 0, -1)        # its shiver before a lunge, a step every 3 frames
+CRAB_LOOKAHEAD = 6                 # how many tiles of its way the crab looks ahead, to walk straight where it can
+CRAB_BREATH_FRAMES = 70            # standing still, it breathes in and out in this many frames
+CRAB_SHADOW = (28, 8)              # the wide oval under it, on the floor
+CRAB_DUST_EVERY = 6                # frames between two puffs from its legs as it runs
+CRAB_DUST = [(190, 166, 130), (150, 130, 104), (214, 198, 170)]   # dust, on a dry floor
+CRAB_FOAM = [(236, 244, 248), (196, 220, 236), (160, 196, 218)]   # foam, on a wet one
+CRAB_EYE_GLOW = (90, 20, 8)        # the red glow of its eyes when it hunts
+CRAB_TRAIL_FRAMES = 6              # how long the red streaks of its eyes stay behind when it charges
 CRAB_WAKE_FRAMES = 3 * FPS         # still for a moment after waking: time to understand and run
 CRAB_TRANSIT_FRAMES = FPS          # between two rooms, out of sight
 CRAB_ARRIVE_FRAMES = FPS // 2      # still for a moment after coming through a door
@@ -4761,7 +4790,7 @@ def new_crab():
             # Only for the easy crab: the way it goes, the tile it walks to, chasing or going to its
             # corner and for how long, the door it roams to when it sees nobody and for how long,
             # and how many doors it has taken at random.
-            "heading": (0, 1), "next": None, "mode": "chase", "clock": 0,
+            "heading": (0, 1), "next": None, "mode": "chase", "clock": 0, "stuck": 0,
             "roam": None, "roam_clock": 0, "turns": 0}
 
 
@@ -4798,15 +4827,24 @@ def crab_rect(crab):
     return player_rect(crab["pos"])
 
 
+def crab_foot(position):
+    """The crab's footprint on the floor: as wide as its shell, wider than its body. What it bumps
+    into with; it catches the players with its body, as before."""
+    return player_rect(position).inflate(2 * CRAB_WIDEN, 0)
+
+
 def free_tiles(state, room):
-    """The tiles of a room the crab can walk on: the floor that nothing solid covers, and the open doors."""
+    """The tiles of a room the crab can walk on: where its footprint, in the middle of the tile, touches
+    nothing solid; and the open doors, which it goes through by their middle."""
     seen = room_state(state, room)
     solids = solid_rects(seen)
     columns, rows = room_size(room)
-    free = set()
+    free = set(open_door_tiles(state, room))
+    foot = crab_foot((0, 0))
     for col in range(columns):
         for row in range(rows):
-            if tile_rect(col, row).collidelist(solids) == -1:
+            foot.center = tile_rect(col, row).center
+            if foot.collidelist(solids) == -1:
                 free.add((col, row))
     return free
 
@@ -4815,28 +4853,6 @@ def tile_of(position):
     """The tile of the room grid under the middle of a body (see tile_rect: the rooms start below the bar)."""
     x, y = player_rect(position).center
     return (x // TILE, (y - HUD_HEIGHT) // TILE)
-
-
-def next_tile(free, start, goals):
-    """The first tile to walk to on the shortest way from `start` to any of `goals`, or None.
-
-    A plain search over the free tiles, in the four directions: rooms are small.
-    """
-    goals = set(goals)
-    if start in goals:
-        return start
-    first = {start: None}
-    queue = collections.deque([start])
-    while queue:
-        tile = queue.popleft()
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            near = (tile[0] + dx, tile[1] + dy)
-            if near in free and near not in first:
-                first[near] = near if tile == start else first[tile]
-                if near in goals:
-                    return first[near]
-                queue.append(near)
-    return None
 
 
 def door_toward(state, room, rooms):
@@ -4887,7 +4903,7 @@ def step_crab(crab, goal, solids, speed=CRAB_SPEED):
     move_x = step * dx / distance
     move_y = step * dy / distance
     before = crab["pos"]
-    crab["pos"] = move(crab["pos"], move_x, move_y, solids)
+    crab["pos"] = move(crab["pos"], move_x, move_y, solids, CRAB_WIDEN)
     crab["moving"] = crab["pos"] != before
     if crab["moving"]:
         crab["walk"] += 1
@@ -4924,13 +4940,55 @@ def move_crab(app):
             return
         col, row, width, height = door_tiles(door)
         goals = [(col + dx, row + dy) for dx in range(width) for dy in range(height)]
-    tile = next_tile(free, start, goals)
-    if tile is None:
+    way = path_to(free, start, goals)
+    if way is None:
         return
+    solids = solid_rects(seen)
+    tile = way[0]
+    for ahead in reversed(way[:CRAB_LOOKAHEAD]):  # the farthest tile of its way it can walk to in a straight line
+        if ahead not in open_door_tiles(state, crab["room"]) and straight_way(crab["pos"], tile_rect(*ahead).center, solids):
+            tile = ahead
+            break
     goal = tile_rect(*tile).center
     if tile == start and target[0] == "door":
         goal = door_rect(target[1]).center
-    step_crab(crab, goal, solid_rects(seen))
+    step_crab(crab, goal, solids)
+
+
+def path_to(free, start, goals):
+    """The tiles of the shortest way from `start` to any of `goals` (start left out), or None.
+    [start] when it is already there."""
+    goals = set(goals)
+    if start in goals:
+        return [start]
+    came = {start: None}
+    queue = collections.deque([start])
+    while queue:
+        tile = queue.popleft()
+        if tile in goals:
+            way = []
+            while tile != start:
+                way.append(tile)
+                tile = came[tile]
+            return way[::-1]
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            near = (tile[0] + dx, tile[1] + dy)
+            if near in free and near not in came:
+                came[near] = tile
+                queue.append(near)
+    return None
+
+
+def straight_way(position, point, solids):
+    """True if the crab's footprint can slide in a straight line from `position` until its middle is at `point`."""
+    body = crab_rect({"pos": position})
+    dx, dy = point[0] - body.centerx, point[1] - body.centery
+    steps = max(int(math.hypot(dx, dy) // 3), 1)
+    for step in range(1, steps + 1):
+        share = step / steps
+        if crab_foot((position[0] + dx * share, position[1] + dy * share)).collidelist(solids) != -1:
+            return False
+    return True
 
 
 def open_door_tiles(state, room):
@@ -5032,8 +5090,13 @@ def move_easy_crab(app):
     tile = tuple(crab["next"])
     goal = tile_rect(*tile).center
     body = crab_rect(crab)
-    if math.hypot(goal[0] - body.centerx, goal[1] - body.centery) > EASY_CRAB_SPEED:
-        step_crab(crab, goal, solids, EASY_CRAB_SPEED)
+    if tile in doors:  # a door: through the middle of its opening, as soon as it touches it
+        if body.colliderect(door_rect(doors[tile]).inflate(2, 2)):
+            goal = body.center
+        else:
+            goal = door_rect(doors[tile]).center
+    if math.hypot(goal[0] - body.centerx, goal[1] - body.centery) > CRAB_SPEED:
+        step_crab(crab, goal, solids)
         if not crab["moving"]:
             crab["next"] = None  # something in the way: it starts again from where it is
         return
@@ -5054,7 +5117,7 @@ def move_easy_crab(app):
         return
     crab["heading"] = heading
     crab["next"] = (tile[0] + heading[0], tile[1] + heading[1])
-    step_crab(crab, tile_rect(*crab["next"]).center, solids, EASY_CRAB_SPEED)
+    step_crab(crab, tile_rect(*crab["next"]).center, solids)
 
 
 def farthest_tile(free, start, point, room):
@@ -5168,9 +5231,46 @@ def update_crab(app):
         crab["wait"] -= 1
         crab["moving"] = False
         return
+    before = crab["pos"]
     move_crab(app)
+    watch_for_stuck(app, before)
     if crab["away"] == 0:
         catch_players(app)
+
+
+def wants_to_move(app):
+    """True if the crab has somewhere to go: a player to chase or a door to take (not running from the
+    ghost, which ends in a corner, nor waiting with nobody to reach)."""
+    if engine.crab_difficulty(app["state"]) == "easy":
+        return easy_target(app)[0] in ("chase", "scatter", "roam")
+    target = crab_target(app)
+    return target is not None and target[0] in ("player", "door")
+
+
+def watch_for_stuck(app, before):
+    """If the crab has somewhere to go but has not moved for CRAB_STUCK_FRAMES frames (caught on a
+    corner), it gets loose: back to the middle of the nearest tile where it fits, at most a tile away."""
+    crab = app["crab"]
+    if crab["away"] > 0 or crab["pos"] != before or not wants_to_move(app):
+        crab["stuck"] = 0
+        return
+    crab["stuck"] = crab.get("stuck", 0) + 1
+    if crab["stuck"] < CRAB_STUCK_FRAMES:
+        return
+    crab["stuck"] = 0
+    crab["next"] = None
+    body = crab_rect(crab)
+    solids = solid_rects(room_state(app["state"], crab["room"]))
+    tiles = sorted(free_tiles(app["state"], crab["room"]),
+                   key=lambda tile: pygame.Vector2(tile_rect(*tile).center).distance_to(body.center))
+    for tile in tiles:
+        center = tile_rect(*tile).center
+        if pygame.Vector2(center).distance_to(body.center) > 1.5 * TILE:
+            break
+        place = (crab["pos"][0] + center[0] - body.centerx, crab["pos"][1] + center[1] - body.centery)
+        if crab_foot(place).collidelist(solids) == -1 and tile not in open_door_tiles(app["state"], crab["room"]):
+            crab["pos"] = place
+            return
 
 
 def crab_news(app):
@@ -5259,18 +5359,12 @@ def draw_petrify(app, screen):
     stone = app["petrify"]
     if stone is None or stone["room"] != view(app)["room"] or stone["age"] >= PETRIFY_BURST:
         return
-    picture = sprites.image("crab")
-    body = player_rect(stone["pos"])
-    if picture is None:
-        pygame.draw.rect(screen, RUBBLE_COLORS[1], body)
-        return
-    small = pygame.transform.scale(picture, (CRAB_PICTURE_SIZE, CRAB_PICTURE_SIZE))
-    if stone["facing"][0] < 0:
-        small = pygame.transform.flip(small, True, False)
+    small = crab_look.picture(crab_look.pose(legs=1, claws=0.0, eyes="calm", look=stone["facing"]))
     shiver = 0
     if stone["age"] >= PETRIFY_CRACK:
         shiver = (stone["age"] // 2) % 3 - 1  # cracked: it trembles before it bursts
-    place = small.get_rect(midbottom=(body.centerx + shiver, body.bottom + 2))
+    x, y = crab_place({"pos": stone["pos"]})
+    place = small.get_rect(topleft=(x + shiver, y))
     screen.blit(small, place)
     grey = stone_crab(small).copy()
     grey.set_alpha(min(255, 255 * stone["age"] // PETRIFY_CRACK))  # the colour drains away
@@ -5459,6 +5553,7 @@ def reset_crab(app):
     app["hidden"] = {}
     app["afterimages"] = []
     app["beams"] = []
+    app["crab_trail"] = []
     app["petrify"] = None
     app["crumble"] = 0
     app["shatter"] = None
@@ -5494,39 +5589,126 @@ def can_move(app):
     return number not in app["downed"] and not engine.is_out(app["state"], number)
 
 
-def crab_picture(app):
-    """The crab's sprite, shrunk once to its size on the deck, facing where it walks."""
-    picture = sprites.image("crab")
-    if picture is None:
+def crab_target_player(app):
+    """The player the crab is after in its room, the nearest one it can see, or None."""
+    crab = app["crab"]
+    state = app["state"]
+    body = pygame.Vector2(crab_rect(crab).center)
+    here = [number for number in hunted_players(app) if engine.player_room(state, number) == crab["room"]]
+    if not here:
         return None
-    small = SMALL_CRABS.get(id(picture))
-    if small is None:
-        small = pygame.transform.scale(picture, (CRAB_PICTURE_SIZE, CRAB_PICTURE_SIZE))
-        SMALL_CRABS[id(picture)] = small
-    if app["crab"]["facing"][0] < 0:
-        small = pygame.transform.flip(small, True, False)
-    return small
+    return min(here, key=lambda number: body.distance_to(player_rect(app["players"][number - 1]["pos"]).center))
 
 
-SMALL_CRABS = {}
+def crab_telegraph(app):
+    """True when the crab is about to lunge: hunting, and a player is within CHARGE_DISTANCE. Once
+    it is, it stays so until the player is a tile farther: it does not flicker at the edge."""
+    crab = app["crab"]
+    target = crab_target_player(app)
+    if target is None or crab["stun"] > 0:
+        return False
+    body = crab_rect(crab).center
+    other = player_rect(app["players"][target - 1]["pos"]).center
+    reach = CHARGE_DISTANCE + (TILE if app["crab_lunging"] else 0)
+    return math.hypot(other[0] - body[0], other[1] - body[1]) < reach
+
+
+def claws_wanted(app):
+    """How open the crab's claws should be: gaping before a lunge, opening and shutting smoothly as it
+    chases, a little open otherwise, shut when it is stunned."""
+    crab = app["crab"]
+    if crab["stun"] > 0:
+        return 0.0
+    if crab_target_player(app) is None:
+        return 0.25
+    if crab_telegraph(app):
+        return 1.0
+    if crab["moving"]:
+        low, high = CRAB_CLAW_CHASE
+        return low + (high - low) * (0.5 - 0.5 * math.cos(2 * math.pi * app["frame"] / CRAB_CLAW_PERIOD))
+    return 0.25
+
+
+def crab_pose(app):
+    """How the crab looks now (see crab.py): its legs walk while it moves; its claws open and shut
+    as it chases, and gape when it is about to lunge; it breathes when it stands still; its eyes
+    burn when it hunts, and droop when the wizard has stunned it."""
+    crab = app["crab"]
+    if crab["stun"] > 0:
+        return crab_look.pose(legs=1, claws=0.0, breath=(app["frame"] // (CRAB_BREATH_FRAMES * 2)) % 2,
+                              eyes="dazed", look=(0, 1))
+    target = crab_target_player(app)
+    legs = (crab["walk"] // CRAB_LEG_FRAMES) % 4 if crab["moving"] else 1
+    breath = 0 if crab["moving"] else (app["frame"] // (CRAB_BREATH_FRAMES // 2)) % 2
+    if target is None:
+        return crab_look.pose(legs, app["crab_claws"], breath, "calm", crab["facing"])
+    body = crab_rect(crab).center
+    other = player_rect(app["players"][target - 1]["pos"]).center
+    look = (sign(other[0] - body[0]), sign(other[1] - body[1]))
+    return crab_look.pose(legs, app["crab_claws"], breath, "hunt", look)
+
+
+def crab_place(crab):
+    """Where the crab's picture goes: its legs on the floor at the bottom of its body, its shell over the middle."""
+    body = crab_rect(crab)
+    return (body.centerx - crab_look.CENTER[0], body.bottom + 1 - crab_look.FEET)
+
+
+def update_crab_looks(app):
+    """On every computer, once a frame: the dust or foam its legs kick up as it runs, and the red
+    streaks its burning eyes leave behind when it is about to lunge."""
+    for streak in app["crab_trail"]:
+        streak["age"] += 1
+    app["crab_trail"] = [streak for streak in app["crab_trail"] if streak["age"] < CRAB_TRAIL_FRAMES]
+    crab = app["crab"]
+    if app["state"] is None or crab is None:
+        return
+    wanted = claws_wanted(app)  # the claws move toward it, a little each frame
+    app["crab_claws"] += max(-CRAB_CLAW_SPEED, min(CRAB_CLAW_SPEED, wanted - app["crab_claws"]))
+    app["crab_lunging"] = crab_telegraph(app)
+    if crab["away"] > 0 or crab["room"] != view(app)["room"]:
+        return
+    if crab["moving"] and effects.FX["dust"] and app["frame"] % CRAB_DUST_EVERY == 0:
+        info = story.ROOMS[crab["room"]]
+        colors = CRAB_FOAM if info["outdoor"] or info.get("damp") or crab["room"] == "crab_room" else CRAB_DUST
+        body = crab_rect(crab)
+        side = 1 if (app["frame"] // CRAB_DUST_EVERY) % 2 else -1  # one side, then the other
+        effects.spawn(app["fx"], body.centerx + side * 14, body.bottom, 3, colors, speed=0.5, life=16, up=0.5,
+                      gravity=0.04)
+    if crab["moving"] and app["crab_lunging"]:
+        x, y = crab_place(crab)
+        points = [(x + px, y + py) for px, py in crab_look.eye_points(crab_pose(app))]
+        app["crab_trail"].append({"room": crab["room"], "points": points, "age": 0})
 
 
 def draw_crab(app, screen):
+    """The crab: a wide shadow on the floor under it, the crab in its pose, a shiver when it is
+    about to lunge, the glow and the streaks of its burning eyes, and stars when it is stunned."""
     crab = app["crab"]
     body = crab_rect(crab)
-    picture = crab_picture(app)
-    hop = 1 if crab["moving"] and (crab["walk"] // WALK_STEP_FRAMES) % 2 else 0  # the legs scuttle
-    if picture is None:
-        pygame.draw.rect(screen, COLORS["seal"], body)
-        return
-    screen.blit(picture, picture.get_rect(midbottom=(body.centerx, body.bottom + 2 - hop)))
+    shadow = shadow_picture(CRAB_SHADOW)
+    screen.blit(shadow, shadow.get_rect(center=(body.centerx + 1, body.bottom - 1)))
+    crab_pose_now = crab_pose(app)
+    x, y = crab_place(crab)
+    if app["crab_lunging"]:
+        x += CRAB_SHIVER[(app["frame"] // 3) % len(CRAB_SHIVER)]  # it shivers, ready to lunge
+    for streak in app["crab_trail"]:
+        if streak["room"] == crab["room"]:
+            fade = 1 - streak["age"] / CRAB_TRAIL_FRAMES
+            color = tuple(round(channel * fade) for channel in crab_look.HUNT_EYE)
+            for point in streak["points"]:
+                screen.fill(color, (point[0], point[1], 2, 1), special_flags=pygame.BLEND_RGB_ADD)
+    screen.blit(crab_look.picture(crab_pose_now), (x, y))
+    if crab_pose_now["eyes"] == "hunt" and effects.FX["lights"]:
+        for px, py in crab_look.eye_points(crab_pose_now):
+            effects.glow(screen, (x + px, y + py), 5, CRAB_EYE_GLOW, effects.pulse(app["frame"], 0.15, 0.6, 1.0))
     if crab["stun"] > 0:  # stunned by the wizard: three stars turn above its head
         for star in range(3):
             angle = app["frame"] * 0.15 + star * 2 * math.pi / 3
-            x = body.centerx + round(8 * math.cos(angle))
-            y = body.top - 12 + round(3 * math.sin(angle))
-            pygame.draw.rect(screen, COLORS["highlight"], (x - 1, y - 1, 3, 3))
-            pygame.draw.rect(screen, COLORS["text"], (x, y, 1, 1))
+            sx = body.centerx + round(8 * math.cos(angle))
+            sy = y + 2 + round(3 * math.sin(angle))
+            pygame.draw.rect(screen, COLORS["highlight"], (sx - 1, sy - 1, 3, 3))
+            pygame.draw.rect(screen, COLORS["text"], (sx, sy, 1, 1))
 
 
 def crab_here(app):
@@ -6024,6 +6206,191 @@ def handle_message(app, message):
         finish(app, action, before, state, message["outcome"])
 
 
+# --- Sound: the rooms, the footsteps, and the crab wherever it is ----------------------------
+#
+# Every room has a quiet sound of its own, looping on channels of its own (sounds.loop): the
+# sea on the deck, muffled inside the ship, water dripping in the damp rooms; and a machine's
+# hum that grows as the player comes near a generator or a portal, from the side it is on.
+# They fade into each other when the player changes room. Footsteps sound like the floor
+# they fall on, or splash in a puddle. The crab's claws click on the floor, louder as it comes
+# nearer, from its side of the screen, faster when it charges; in the next room, through an
+# open door, they are muffled and come from that door. Each computer hears from its own
+# player: nothing of this goes through the network, only what is already there.
+
+SEA_VOLUME = 0.35        # the sea, on the deck
+SEA_INSIDE_VOLUME = 0.22  # ...and from inside the ship
+DRIPS_VOLUME = 0.35      # the water dripping in the damp rooms
+CHASE_VOLUME = 0.5       # the music of a chase
+CHASE_RANGE = DASH_TILES * TILE  # it plays when the crab hunts within this distance: as far as Flash dashes
+CHASE_HOLD = 2 * FPS     # it goes on this long after the crab has gone, then fades
+CHASE_DUCK = 0.6         # meanwhile the sound of the room is this much as loud
+HUM_VOLUME = 0.45        # a machine's hum, right next to it
+HUM_RANGE = 6 * TILE     # how far it is heard
+HUM_OFF = 0.35           # a generator that is off hums less
+STEP_VOLUME = 0.3        # footsteps: soft
+HEAR_RANGE = 16 * TILE   # how far something in the room is still heard, at its quietest
+HEAR_QUIETEST = 0.2      # how quiet that is
+PAN_WIDTH = 0.8          # how far to the side a sound can be put: never all in one ear
+CRAB_VOLUME = 0.8        # the crab's claws, right next to the player
+CLAW_CLICK_EVERY = 16    # frames between two clicks of its claws as it walks...
+CHARGE_CLICK_EVERY = 9   # ...and as it charges
+CHARGE_DISTANCE = 4 * TILE  # it charges when it is this close
+CHARGE_PAUSE = 3 * FPS   # frames before its charge can be heard again
+NEXT_ROOM_VOLUME = 0.35  # its claws in the next room, through the wall
+
+
+def listener(app):
+    """The player whose ears this computer uses: its own, or the partner's it watches once out."""
+    state = app["state"]
+    if engine.is_out(state, my_number(app)) and len(app["players"]) == 2:
+        return app["players"][1 - app["me"]]
+    return local_player(app)
+
+
+def hearing(app, point):
+    """How loud and from where a sound at `point` (room pixels) of the room on screen reaches the
+    listener: (volume, pan). Quieter the farther it is, never silent in the room."""
+    ear = player_rect(listener(app)["pos"]).center
+    distance = math.hypot(point[0] - ear[0], point[1] - ear[1])
+    volume = max(HEAR_QUIETEST, 1 - distance / HEAR_RANGE)
+    pan = max(-1.0, min(1.0, (point[0] - ear[0]) / (WIDTH / 2))) * PAN_WIDTH
+    return volume, pan
+
+
+def ambience(app):
+    """What loops in each slot now: (bed, volume) and (hum, volume, pan), or None outside the game."""
+    state = app["state"]
+    if state is None or engine.is_over(state) or app["scene"] in ("ending", "shatter"):
+        return None, None
+    seen = view(app)
+    room = seen["room"]
+    info = story.ROOMS[room]
+    if info["outdoor"]:
+        bed = ("sea", SEA_VOLUME)
+    elif info.get("damp"):
+        bed = ("drips", DRIPS_VOLUME)
+    else:
+        bed = ("sea_far", SEA_INSIDE_VOLUME)
+    ear = player_rect(listener(app)["pos"]).center
+    hum = None
+    for thing in engine.things_here(seen):
+        if thing["kind"] not in ("switch", "portal"):
+            continue
+        center = thing_rect(thing["id"]).center
+        closeness = 1 - math.hypot(center[0] - ear[0], center[1] - ear[1]) / HUM_RANGE
+        if thing["kind"] == "switch" and thing["status"] != "on":
+            closeness *= HUM_OFF
+        if closeness > 0 and (hum is None or closeness * HUM_VOLUME > hum[1]):
+            pan = max(-1.0, min(1.0, (center[0] - ear[0]) / (WIDTH / 2))) * PAN_WIDTH
+            hum = ("hum", closeness * HUM_VOLUME, pan)
+    return bed, hum
+
+
+def chase_music(app):
+    """The music of a chase, on this computer: "chase" while the crab hunts in this player's room and is
+    within CHASE_RANGE of them, "chase_near" when it is close enough to lunge; it goes on for
+    CHASE_HOLD frames once that ends, then fades. None when there is no chase."""
+    crab = app["crab"]
+    state = app["state"]
+    if state is None or engine.is_over(state) or app["scene"] in ("ending", "shatter"):
+        app["chase_left"] = 0
+        return None
+    near = False
+    hunting = (crab is not None and crab["away"] == 0 and crab["stun"] == 0 and crab["room"] == view(app)["room"]
+               and crab_target_player(app) is not None)
+    if hunting:
+        body = crab_rect(crab).center
+        ear = player_rect(listener(app)["pos"]).center
+        distance = math.hypot(body[0] - ear[0], body[1] - ear[1])
+        hunting = distance < CHASE_RANGE
+        near = distance < CHARGE_DISTANCE
+    if hunting:
+        app["chase_left"] = CHASE_HOLD
+        return "chase_near" if near else "chase"
+    if app["chase_left"] > 0:
+        app["chase_left"] -= 1
+        return "chase"
+    return None
+
+
+def update_audio(app):
+    """Once a frame, on every computer: the loops of the room (quieter during a chase), the music of a
+    chase, the footsteps, the crab."""
+    bed, hum = ambience(app)
+    music = chase_music(app)
+    if bed is not None and music is not None:
+        bed = (bed[0], bed[1] * CHASE_DUCK)
+    sounds.loop("bed", *(bed or (None,)))
+    sounds.loop("hum", *(hum or (None,)))
+    sounds.loop("chase", music, CHASE_VOLUME)
+    sounds.update_loops()
+    if app["state"] is not None:
+        footsteps(app)
+        crab_audio(app)
+
+
+def step_sound(seen, player):
+    """The sound of a footstep: a splash in a puddle, else the floor of the room."""
+    feet = player_rect(player["pos"]).midbottom
+    for thing in engine.things_here(seen):
+        if story.OBJECTS.get(thing["id"], {}).get("picture") == "decor_puddle" \
+                and thing_rect(thing["id"]).inflate(0, 2).collidepoint(feet[0], feet[1] - 1):
+            return "step_puddle"
+    return "step_" + story.ROOMS[seen["room"]]["floor"]
+
+
+def footsteps(app):
+    """A footstep at each step of the walk of a player in the room on screen: the one on this
+    computer in the middle, the other one from where they are."""
+    state = app["state"]
+    seen = view(app)
+    for number, player in enumerate(app["players"], start=1):
+        step = player["walk"] // WALK_STEP_FRAMES
+        last = app["steps"].get(number)
+        app["steps"][number] = step
+        if last is None or step == last or not player["moving"] or player["dash"] > 0:
+            continue
+        if engine.player_room(state, number) != seen["room"] or engine.is_out(state, number):
+            continue
+        volume, pan = (1.0, 0.0) if player is listener(app) else hearing(app, player_rect(player["pos"]).center)
+        sounds.play(step_sound(seen, player), volume * STEP_VOLUME, pan)
+
+
+def door_between(state, room, other):
+    """The open door of `room` that leads to `other`, or None."""
+    for door in doors_in(room):
+        if story.DOORS[door]["to"] == other and engine.door_status(state, door) == "open":
+            return door
+    return None
+
+
+def crab_audio(app):
+    """The crab's claws clicking as it walks: in the room, from where it is, louder and faster
+    as it comes near (a hiss when it charges); in the next room, muffled, from the door."""
+    crab = app["crab"]
+    if crab is None or not crab["moving"] or crab["away"] > 0:
+        app["charging"] = False
+        return
+    seen = view(app)
+    if crab["room"] == seen["room"]:
+        body = crab_rect(crab).center
+        ear = player_rect(listener(app)["pos"]).center
+        charging = math.hypot(body[0] - ear[0], body[1] - ear[1]) < CHARGE_DISTANCE
+        volume, pan = hearing(app, body)
+        if app["frame"] % (CHARGE_CLICK_EVERY if charging else CLAW_CLICK_EVERY) == 0:
+            sounds.play("claw_click", min(1.0, volume * CRAB_VOLUME * (1.25 if charging else 1.0)), pan)
+        if charging and not app["charging"] and app["frame"] - app["charge_at"] >= CHARGE_PAUSE:
+            sounds.play("crab_charge", volume * CRAB_VOLUME, pan)
+            app["charge_at"] = app["frame"]
+        app["charging"] = charging
+        return
+    app["charging"] = False
+    door = door_between(app["state"], seen["room"], crab["room"])
+    if door is not None and app["frame"] % CLAW_CLICK_EVERY == 0:
+        _, pan = hearing(app, door_rect(door).center)
+        sounds.play("claw_click_far", NEXT_ROOM_VOLUME, pan)
+
+
 # --- Visual effects: what happens on screen when something happens in the game -----------
 #
 # effects.py has the tools (particles, glows, dissolves, the warp) and the switches;
@@ -6499,8 +6866,55 @@ def draw_soft_lights(app, surface, state, things):
             effects.soft_light(surface, light_center(app, thing), radius, color, light_strength(app, thing, change))
 
 
+CRAB_AURA = 26                 # the faint red halo around the crab: its radius...
+CRAB_AURA_COLOR = (70, 10, 10)  # ...and its colour, at its strongest
+DOOR_WARNING = 5 * TILE        # how far from a door the crab, in the next room, already glows in its doorway
+
+
+def crab_warning(app):
+    """The door of the room on screen where the crab's red glow shows in the dark, and how strong it
+    is (0 to 1), or None: the crab is in the next room coming near that door, or coming through it."""
+    crab = app["crab"]
+    state = app["state"]
+    if crab is None or state is None:
+        return None
+    room = view(app)["room"]
+    if crab["room"] == room:
+        if crab["away"] <= 0:
+            return None
+        body = crab_rect(crab).center  # coming through: right in front of the door it comes in by
+        door = min(doors_in(room), key=lambda door: pygame.Vector2(door_rect(door).center).distance_to(body),
+                   default=None)
+        return None if door is None else (door, 1.0)
+    door = door_between(state, room, crab["room"])
+    back = door_between(state, crab["room"], room)
+    if door is None or back is None:
+        return None
+    distance = pygame.Vector2(door_rect(back).center).distance_to(crab_rect(crab).center)
+    if distance >= DOOR_WARNING:
+        return None
+    return door, 1 - distance / DOOR_WARNING
+
+
+def draw_crab_aura(app, surface):
+    """A faint red halo around the crab, stronger when it hunts; and when it comes near a door from the
+    next room, its red glow in the dark of that doorway, beating, stronger as it comes. Drawn over
+    the darkness, so it shows in the dark rooms too."""
+    if not effects.FX["lights"]:
+        return
+    beat = effects.pulse(app["frame"], 0.12, 0.6, 1.0)
+    if crab_here(app) and app["crab"]["away"] <= 0:
+        strength = 0.8 if crab_target_player(app) is not None else 0.4
+        effects.glow(surface, crab_rect(app["crab"]).center, CRAB_AURA, CRAB_AURA_COLOR, strength * beat)
+    warning = crab_warning(app)
+    if warning is not None:
+        door, strength = warning
+        effects.glow(surface, door_rect(door).center, CRAB_AURA, (110, 14, 10), strength * beat)
+
+
 def draw_lights(app, surface, things):
     """The light of the room, added on top: lanterns, crystals, the blue fire of the cauldron."""
+    draw_crab_aura(app, surface)
     if not effects.FX["lights"] and not effects.FX["cauldron"]:
         return
     frame = app["frame"]
@@ -7923,6 +8337,7 @@ def show(screen, window):
 
 
 def main():
+    pygame.mixer.pre_init(22050, -16, 2, 512)  # the rate the sounds are made at, in stereo, and quick to start
     pygame.init()
     sounds.load()  # silent if the computer has no audio
     fullscreen = False
@@ -9583,6 +9998,251 @@ def portrait(size, fierce, opening=0.25):
             pygame.draw.rect(picture, tones["light"], (round(x + nx * w * across), round(y + ny * w * across), 2, 2))
     seam(picture, wrist, heading, look["fore"][-1] + 1, tones)
     return picture
+
+
+================================================================================
+# FILE: plot_twist/crab.py
+================================================================================
+
+"""The crab that hunts the players, drawn pixel by pixel in any pose.
+
+Seen from above and a little from the front, like everything in the game: a round
+shell with a crown of spikes, two eyes on stalks, two claws on segmented arms in
+front, and three legs on each side. Nothing here is a picture: picture() paints the
+crab for a pose, at the size of the small screen, and keeps what it painted.
+
+A pose says:
+- "legs": which of the 4 frames of the walk (0 to 3). The legs move in two groups,
+  like a crab's: on frames 0 and 2 one group is lifted and reaching while the other
+  pushes, on frames 1 and 3 all of them touch the floor;
+- "claws": how far the claws are open, from 0 (shut) to 1 (gaping wide);
+- "breath": 1 when the shell is risen by a pixel (breathing in), else 0;
+- "eyes": "calm", "hunt" (red, burning) or "dazed" (half shut);
+- "look": the way it looks, (-1, 0, 1) on each axis: where its pupils are.
+
+The shell has five tones: a very dark red, almost violet, outline; a deep shadow
+underneath; the crimson of the shell; coral where the light falls, on the top; and
+a pale glint. The light comes from the top left, as on everything else.
+"""
+
+import math
+
+import pygame
+
+OUTLINE = (52, 10, 34)     # very dark red, almost violet
+SHADOW = (120, 22, 44)     # the side away from the light, underneath
+BASE = (192, 38, 52)       # crimson
+LIGHT = (242, 112, 92)     # coral, where the light falls
+GLINT = (255, 210, 182)    # a pale glint
+EYE = (248, 242, 226)      # the white of the eyes
+PUPIL = (26, 10, 22)
+HUNT_EYE = (255, 92, 40)   # burning eyes, when it hunts...
+HUNT_PUPIL = (255, 236, 120)  # ...with a hot core
+DAZED_EYE = (150, 120, 130)
+
+SIZE = (40, 30)            # the picture
+CENTER = (20, 17)          # the middle of the shell on it
+FEET = 28                  # the row where the legs touch the floor: the bottom of the crab on the floor
+SHELL = (8.5, 5.5)         # half its width and half its height
+SPINES = (2.55, 2.8, 3.05)  # where the spines stand along the front of each side of the shell (radians, right side)
+HORNS = (-1, 1)            # two small horns between the eyes
+STALKS = (-3, 3)           # where the eye stalks rise, from the middle
+STALK = 4                  # how tall they are
+LEG_ROOTS = (0, 2, 4)      # where the legs leave the side of the shell, below its middle
+LEG_KNEES = (12, 13, 12)   # how far out from the middle each knee is
+LEG_TIPS = (16, 17, 15)    # and each tip
+CLAW_ROOT = (6, 2)         # where an arm leaves the shell, from the middle (x on each side, y down)
+CLAW_ELBOW = (11, 2)       # its elbow
+CLAW_AT = (14, -4)         # the middle of the palm of its claw
+PALM = 8                   # how round the palm is (its radius squared)
+FINGER = 6                 # how long the fingers are
+FINGER_SHUT = -0.26        # radians each finger leans in when the claw is shut: their tips meet...
+CLAW_STEPS = 8             # how many openings of the claws are painted, between shut and gaping
+FINGER_OPEN = 0.55         # ...and out when it gapes
+
+_pictures = {}
+
+
+def pose(legs=1, claws=0.0, breath=0, eyes="calm", look=(0, 1)):
+    """A pose of the crab (see the top of this file), its values kept in their ranges."""
+    return {"legs": legs % 4, "claws": round(min(max(claws, 0.0), 1.0) * CLAW_STEPS) / CLAW_STEPS, "breath": 1 if breath else 0,
+            "eyes": eyes, "look": (max(-1, min(1, look[0])), max(-1, min(1, look[1])))}
+
+
+def picture(crab_pose):
+    """The crab in this pose, on a clear picture of SIZE, painted once and kept."""
+    key = tuple(sorted(crab_pose.items()))
+    if key not in _pictures:
+        _pictures[key] = paint(crab_pose)
+    return _pictures[key]
+
+
+def paint(crab_pose):
+    """Paint the crab: the legs behind, the shell and its spikes, the arms and claws, the eyes;
+    then a dark outline around all of it."""
+    pixels = {}
+    rise = crab_pose["breath"]
+    cx, cy = CENTER[0], CENTER[1] - rise
+    draw_legs(pixels, crab_pose["legs"], cx, CENTER[1])  # the legs stay on the floor as the shell breathes
+    draw_shell(pixels, cx, cy)
+    for side in (-1, 1):
+        draw_claw(pixels, side, crab_pose["claws"], cx, cy)
+    draw_eyes(pixels, crab_pose["eyes"], crab_pose["look"], cx, cy)
+    outline(pixels)
+    surface = pygame.Surface(SIZE, pygame.SRCALPHA)
+    for (x, y), color in pixels.items():
+        if 0 <= x < SIZE[0] and 0 <= y < SIZE[1]:
+            surface.set_at((x, y), color)
+    return surface
+
+
+def put(pixels, x, y, color, over=True):
+    """One pixel; `over` False leaves what is already there."""
+    point = (round(x), round(y))
+    if over or point not in pixels:
+        pixels[point] = color
+
+
+def line(pixels, start, end, color, over=True):
+    """A line one pixel thick, with no gaps."""
+    (x0, y0), (x1, y1) = start, end
+    steps = max(abs(round(x1) - round(x0)), abs(round(y1) - round(y0)), 1)
+    for step in range(steps + 1):
+        share = step / steps
+        put(pixels, x0 + (x1 - x0) * share, y0 + (y1 - y0) * share, color, over)
+
+
+def shade(nx, ny, extra=0.0):
+    """The tone of a round piece of shell where its surface faces (nx, ny), the light from the top left."""
+    light = -0.45 * nx - 0.85 * ny + extra
+    if light > 0.55:
+        return LIGHT
+    if light > -0.25:
+        return BASE
+    return SHADOW
+
+
+def draw_shell(pixels, cx, cy):
+    """The round shell: coral on top, crimson, a dithered edge into the shadow underneath, a glint,
+    a seam across its back; a row of spines along the front of each side, and two horns in front."""
+    rx, ry = SHELL
+    for y in range(math.floor(cy - ry), math.ceil(cy + ry) + 1):
+        for x in range(math.floor(cx - rx), math.ceil(cx + rx) + 1):
+            u, v = (x + 0.5 - cx) / rx, (y + 0.5 - cy) / ry
+            if u * u + v * v > 1:
+                continue
+            tone = shade(u, v, 0.35 * (1 - u * u - v * v))
+            if tone == BASE and -0.45 * u - 0.85 * v < -0.1 and (x + y) % 2 == 0:
+                tone = SHADOW  # half way into the shadow: a dither
+            if v > 0.62:
+                tone = SHADOW  # the rim underneath
+            put(pixels, x, y, tone)
+    for x in range(round(cx - rx * 0.55), round(cx + rx * 0.55) + 1):  # the seam between the front and the back
+        put(pixels, x, round(cy + 0.5 + 0.12 * abs(x - cx)), SHADOW)
+    put(pixels, cx - 4, cy - 3, GLINT)
+    put(pixels, cx - 3, cy - 3, GLINT)
+    put(pixels, cx - 4, cy - 2, LIGHT)
+    for side in (-1, 1):
+        for index, angle in enumerate(SPINES):  # the spines: short, sharp, pointing out from the rim
+            nx, ny = math.cos(angle), -math.sin(angle)
+            nx = -nx * side  # the right side mirrored from the left
+            rim = (cx + nx * rx, cy + ny * ry)
+            put(pixels, rim[0] + nx * 0.8, rim[1] + ny * 0.8, BASE)
+            put(pixels, rim[0] + nx * 1.9, rim[1] + ny * 1.9, BASE)
+            put(pixels, rim[0] + nx * 2.9, rim[1] + ny * 2.9, LIGHT)  # a pale, sharp tip
+    for offset in HORNS:
+        put(pixels, cx + offset, round(cy - ry) - 1, BASE)
+
+
+def draw_legs(pixels, frame, cx, cy):
+    """Three legs on each side, each in two segments: out and up to the knee, then down to the floor.
+    On frames 0 and 2 one group (front and back on the left, the middle on the right; or the
+    other) is lifted and reaching while the other pushes; on 1 and 3 all of them stand."""
+    for side in (-1, 1):
+        for index in range(3):
+            group = (index + (0 if side < 0 else 1)) % 2
+            lifted = (frame == 0 and group == 0) or (frame == 2 and group == 1)
+            pushing = (frame == 0 and group == 1) or (frame == 2 and group == 0)
+            root = (cx + side * 6, cy + LEG_ROOTS[index])
+            knee = (cx + side * LEG_KNEES[index], cy + LEG_ROOTS[index] - 2 - (1 if lifted else 0))
+            tip = (cx + side * (LEG_TIPS[index] + (1 if lifted else 0) - (1 if pushing else 0)),
+                   FEET - 1 - (1 if lifted else 0) - (2 - index) // 2)
+            color = SHADOW if index == 2 else BASE
+            line(pixels, root, knee, color)
+            line(pixels, (root[0], root[1] + 1), (knee[0], knee[1] + 1), SHADOW)  # thick near the body
+            line(pixels, knee, tip, SHADOW)
+            put(pixels, knee[0], knee[1], LIGHT if index == 0 else BASE)  # the joint catches the light
+
+
+def draw_claw(pixels, side, opening, cx, cy):
+    """One arm and its claw: the arm in two thick segments with dark bands where they join, from the
+    front of the shell out and up to a round palm; two fingers, shut tip to tip or apart as far
+    as `opening` says, the upper one lit."""
+    root = (cx + side * CLAW_ROOT[0], cy + CLAW_ROOT[1])
+    elbow = (cx + side * CLAW_ELBOW[0], cy + CLAW_ELBOW[1])
+    palm = (cx + side * CLAW_AT[0], cy + CLAW_AT[1])
+    for (a, b) in ((root, elbow), (elbow, palm)):
+        line(pixels, a, b, BASE)
+        line(pixels, (a[0], a[1] + 1), (b[0] + side, b[1] + 1), SHADOW)
+    for band in (root, elbow, ((elbow[0] + palm[0]) / 2, (elbow[1] + palm[1]) / 2)):
+        put(pixels, band[0], band[1], SHADOW)  # the bands of the segments
+        put(pixels, band[0], band[1] + 1, OUTLINE)
+    for dy in range(-3, 4):  # the palm: round, lit on its top
+        for dx in range(-3, 4):
+            if dx * dx + dy * dy <= PALM:
+                put(pixels, palm[0] + dx, palm[1] + dy, shade(dx / 2.8, dy / 2.8, 0.3))
+    put(pixels, palm[0] - 1, palm[1] - 2, GLINT)
+    put(pixels, palm[0] + side * 2, palm[1] + 1, SHADOW)
+    heading = math.atan2(-1.0, side * 0.25)  # the fingers point up, a little outward
+    spread = FINGER_SHUT + (FINGER_OPEN - FINGER_SHUT) * opening
+    across = (math.cos(heading + math.pi / 2), math.sin(heading + math.pi / 2))
+    for finger in (1, -1):  # 1: the outer finger, -1: the inner one
+        angle = heading + finger * side * spread  # on screen a growing angle turns clockwise: outward
+        base = (palm[0] + across[0] * finger * side * 1.6, palm[1] - 2 + across[1] * finger * side * 1.6)
+        tip = (base[0] + FINGER * math.cos(angle), base[1] + FINGER * math.sin(angle))
+        middle = ((base[0] + tip[0]) / 2, (base[1] + tip[1]) / 2)
+        line(pixels, base, tip, LIGHT if finger == 1 else BASE)
+        line(pixels, (base[0] + side * 0.6, base[1] + 0.6), (middle[0] + side * 0.6, middle[1] + 0.6),
+             BASE if finger == 1 else SHADOW)  # thick at the base, thin at the tip
+        put(pixels, tip[0], tip[1], SHADOW)
+
+
+def draw_eyes(pixels, mood, look, cx, cy):
+    """Two eyes on stalks above the shell, each with its pupil where the crab looks and a glint;
+    burning red when it hunts, half shut when it is dazed."""
+    eye, pupil = {"calm": (EYE, PUPIL), "hunt": (HUNT_EYE, HUNT_PUPIL), "dazed": (DAZED_EYE, PUPIL)}[mood]
+    for offset in STALKS:
+        x = cx + offset
+        top = round(cy - SHELL[1]) - STALK
+        line(pixels, (x, top + 2), (x, round(cy - SHELL[1]) + 1), SHADOW)
+        for dx in (0, 1):
+            for dy in (0, 1):
+                put(pixels, x - 1 + dx, top + dy, eye)
+        if mood == "dazed":
+            put(pixels, x - 1, top, OUTLINE)  # the lid, half down
+            put(pixels, x, top, OUTLINE)
+            continue
+        put(pixels, x - 1 + (1 if look[0] > 0 else 0), top + (1 if look[1] > 0 else 0), pupil)
+        if mood == "calm":
+            put(pixels, x - 1 + (0 if look[0] > 0 else 1), top, GLINT)  # a glint in the eye
+
+
+def outline(pixels):
+    """A dark outline: every empty pixel next to the crab, left, right, above or below."""
+    edge = set()
+    for (x, y) in pixels:
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            if (x + dx, y + dy) not in pixels:
+                edge.add((x + dx, y + dy))
+    for point in edge:
+        pixels[point] = OUTLINE
+
+
+def eye_points(crab_pose):
+    """Where the eyes are on the picture: for a glow or a trail drawn on top."""
+    cx, cy = CENTER[0], CENTER[1] - crab_pose["breath"]
+    top = round(cy - SHELL[1]) - STALK
+    return [(cx + offset, top + 1) for offset in STALKS]
 
 
 ================================================================================
@@ -11704,113 +12364,455 @@ class PixelFont:
 # FILE: plot_twist/sounds.py
 ================================================================================
 
-"""The sound effects of Plot Twist, made from square waves and noise like on an 8-bit console.
+"""The sounds of Plot Twist, made in code like on an 8-bit console: no sound files.
 
-There are no sound files: each effect is a list of notes, (frequency in Hz,
-length in seconds), where a frequency of 0 is a pause and a negative frequency
-is noise: the hiss of the console's noise channel, as rough as the number is
-low (-60 rumbles, -8000 crackles). load() turns them into
-pygame sounds once the mixer is running, in whatever rate and channels it opened
-with. Without audio (no sound card, or the mixer could not start), play() does
-nothing, and the game runs the same.
+The voices are those of the sound chip of an 8-bit console:
+
+- "pulse12", "pulse25" and "square": a pulse wave that is up for 1/8, 1/4 or half of
+  each period. The thinner the pulse, the thinner and more nasal the sound.
+- "triangle": a triangle in 32 steps of 16 levels, round and deep, for the basses.
+- "noise": the hiss of a 15-bit shift register fed back on itself (the noise channel),
+  clocked `freq` times a second: low is a rumble, high a crackle. "metal" is the same
+  register in its short mode, which repeats every 93 steps and rings like metal.
+
+Each effect is a list of layers played together, each a voice with its own:
+
+- envelope, ADSR: it rises in `attack` seconds, falls in `decay` to the `sustain` level,
+  holds it until the layer's `length` is over, then dies in `release`. Like the chip's
+  4-bit volume, the envelope moves in 16 steps;
+- pitch: it starts at `freq` and glides to `to` (if given) in `sweep` seconds, or over the
+  whole layer; `vibrato` (rate in Hz, depth in semitones) makes it waver;
+- `tremolo` (rate, depth from 0 to 1): the volume beating, for a rumble that grinds;
+- filters: a one-pole `lowpass` (which can glide to `lowpass_to`) muffles it, a
+  `highpass` thins it: the noise of a footstep in a puddle is not the noise of glass.
+
+The loops (LOOPS) are made the same way and fade into themselves at their seam, so they
+can play forever: the sea on the deck, water dripping, the hum of a machine. They play on
+channels of their own (loop, update_loops), whose volume moves a little every frame, so
+that they fade in and out cleanly when the player changes room.
+
+load() makes everything once the mixer is running, in its rate and channels. Without
+audio (no sound card, or the mixer could not start) play() and loop() do nothing, and
+the game runs the same. With a stereo mixer, play() can put a sound to the left or to
+the right (`pan`), and quieter (`volume`): main.py does so with the crab, wherever it is.
 """
 
 import array
+import math
 
 import pygame
 
-VOLUME = 0.2  # of the loudest square wave: the effects are short and should not hurt
-FADE = 0.005  # seconds at the end of each note that fade out, so notes do not click
+MASTER = 0.3        # of the loudest possible sample: a few voices together never hurt
+STEPS = 16          # the envelope moves in 16 levels, like the 4-bit volume of the chip
+BLOCK = 32          # samples between two updates of the pitch and the envelope
+RENDER_RATE = 22050  # the sounds are made at most at this rate, then held to the mixer's
+NOISE_SEED = 1      # where the register of the noise starts: the same noise every time
+LOOP_FADE = 0.25    # seconds at the end of a loop that fade into its start: no click at the seam
+LOOP_FADE_FRAMES = 30  # frames a loop takes to fade in or out (half a second)
+LOOP_CHANNELS = 8   # mixer channels kept for the loops: two for each loop slot, to cross-fade
+LOOP_SLOTS = ("bed", "hum", "chase", "spare")  # what can loop at the same time
 
-EFFECTS = {
-    "blip": [(1047, 0.04)],                                            # a tile lights up
-    "ding": [(784, 0.07), (1175, 0.16)],                               # a phase is complete
-    "fanfare": [(523, 0.08), (659, 0.08), (784, 0.08), (1047, 0.3)],   # the puzzle is solved
-    "buzz": [(98, 0.12), (0, 0.04), (98, 0.3)],                        # BZZZ: a mistake, the lights go out
-    "clue": [(988, 0.05), (1319, 0.05), (0, 0.02), (1976, 0.22)],      # a new clue: a light, rising chime
-    "crab_wake": [(73, 0.1), (82, 0.1), (98, 0.1), (0, 0.03), (147, 0.35)],  # the statue cracks: the crab is awake
-    "knocked": [(392, 0.06), (262, 0.06), (131, 0.25)],                # the crab knocks a player down
-    "revived": [(523, 0.06), (784, 0.06), (1047, 0.15)],               # back on their feet
-    "ability": [(659, 0.04), (988, 0.04), (1319, 0.04), (1976, 0.12)],  # a character's ability: a quick rising run
-    "drop": [(330, 0.04), (196, 0.07)],                                # an item dropped on the floor
-    "thunder": [(110, 0.03), (55, 0.1), (49, 0.12), (0, 0.04), (41, 0.18), (37, 0.3)],  # the bolt that opens the game
-    "knocked_out": [(330, 0.15), (262, 0.15), (196, 0.15), (131, 0.4)],  # a player is out of the game
-    # The crab statue shakes and crumbles: low, jagged noise over a deep square wave.
-    "crumble": [(-90, 0.08), (55, 0.05), (-60, 0.12), (41, 0.06), (-45, 0.2), (-30, 0.25)],
-    # The wizard's spell: a ray that crackles, falling and rising.
-    "zap": [(1568, 0.03), (-3000, 0.02), (1175, 0.03), (-2500, 0.02), (1760, 0.05), (2349, 0.08)],
-    # Flash's dash: a rush of air.
-    "dash": [(-6000, 0.03), (-4000, 0.04), (-2500, 0.06)],
-    # The crab turns to stone: a grinding that slows down.
-    "petrify": [(-70, 0.1), (62, 0.08), (-55, 0.12), (49, 0.1), (-40, 0.3)],
-    # The giant claw snaps shut: a dry crack.
-    "snap": [(-4000, 0.015), (1800, 0.02), (-2500, 0.025), (90, 0.05)],
-    # The screen breaks like glass: a high crackle with a few bright chips.
-    "shatter": [(-9000, 0.05), (3520, 0.02), (-7000, 0.06), (4186, 0.02), (-8000, 0.08), (2637, 0.03),
-                (-6000, 0.12), (-5000, 0.15)],
-}
-
-_loaded = {}  # effect name -> pygame Sound, once load() has run with audio
+DUTIES = {"pulse12": 0.125, "pulse25": 0.25, "square": 0.5}
+TRIANGLE = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]  # 32 steps of 16 levels, like the chip
 
 
-NOISE_SEED = 1  # where the register of the noise starts: the same noise every time
-
-
-def noise_bit(register):
+def noise_bit(register, short=False):
     """One step of the noise: a 15-bit shift register fed back on itself, like the noise channel
-    of an 8-bit console. Returns the new register; its lowest bit is the next level (up or down)."""
-    feedback = (register ^ (register >> 1)) & 1
+    of an 8-bit console. Returns the new register; its lowest bit is the next level (up or down).
+    In the short mode the feedback comes from bit 6 instead of bit 1: a loop of 93 steps that rings."""
+    feedback = (register ^ (register >> (6 if short else 1))) & 1
     return (register >> 1) | (feedback << 14)
 
 
-def samples(notes, rate, channels=1):
-    """The notes as signed 16-bit samples, the same value repeated on every channel."""
-    peak = int(32767 * VOLUME)
-    fade = max(1, int(rate * FADE))
-    data = array.array("h")
+def layer(wave, freq, length, start=0.0, volume=1.0, to=None, sweep=None, attack=0.002, decay=0.0,
+          sustain=1.0, release=0.02, vibrato=None, tremolo=None, lowpass=None, lowpass_to=None, highpass=None):
+    """One voice of an effect (see the top of this file). Times in seconds, frequencies in Hz."""
+    return {"wave": wave, "freq": freq, "length": length, "start": start, "volume": volume, "to": to,
+            "sweep": sweep, "attack": attack, "decay": decay, "sustain": sustain, "release": release,
+            "vibrato": vibrato, "tremolo": tremolo, "lowpass": lowpass, "lowpass_to": lowpass_to,
+            "highpass": highpass}
+
+
+def hit(wave, freq, length, start=0.0, volume=1.0, **more):
+    """A voice that strikes and dies away by itself: no sustain, its whole length a decay."""
+    return layer(wave, freq, length, start, volume, attack=0.001, decay=length, sustain=0.0, release=0.005, **more)
+
+
+def notes(wave, pitches, each, start=0.0, volume=1.0, **more):
+    """A run of short struck notes, one after the other."""
+    return [hit(wave, pitch, each * 1.6, start + index * each, volume, **more) for index, pitch in enumerate(pitches)]
+
+
+def muffled(effect, cutoff):
+    """The same effect heard through a wall: every voice muffled."""
+    return [dict(voice, lowpass=min(voice["lowpass"] or cutoff, cutoff), lowpass_to=None) for voice in effect]
+
+
+def scattered(wave, count, start, spread, low, high, length, volume, seed, **more):
+    """`count` short struck voices at times and pitches that look random, but are always the same."""
+    voices = []
+    register = seed
+    for _ in range(count):
+        register = noise_bit(noise_bit(noise_bit(register)))
+        when = start + spread * ((register % 97) / 97)
+        register = noise_bit(noise_bit(register))
+        pitch = low + (high - low) * ((register % 89) / 89)
+        voices.append(hit(wave, pitch, length, when, volume, **more))
+    return voices
+
+
+EFFECTS = {
+    # The puzzles
+    "blip": [hit("pulse25", 1047, 0.07), hit("triangle", 523, 0.07, volume=0.6)],          # a tile lights up
+    "ding": [hit("pulse25", 784, 0.08), hit("pulse25", 1175, 0.35, 0.07, vibrato=(7, 0.15)),
+             hit("triangle", 392, 0.42, volume=0.7)],                                       # a phase is complete
+    "fanfare": notes("square", [523, 659, 784], 0.08, volume=0.7)                           # the puzzle is solved
+    + [layer("square", 1047, 0.3, 0.24, 0.7, decay=0.1, sustain=0.6, release=0.15, vibrato=(6, 0.2))]
+    + notes("triangle", [262, 330, 392], 0.08) + [layer("triangle", 523, 0.3, 0.24, release=0.15)],
+    "buzz": [layer("pulse12", 98, 0.12, release=0.01), layer("metal", 1800, 0.12, volume=0.35, lowpass=2500),
+             layer("pulse12", 98, 0.3, 0.16, decay=0.3, sustain=0.2, release=0.05, to=82),
+             layer("metal", 1800, 0.3, 0.16, volume=0.35, lowpass=2500, decay=0.3, sustain=0.1)],  # BZZZ: a mistake
+    "clue": notes("pulse12", [988, 1319, 1976], 0.05) + notes("pulse12", [988, 1319, 1976], 0.05, 0.09, 0.3)
+    + [hit("triangle", 1976, 0.25, 0.1, 0.5)],                                              # a new clue: a chime and its echo
+    # The crab
+    "crab_wake": [layer("triangle", 98, 0.6, to=55, decay=0.2, sustain=0.7, release=0.2),   # the statue cracks
+                  layer("noise", 900, 0.5, volume=0.8, lowpass=400, decay=0.5, sustain=0.0, tremolo=(18, 0.6)),
+                  hit("metal", 3000, 0.06, 0.0, 0.6, highpass=1500), hit("pulse12", 147, 0.35, 0.45, 0.6)],
+    "knocked": [layer("pulse25", 392, 0.3, to=110, decay=0.3, sustain=0.0, release=0.02),  # the crab knocks a player down
+                hit("noise", 1500, 0.08, 0.0, 0.8, lowpass=600), hit("triangle", 131, 0.3, 0.05, 0.9)],
+    "revived": notes("pulse25", [523, 784], 0.06)                                           # back on their feet
+    + [layer("pulse25", 1047, 0.15, 0.12, to=1319, decay=0.1, sustain=0.5, release=0.08)]
+    + notes("triangle", [262, 392, 523], 0.06, volume=0.7),
+    "knocked_out": [layer("pulse25", pitch, 0.18, 0.16 * index, decay=0.15, sustain=0.5, release=0.05,
+                          vibrato=(5, 0.3) if index == 3 else None)
+                    for index, pitch in enumerate((330, 262, 196, 131))]                     # a player is out of the game
+    + [layer("triangle", 65, 0.6, 0.48, decay=0.5, sustain=0.3, release=0.2)],
+    # Its claws on the floor: two dry clicks of chitin
+    "claw_click": [hit("metal", 5000, 0.012, 0.0, 0.7, highpass=2500), hit("pulse12", 2200, 0.02, 0.0, 0.4, to=1400),
+                   hit("metal", 4500, 0.012, 0.045, 0.6, highpass=2500), hit("pulse12", 1900, 0.02, 0.045, 0.35, to=1200)],
+    # The crab charges: a hiss and a clatter
+    "crab_charge": [layer("noise", 7000, 0.3, volume=0.6, highpass=2500, decay=0.3, sustain=0.0, tremolo=(30, 0.5)),
+                    hit("pulse12", 330, 0.2, 0.0, 0.5, to=660)]
+    + scattered("metal", 5, 0.02, 0.25, 4000, 6000, 0.012, 0.5, 31, highpass=2500),
+    # The abilities
+    "ability": [layer("pulse12", 659, 0.16, to=1976, decay=0.12, sustain=0.4, release=0.05),  # a quick rising run
+                hit("triangle", 330, 0.18, volume=0.6, to=988)],
+    "zap": [layer("pulse12", 1568, 0.3, to=2349, vibrato=(28, 2.0), decay=0.25, sustain=0.2, release=0.06),
+            layer("metal", 6000, 0.25, volume=0.4, highpass=3000, decay=0.25, sustain=0.0),
+            hit("triangle", 196, 0.15, volume=0.6)],                                         # the wizard's ray crackles
+    "dash": [layer("noise", 9000, 0.22, volume=0.9, lowpass=600, lowpass_to=7000, attack=0.03, decay=0.15,
+                   sustain=0.0, release=0.04),                                               # Flash's dash: a rush of air
+             layer("pulse25", 300, 0.14, volume=0.35, to=1300, decay=0.12, sustain=0.0)],
+    "drop": [hit("triangle", 330, 0.12, to=150), hit("noise", 3000, 0.03, 0.0, 0.5, lowpass=2000)],  # an item on the floor
+    # The game
+    "thunder": [hit("noise", 12000, 0.06, 0.0, 1.0, highpass=2000),                          # the bolt that opens the game
+                layer("noise", 4000, 1.3, 0.03, 1.0, lowpass=3000, lowpass_to=250, attack=0.01, decay=1.2,
+                      sustain=0.0, tremolo=(9, 0.4)),
+                layer("triangle", 55, 1.2, 0.05, to=36, decay=1.1, sustain=0.0)],
+    # The statue crumbles: a crack, a deep rumble that falls, grinding, and pebbles bouncing
+    "crumble": [hit("metal", 2500, 0.05, 0.0, 0.8, highpass=1200),
+                layer("triangle", 70, 0.9, to=40, decay=0.8, sustain=0.0, release=0.1),
+                layer("noise", 1200, 0.9, volume=0.9, lowpass=500, lowpass_to=150, decay=0.85, sustain=0.0,
+                      tremolo=(13, 0.5))]
+    + scattered("noise", 9, 0.12, 0.7, 4000, 9000, 0.025, 0.45, 7, highpass=1800),
+    # The crab turns to stone: a grinding that slows down
+    "petrify": [layer("triangle", 70, 0.7, to=45, decay=0.6, sustain=0.2, release=0.1),
+                layer("noise", 800, 0.7, volume=0.8, lowpass=300, tremolo=(16, 0.7), decay=0.7, sustain=0.1)],
+    # The giant claw snaps shut: a dry crack, a ring of chitin, a thump
+    "snap": [hit("noise", 15000, 0.015, 0.0, 1.0, highpass=3000), hit("pulse12", 1800, 0.04, 0.0, 0.6, to=600),
+             hit("metal", 3500, 0.05, 0.01, 0.5, highpass=2000), hit("triangle", 90, 0.08, 0.0, 1.0, to=60)],
+    # The screen breaks like glass: a sharp burst, a ringing hiss and shards tinkling as they fall
+    "shatter": [hit("noise", 15000, 0.06, 0.0, 1.0, highpass=3500),
+                layer("metal", 9000, 0.5, 0.01, 0.6, highpass=2500, decay=0.5, sustain=0.0),
+                hit("triangle", 120, 0.06, 0.0, 0.7)]
+    + scattered("pulse12", 12, 0.03, 0.6, 2600, 5200, 0.06, 0.45, 99),
+    # Footsteps, on each floor, and in a puddle
+    "step_wood": [hit("triangle", 180, 0.06, to=110), hit("noise", 2000, 0.025, 0.0, 0.5, lowpass=1500)],
+    "step_stone": [hit("noise", 6000, 0.025, 0.0, 0.8, highpass=1500), hit("triangle", 260, 0.03, 0.0, 0.4, to=200)],
+    "step_tiles": [hit("pulse12", 1400, 0.018, 0.0, 0.5), hit("noise", 9000, 0.015, 0.0, 0.6, highpass=3000)],
+    "step_earth": [hit("noise", 1500, 0.05, 0.0, 0.8, lowpass=700), hit("triangle", 110, 0.03, 0.0, 0.5)],
+    "step_puddle": [layer("noise", 9000, 0.13, volume=0.8, lowpass=3000, lowpass_to=700, decay=0.13, sustain=0.0),
+                    hit("triangle", 600, 0.06, 0.02, 0.5, to=1300), hit("triangle", 800, 0.04, 0.08, 0.3, to=1500)],
+    # A door that does not open: a dull thud on the wood, and the bars or the lock rattle
+    "locked": [hit("triangle", 110, 0.14, to=65), hit("noise", 2000, 0.05, 0.0, 0.8, lowpass=900)]
+    + [hit("metal", 4000, 0.02, when, 0.45, highpass=2000) for when in (0.07, 0.12, 0.16)],
+}
+EFFECTS["claw_click_far"] = muffled(EFFECTS["claw_click"], 900)  # in the next room, through the wall
+
+E2, G2, A2, BB2, CS3, D3 = 82.4, 98.0, 110.0, 116.5, 138.6, 146.8
+CHASE_BASS = (E2, E2, E2, G2, E2, E2, BB2, A2, E2, E2, E2, G2, E2, E2, D3, CS3)  # sixteen eighths, two bars
+
+
+def chase(eighth, near=False):
+    """The music of a chase, (length, voices): a deep triangle ostinato in E that leans on its tritone,
+    a hissing hi-hat on every eighth and a snare on the beats, a stab of the tritone at each bar.
+    Near, it is faster, the hats are sharper and a nervous pulse ticks over it."""
+    voices = []
+    for index, pitch in enumerate(CHASE_BASS):
+        when = index * eighth
+        voices.append(hit("triangle", pitch, eighth * 0.9, when, 1.0))
+        voices.append(hit("noise", 11000, 0.03, when, 0.25 if index % 2 == 0 else 0.4, highpass=5000))
+        if index % 4 == 2:
+            voices.append(hit("noise", 3000, 0.09, when, 0.55, lowpass=4000))
+        if index % 8 == 0:
+            voices += [hit("pulse12", 330, eighth * 0.6, when, 0.35), hit("pulse12", 466, eighth * 0.6, when, 0.3)]
+        if near:
+            voices.append(hit("pulse25", 659 if index % 2 == 0 else 622, eighth * 0.4, when + eighth / 2, 0.22))
+    return (len(CHASE_BASS) * eighth, voices)
+
+
+LOOPS = {
+    # The sea on the deck: deep surf that swells and falls twice in four seconds, and the hiss of foam
+    "sea": (4.0, [layer("noise", 3000, 4.0, volume=0.9, lowpass=500, attack=0.0, release=0.0, tremolo=(0.5, 0.7)),
+                  layer("noise", 12000, 4.0, volume=0.25, lowpass=4000, highpass=1500, attack=0.0, release=0.0,
+                        tremolo=(0.5, 0.9))]),
+    # Water dripping in the dark: drops and their echo, now and then, on a breath of cave air
+    "drips": (6.0, [layer("noise", 2000, 6.0, volume=0.12, lowpass=300, attack=0.0, release=0.0)]
+              + [hit("triangle", pitch, 0.05, when, 0.5, to=pitch * 1.7) for when, pitch in
+                 ((0.6, 900), (2.9, 1100), (4.4, 820))]
+              + [hit("triangle", pitch, 0.05, when + 0.09, 0.15, to=pitch * 1.7) for when, pitch in
+                 ((0.6, 900), (2.9, 1100), (4.4, 820))]),
+    # A machine hums: the mains, its overtones, and a faint crackle
+    "hum": (1.0, [layer("triangle", 60, 1.0, attack=0.0, release=0.0, vibrato=(3, 0.05)),
+                  layer("pulse12", 120, 1.0, volume=0.25, attack=0.0, release=0.0, lowpass=900),
+                  layer("pulse25", 180, 1.0, volume=0.1, attack=0.0, release=0.0, lowpass=900, tremolo=(2, 0.5)),
+                  layer("metal", 8000, 1.0, volume=0.06, attack=0.0, release=0.0, highpass=4000, tremolo=(7, 0.9))]),
+}
+LOOPS["sea_far"] = (LOOPS["sea"][0], muffled(LOOPS["sea"][1], 250))  # the sea from inside the ship
+LOOPS["chase"] = chase(60 / 140 / 2)               # the crab is after you: 140 beats a minute...
+LOOPS["chase_near"] = chase(60 / 180 / 2, near=True)  # ...and when it is close, 180
+
+_loaded = {}    # effect or loop name -> pygame Sound, once load() has run with audio
+_loops = {}     # slot -> list of the loops playing in it (see loop)
+_free = []      # the reserved channels no loop is using
+
+
+def envelope(voice, time):
+    """The level of a voice `time` seconds after it starts (ADSR), in STEPS steps, from 0 to 1."""
+    length = voice["length"]
+    attack, decay, sustain, release = voice["attack"], voice["decay"], voice["sustain"], voice["release"]
+    if time < attack:
+        level = time / attack
+    elif time < attack + decay:
+        level = 1 - (1 - sustain) * (time - attack) / decay
+    else:
+        level = sustain
+    if time >= length:
+        held = envelope(voice, length - 1e-9) if length > 0 else 0.0
+        level = held * (1 - (time - length) / release) if release > 0 and time < length + release else 0.0
+    return math.ceil(max(level, 0.0) * STEPS - 1e-9) / STEPS
+
+
+def pitch(voice, time):
+    """The frequency of a voice at `time`: its glide toward `to`, and its vibrato."""
+    frequency = voice["freq"]
+    if voice["to"]:
+        span = voice["sweep"] or voice["length"]
+        share = min(time / span, 1.0) if span > 0 else 1.0
+        frequency *= (voice["to"] / voice["freq"]) ** share  # a glide by equal steps of pitch
+    if voice["vibrato"]:
+        rate, depth = voice["vibrato"]
+        frequency *= 2 ** (depth * math.sin(2 * math.pi * rate * time) / 12)
+    return frequency
+
+
+def one_pole(cutoff, rate):
+    """How much a one-pole lowpass filter moves toward its input at each sample."""
+    return 1 - math.exp(-2 * math.pi * min(cutoff, rate * 0.45) / rate)
+
+
+def voice_samples(voice, rate):
+    """One voice, alone, as floats from -1 to 1, from its start to the end of its release."""
+    count = int((voice["length"] + voice["release"]) * rate)
+    out = [0.0] * count
+    wave = voice["wave"]
+    noisy = wave in ("noise", "metal")
+    short = wave == "metal"
+    duty = DUTIES.get(wave, 0.5)
+    phase = 0.0
     register = NOISE_SEED
-    for frequency, length in notes:
-        count = int(rate * length)
-        step = -1
-        for index in range(count):
-            value = 0
-            if frequency > 0:
-                # Half of each period up, half down: a square wave.
-                up = (2 * index * frequency // rate) % 2 == 0
-                value = peak if up else -peak
-            elif frequency < 0:
-                # Noise: a new random level -frequency times a second, held in between.
-                now = index * -frequency // rate
-                if now != step:
-                    step = now
-                    register = noise_bit(register)
-                value = peak if register & 1 else -peak
-            if frequency != 0:
-                left = count - index
-                if left < fade:
-                    value = value * left // fade
-            data.extend([value] * channels)
+    level_now = 1.0 if register & 1 else -1.0
+    low = voice["lowpass"]
+    high = voice["highpass"]
+    low_y = high_y = high_x = 0.0
+    high_a = math.exp(-2 * math.pi * high / rate) if high else 0.0
+    tremolo = voice["tremolo"]
+    volume = voice["volume"]
+    for block in range(0, count, BLOCK):
+        time = block / rate
+        gain = envelope(voice, time) * volume
+        if tremolo:
+            gain *= 1 - tremolo[1] * (0.5 + 0.5 * math.cos(2 * math.pi * tremolo[0] * time))
+        step = pitch(voice, time) / rate
+        low_a = None
+        if low:
+            cutoff = low
+            if voice["lowpass_to"]:
+                cutoff = low * (voice["lowpass_to"] / low) ** min(time / voice["length"], 1.0)
+            low_a = one_pole(cutoff, rate)
+        for index in range(block, min(block + BLOCK, count)):
+            phase += step
+            if noisy:
+                while phase >= 1.0:
+                    phase -= 1.0
+                    register = noise_bit(register, short)
+                    level_now = 1.0 if register & 1 else -1.0
+                value = level_now
+            else:
+                phase -= int(phase)
+                if wave == "triangle":
+                    value = TRIANGLE[int(phase * 32)] / 7.5 - 1.0
+                else:
+                    value = 1.0 if phase < duty else -1.0
+            if low_a is not None:
+                low_y += low_a * (value - low_y)
+                value = low_y
+            if high:
+                high_y = high_a * (high_y + value - high_x)
+                high_x = value
+                value = high_y
+            out[index] = value * gain
+    return out
+
+
+def render(voices, rate, length=None):
+    """All the voices of an effect mixed, as floats; `length` in seconds, else until the last one ends."""
+    if length is None:
+        length = max(voice["start"] + voice["length"] + voice["release"] for voice in voices)
+    mix = [0.0] * int(length * rate)
+    for voice in voices:
+        start = int(voice["start"] * rate)
+        for index, value in enumerate(voice_samples(voice, rate), start):
+            if index < len(mix):
+                mix[index] += value
+    return mix
+
+
+def seamless(mix, rate):
+    """A loop that fades into its own start: its last LOOP_FADE seconds mixed into its first, and cut."""
+    overlap = int(LOOP_FADE * rate)
+    body = mix[:len(mix) - overlap]
+    tail = mix[len(mix) - overlap:]
+    for index, value in enumerate(tail):
+        share = index / overlap
+        body[index] = body[index] * share + value * (1 - share)
+    return body
+
+
+def pcm(mix, channels=1, repeat=1):
+    """Floats as signed 16-bit samples: loudness MASTER, gently saturated rather than clipped,
+    each sample held `repeat` times (to fill a faster mixer) and repeated on every channel."""
+    data = array.array("h")
+    width = channels * repeat
+    for value in mix:
+        value = value / (1 + abs(value) * 0.25)  # many voices together bend, they do not crack
+        data.extend([int(max(-1.0, min(1.0, value * MASTER)) * 32767)] * width)
     return data
+
+
+def loop_samples(length, voices, rate):
+    """A loop as floats: the voices that last the whole loop go on past its end for LOOP_FADE seconds
+    (they are periodic: the same as its start), the short ones of its first LOOP_FADE seconds come
+    again after its end, and that end fades into the start: it sounds the same all the way round."""
+    longer = [dict(voice, length=voice["length"] + LOOP_FADE) if voice["length"] >= length else voice
+              for voice in voices]
+    again = [dict(voice, start=voice["start"] + length) for voice in voices
+             if voice["length"] < length and voice["start"] < LOOP_FADE]
+    return seamless(render(longer + again, rate, length + LOOP_FADE), rate)
+
+
+
+def effect_length(voices):
+    """How long an effect lasts, in seconds."""
+    return max(voice["start"] + voice["length"] + voice["release"] for voice in voices)
 
 
 def load():
     """Make the sounds for the running mixer. Without audio, or with samples that are not 16-bit, there are none."""
     _loaded.clear()
+    _loops.clear()
+    _free.clear()
     settings = pygame.mixer.get_init()
     if settings is None:
         return
     rate, size, channels = settings
     if size != -16:
         return
-    for name, notes in EFFECTS.items():
-        _loaded[name] = pygame.mixer.Sound(buffer=samples(notes, rate, channels).tobytes())
+    repeat = max(1, round(rate / RENDER_RATE))
+    made = rate / repeat
+    for name, voices in EFFECTS.items():
+        _loaded[name] = pygame.mixer.Sound(buffer=pcm(render(voices, made), channels, repeat).tobytes())
+    for name, (length, voices) in LOOPS.items():
+        _loaded[name] = pygame.mixer.Sound(buffer=pcm(loop_samples(length, voices, made), channels, repeat).tobytes())
+    if pygame.mixer.get_num_channels() < LOOP_CHANNELS + 8:
+        pygame.mixer.set_num_channels(LOOP_CHANNELS + 8)
+    pygame.mixer.set_reserved(LOOP_CHANNELS)  # play() never takes these: they are the loops'
+    _free.extend(pygame.mixer.Channel(index) for index in range(LOOP_CHANNELS))
 
 
-def play(name):
-    """Play an effect. An unknown name, None or a game without audio make no sound."""
+def sides(volume, pan):
+    """The volume of the left and the right speaker for a sound `pan` from the middle (-1 all
+    left, 1 all right): as loud in the middle as at either side (equal power)."""
+    angle = (max(-1.0, min(1.0, pan)) + 1) * math.pi / 4
+    volume = max(0.0, min(1.0, volume))
+    return (min(1.0, math.sqrt(2) * math.cos(angle)) * volume, min(1.0, math.sqrt(2) * math.sin(angle)) * volume)
+
+
+def play(name, volume=1.0, pan=0.0):
+    """Play an effect, `volume` from 0 to 1 and `pan` from -1 (left) to 1 (right). An unknown name,
+    None or a game without audio make no sound."""
     sound = _loaded.get(name)
-    if sound is not None:
-        sound.play()
+    if sound is None or volume <= 0:
+        return
+    channel = pygame.mixer.find_channel(True)  # the oldest one if all are busy: never one of the loops
+    if channel is None:
+        return
+    channel.play(sound)
+    channel.set_volume(*sides(volume, pan))
+
+
+def loop(slot, name, volume=1.0, pan=0.0):
+    """What a loop slot should play now (or None: nothing), how loud and where. A new loop fades
+    in on a channel of its own while the old one fades out; the same loop only changes volume and
+    pan, smoothly. The fades happen in update_loops, once a frame."""
+    playing = _loops.setdefault(slot, [])
+    for sound in playing:
+        sound["target"] = volume if sound["name"] == name else 0.0
+        if sound["name"] == name:
+            sound["pan"] = pan
+    if name is None or any(sound["name"] == name for sound in playing):
+        return
+    entry = {"name": name, "gain": 0.0, "target": volume, "pan": pan, "channel": None}
+    if name in _loaded and _free:
+        entry["channel"] = _free.pop()
+        entry["channel"].play(_loaded[name], loops=-1)
+        entry["channel"].set_volume(0.0, 0.0)
+    playing.append(entry)
+
+
+def update_loops(frames=LOOP_FADE_FRAMES):
+    """Once a frame: each loop moves its volume a step toward what loop() asked, over `frames`
+    frames; a loop faded out stops and gives its channel back."""
+    step = 1.0 / frames
+    for slot, playing in _loops.items():
+        for sound in list(playing):
+            if sound["gain"] < sound["target"]:
+                sound["gain"] = min(sound["target"], sound["gain"] + step)
+            else:
+                sound["gain"] = max(sound["target"], sound["gain"] - step)
+            if sound["channel"] is not None:
+                sound["channel"].set_volume(*sides(sound["gain"], sound["pan"]))
+            if sound["gain"] <= 0 and sound["target"] <= 0:
+                if sound["channel"] is not None:
+                    sound["channel"].stop()
+                    _free.append(sound["channel"])
+                playing.remove(sound)
+
+
+def loop_volume(slot, name):
+    """How loud a loop plays in its slot right now (0 if it does not)."""
+    return sum(sound["gain"] for sound in _loops.get(slot, []) if sound["name"] == name)
 
 
 ================================================================================
@@ -14921,10 +15923,24 @@ def in_hold(app):
 
 @pytest.fixture
 def heard(monkeypatch):
-    """The names of the sounds played, in order."""
-    played = []
-    monkeypatch.setattr(sounds, "play", played.append)
+    """The names of the sounds played, in order, but for the footsteps and the clicks of the crab's
+    claws, which go on all the time; `.how` has (name, volume, pan) of every sound, those included."""
+    played = Heard()
+
+    def play(name, volume=1.0, pan=0.0):
+        if name is not None and not name.startswith(("step_", "claw_click")):
+            played.append(name)
+        played.how.append((name, volume, pan))
+    monkeypatch.setattr(sounds, "play", play)
     return played
+
+
+class Heard(list):
+    """The names of the sounds played, and how loud and from where each one was."""
+
+    def __init__(self):
+        super().__init__()
+        self.how = []
 
 
 def lit_tiles(state):
@@ -17747,7 +18763,7 @@ def test_the_easy_crab_decides_only_in_the_middle_of_a_tile_and_never_turns_back
             turns += 1
             tile = main.tile_of(crab["pos"])
             body = main.crab_rect(crab)
-            assert pygame.Vector2(body.center).distance_to(main.tile_rect(*tile).center) <= main.EASY_CRAB_SPEED + 1  # a pixel
+            assert pygame.Vector2(body.center).distance_to(main.tile_rect(*tile).center) <= main.CRAB_SPEED + 1  # a pixel
             if crab["heading"] == (-before[0], -before[1]):  # back only where the way ends
                 ways = [way for way in main.HEADINGS if (tile[0] + way[0], tile[1] + way[1]) in free]
                 assert ways == [crab["heading"]]
@@ -17870,20 +18886,17 @@ def test_the_hard_crab_is_the_one_of_always(app):
 # --- The easy crab's speed, the dash, the spell, the stone, the rubble, the ending for both ---
 
 
-def test_the_easy_crab_is_faster_than_the_hard_one_and_slower_than_the_players(app):
-    assert main.CRAB_SPEED < main.EASY_CRAB_SPEED < main.PLAYER_SPEED
+def test_the_easy_crab_is_as_slow_as_the_hard_one(app):
     two_playing(app, FIRST_HALF)
     easy(app)
     awake_crab(app)
     p1(app)["pos"] = free_spot(app, 4, 20)
     app["players"][1]["pos"] = free_spot(app, 4, 20)
-    steps = []
     for _ in range(60):
         last = app["crab"]["pos"]
         main.update(app, 0, 0)
-        steps.append((pygame.Vector2(app["crab"]["pos"]) - pygame.Vector2(last)).length())
-    assert max(steps) <= main.EASY_CRAB_SPEED + 1.01  # a pixel of rounding
-    assert sum(steps) > 60 * main.CRAB_SPEED  # it covers more ground than the hard one could
+        assert (pygame.Vector2(app["crab"]["pos"]) - pygame.Vector2(last)).length() <= main.CRAB_SPEED + 1.01  # a pixel
+    assert not hasattr(main, "EASY_CRAB_SPEED")
 
 
 def test_a_dashing_flash_on_the_other_computer_leaves_afterimages_here(app):
@@ -17997,6 +19010,479 @@ def test_the_choice_of_the_crab_is_two_frames_side_by_side(app):
     press(app, pygame.K_RETURN)
     assert app["difficulty"] == "hard"
     main.end_network(app)
+
+
+
+# --- Sound: the rooms, the footsteps, the crab wherever it is ---
+
+
+@pytest.fixture
+def looped(monkeypatch):
+    """What each loop slot was last asked to play: slot -> (name, volume, pan)."""
+    asked = {}
+    monkeypatch.setattr(sounds, "loop", lambda slot, name, volume=1.0, pan=0.0: asked.__setitem__(slot, (name, volume, pan)))
+    return asked
+
+
+def test_each_room_has_its_quiet_sound(app, looped):
+    for room, bed in (("deck", "sea"), ("cabin", "sea_far"), ("galley", "sea_far"), ("corridor", "drips"),
+                      ("hold", "drips"), ("mine", "drips")):
+        scenery_room(app, room)
+        main.update(app, 0, 0)
+        assert looped["bed"][0] == bed, room
+        assert 0 < looped["bed"][1] <= 0.6
+    assert main.ambience(app)[0][1] == main.DRIPS_VOLUME
+    main.open_main_menu(app)
+    main.update(app, 0, 0)
+    assert looped["bed"][0] is None and looped["hum"][0] is None  # no game: silence
+
+
+def test_the_machines_hum_louder_as_the_player_comes_near_from_their_side(app):
+    scenery_room(app, "cabin")
+    generator = main.thing_rect("generator_d")  # on the right of the cabin
+    p1(app)["pos"] = free_spot(app, 16, 9)
+    near = main.ambience(app)[1]
+    p1(app)["pos"] = free_spot(app, 12, 9)
+    far = main.ambience(app)[1]
+    assert near[0] == far[0] == "hum" and near[1] > far[1] and near[2] > 0  # to the right
+    assert generator.centerx > main.player_rect(free_spot(app, 16, 9)).centerx
+    scenery_room(app, "corridor_end")
+    ring = main.thing_rect("corridor_portal")
+    p1(app)["pos"] = (ring.centerx - main.PLAYER_SIZE // 2, ring.bottom + 4)
+    hum = main.ambience(app)[1]
+    assert hum is not None and hum[1] > 0.5 * main.HUM_VOLUME  # the portal hums too
+
+
+def test_the_room_sounds_fade_into_each_other_at_a_door(app, monkeypatch):
+    monkeypatch.setattr(pygame.mixer, "get_init", lambda: None)
+    sounds.load()
+    sounds._loops.clear()
+    try:
+        scenery_room(app, "deck")
+        for _ in range(sounds.LOOP_FADE_FRAMES + 2):
+            main.update(app, 0, 0)
+        assert sounds.loop_volume("bed", "sea") == pytest.approx(main.SEA_VOLUME)
+        app["state"]["room"] = "cabin"  # through the door
+        main.update(app, 0, 0)
+        assert 0 < sounds.loop_volume("bed", "sea") < main.SEA_VOLUME  # going...
+        assert 0 < sounds.loop_volume("bed", "sea_far")                 # ...as the other one comes
+        for _ in range(sounds.LOOP_FADE_FRAMES + 2):
+            main.update(app, 0, 0)
+        assert sounds.loop_volume("bed", "sea") == 0
+        assert sounds.loop_volume("bed", "sea_far") == pytest.approx(main.SEA_INSIDE_VOLUME)
+    finally:
+        sounds._loops.clear()
+
+
+def walk(app, frames, dx=1, dy=0):
+    for _ in range(frames):
+        main.update(app, dx, dy)
+
+
+def test_footsteps_sound_like_the_floor_and_splash_in_puddles(app, heard):
+    scenery_room(app, "deck", tile=(4, 6))
+    walk(app, 4 * main.WALK_STEP_FRAMES)
+    steps = [how for how in heard.how if how[0].startswith("step_")]
+    assert {name for name, _, _ in steps} == {"step_wood"} and 3 <= len(steps) <= 5  # one each step
+    assert all(volume == main.STEP_VOLUME and pan == 0 for _, volume, pan in steps)
+    heard.how.clear()
+    scenery_room(app, "hold", actions=TINCTURES_FOUND, tile=(3, 3))
+    walk(app, 3 * main.WALK_STEP_FRAMES, 0, 1)
+    assert "step_stone" in {how[0] for how in heard.how}
+    heard.how.clear()
+    scenery_room(app, "corridor")
+    puddle = main.thing_rect("corridor_puddle_1")
+    seen = main.view(app)
+    p1(app)["pos"] = (puddle.centerx - main.PLAYER_SIZE // 2, puddle.bottom - main.PLAYER_SIZE)
+    assert main.step_sound(seen, p1(app)) == "step_puddle"
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    assert main.step_sound(seen, p1(app)) == "step_stone"
+    heard.how.clear()
+    walk(app, 10, 0, 0)
+    assert not any(how[0].startswith("step_") for how in heard.how)  # standing still: silence
+
+
+def test_the_partners_footsteps_come_from_their_side(app, heard):
+    two_playing(app, FIRST_HALF)
+    p1(app)["pos"] = free_spot(app, 3, 10)
+    partner = app["players"][1]
+    partner["pos"] = free_spot(app, 13, 10)
+    main.update(app, 0, 0)
+    for walked in range(1, 3 * main.WALK_STEP_FRAMES):
+        main.take_player_info(partner, dict(main.player_info(partner), moving=True, walk=walked))
+        main.update(app, 0, 0)
+    steps = [how for how in heard.how if how[0] == "step_wood"]
+    assert len(steps) >= 2 and all(pan > 0 and volume < main.STEP_VOLUME for _, volume, pan in steps)
+
+
+def test_a_locked_door_thuds_when_walked_into(app, heard):
+    start_new_game(app)
+    p1(app)["pos"] = main.spawn_in_front_of("deck_to_crab")
+    side = story.DOORS["deck_to_crab"]["side"]
+    dx, dy = main.TOWARD[side]
+    walk(app, 30, dx, dy)
+    assert "locked" in heard
+
+
+def crab_in(app, room, at):
+    crab = main.new_crab()
+    crab.update(room=room, pos=at, wait=0, moving=True)
+    app["crab"] = crab
+
+
+def test_the_crabs_claws_come_from_where_it_is_and_louder_nearer(app, heard, monkeypatch):
+    two_playing(app, FIRST_HALF)
+    monkeypatch.setattr(main, "update_crab", lambda app: None)  # the test moves it
+    p1(app)["pos"] = free_spot(app, 7, 10)
+    app["players"][1]["pos"] = free_spot(app, 7, 20)
+    me = main.player_rect(p1(app)["pos"])
+    crab_in(app, "deck", (me.x + 6 * main.TILE, me.y))
+    for _ in range(main.CLAW_CLICK_EVERY):
+        main.update(app, 0, 0)
+    far = [how for how in heard.how if how[0] == "claw_click"]
+    assert len(far) == 1 and far[0][2] > 0  # on the right
+    crab_in(app, "deck", (me.x - 5 * main.TILE, me.y))
+    heard.how.clear()
+    for _ in range(main.CLAW_CLICK_EVERY):
+        main.update(app, 0, 0)
+    near = [how for how in heard.how if how[0] == "claw_click"]
+    assert near[0][2] < 0 and near[0][1] > far[0][1]  # on the left, nearer: louder
+    app["crab"]["moving"] = False
+    heard.how.clear()
+    main.update(app, 0, 0)
+    for _ in range(main.CLAW_CLICK_EVERY):
+        main.update(app, 0, 0)
+    assert heard.how == []  # standing still: silent
+
+
+def test_when_the_crab_charges_its_claws_click_faster_with_a_hiss(app, heard, monkeypatch):
+    two_playing(app, FIRST_HALF)
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    p1(app)["pos"] = free_spot(app, 7, 10)
+    app["players"][1]["pos"] = free_spot(app, 7, 20)
+    me = main.player_rect(p1(app)["pos"])
+    crab_in(app, "deck", (me.x + 2 * main.TILE, me.y))
+    frames = 4 * main.CLAW_CLICK_EVERY
+    for _ in range(frames):
+        main.update(app, 0, 0)
+    clicks = [how for how in heard.how if how[0] == "claw_click"]
+    assert len(clicks) > frames // main.CLAW_CLICK_EVERY
+    assert heard.count("crab_charge") == 1  # once, not every frame
+
+
+def test_in_the_next_room_the_crab_is_heard_muffled_from_the_door(app, heard, monkeypatch):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    p1(app)["pos"] = free_spot(app, 4, 9)
+    crab_in(app, "deck", main.spawn_in_front_of("deck_to_cabin"))
+    for _ in range(main.CLAW_CLICK_EVERY):
+        main.update(app, 0, 0)
+    far = [how for how in heard.how if how[0].startswith("claw_click")]
+    assert [name for name, _, _ in far] == ["claw_click_far"] and far[0][1] == main.NEXT_ROOM_VOLUME
+    door = main.door_rect("cabin_to_deck")
+    assert (far[0][2] > 0) == (door.centerx > main.player_rect(p1(app)["pos"]).centerx)
+    crab_in(app, "hold", main.spawn_at_entry("hold"))  # two rooms away: nothing
+    heard.how.clear()
+    for _ in range(main.CLAW_CLICK_EVERY):
+        main.update(app, 0, 0)
+    assert not any(how[0].startswith("claw_click") for how in heard.how)
+
+
+def test_the_listener_is_the_partner_once_this_player_is_out(app):
+    two_playing(app, FIRST_HALF)
+    assert main.listener(app) is p1(app)
+    app["state"] = engine.knock_out(app["state"], 1)[0]
+    assert main.listener(app) is app["players"][1]
+    volume, pan = main.hearing(app, main.player_rect(app["players"][1]["pos"]).center)
+    assert volume == 1.0 and pan == 0.0
+
+
+# --- The crab's looks: its pose, its shadow, the dust of its legs, its burning eyes ---
+
+
+def crab_on_deck(app, monkeypatch, player_at=(3, 18), crab_moving=True):
+    """A game for two on the deck with the crab awake, moved only by the test."""
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    p1(app)["pos"] = free_spot(app, *player_at)
+    app["players"][1]["pos"] = free_spot(app, 13, 3)
+    app["crab"]["moving"] = crab_moving
+    return app["crab"]
+
+
+def test_the_crab_walks_its_legs_and_works_its_claws_as_it_chases(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch)
+    legs, openings = set(), []
+    for walked in range(2 * main.CRAB_CLAW_PERIOD):
+        crab["walk"] = walked
+        main.update(app, 0, 0)
+        pose = main.crab_pose(app)
+        legs.add(pose["legs"])
+        openings.append(app["crab_claws"])
+        assert pose["eyes"] == "hunt"
+    assert legs == {0, 1, 2, 3}
+    assert min(openings) < 0.1 and max(openings) > 0.4  # they open and shut...
+    assert all(abs(b - a) <= main.CRAB_CLAW_SPEED + 1e-9 for a, b in zip(openings, openings[1:]))  # ...smoothly
+    assert main.crab_pose(app)["look"][0] == -1  # it looks at its prey, on its left
+
+
+def test_the_crab_gapes_and_shivers_before_it_lunges(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch)
+    body = main.crab_rect(crab)
+    p1(app)["pos"] = (body.x - 2 * main.TILE, body.y)
+    assert main.crab_telegraph(app)
+    for _ in range(int(1 / main.CRAB_CLAW_SPEED) + 1):
+        main.update(app, 0, 0)
+    assert app["crab_lunging"] and main.crab_pose(app)["claws"] == 1.0  # wide open, once they got there
+    shivers = {main.CRAB_SHIVER[(frame // 3) % len(main.CRAB_SHIVER)] for frame in range(12)}
+    assert shivers == {-1, 0, 1}
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    p1(app)["pos"] = (body.x - main.CHARGE_DISTANCE - main.TILE // 2, body.y)  # just past the edge: still lunging
+    main.update(app, 0, 0)
+    assert app["crab_lunging"]
+    p1(app)["pos"] = (body.x - main.CHARGE_DISTANCE - 2 * main.TILE, body.y)  # a tile farther: it stops
+    main.update(app, 0, 0)
+    assert not app["crab_lunging"]
+    app["hidden"] = {1: 100, 2: 100}  # nobody to see: no lunge, calm eyes
+    assert not main.crab_telegraph(app) and main.crab_pose(app)["eyes"] == "calm"
+
+
+def test_standing_still_the_crab_breathes_and_stunned_it_is_dazed(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch, crab_moving=False)
+    breaths = {main.crab_pose(app | {"frame": frame})["breath"] for frame in range(main.CRAB_BREATH_FRAMES)}
+    assert breaths == {0, 1} and main.crab_pose(app)["legs"] == 1
+    crab["stun"] = 50
+    pose = main.crab_pose(app)
+    assert pose["eyes"] == "dazed" and pose["claws"] == 0.0
+
+
+def test_a_wide_shadow_anchors_the_crab_to_the_floor(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch, crab_moving=False)
+    body = main.crab_rect(crab)
+    under = (body.centerx - 6, body.bottom - 1)  # below the shell, between its legs
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    with_crab = sum(screen.get_at(under)[:3])
+    app["crab"] = None
+    main.draw_room(app, screen)
+    assert with_crab < sum(screen.get_at(under)[:3])
+    assert main.CRAB_SHADOW[0] > 2 * main.PLAYER_SIZE
+
+
+def test_its_legs_kick_up_foam_on_the_wet_deck_and_dust_indoors(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch)
+    app["fx"]["particles"].clear()
+    for _ in range(main.CRAB_DUST_EVERY * 2):
+        main.update(app, 0, 0)
+    colours = {one["color"] for one in app["fx"]["particles"]}
+    assert colours and colours <= set(main.CRAB_FOAM)
+    crab["moving"] = False
+    app["fx"]["particles"].clear()
+    for _ in range(main.CRAB_DUST_EVERY * 2):
+        main.update(app, 0, 0)
+    assert not app["fx"]["particles"]
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])
+    crab_in(app, "cabin", main.spawn_in_front_of("cabin_to_deck"))
+    app["fx"]["particles"].clear()
+    for _ in range(main.CRAB_DUST_EVERY * 2):
+        main.update(app, 0, 0)
+    assert {one["color"] for one in app["fx"]["particles"]} & set(main.CRAB_DUST)
+
+
+def test_its_burning_eyes_glow_and_leave_streaks_when_it_charges(app, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch)
+    body = main.crab_rect(crab)
+    p1(app)["pos"] = (body.x - 2 * main.TILE, body.y)
+    for _ in range(3):
+        main.update(app, 0, 0)
+    assert app["crab_trail"] and all(streak["room"] == "deck" for streak in app["crab_trail"])
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    x, y = main.crab_place(crab)
+    for px, py in main.crab_look.eye_points(main.crab_pose(app)):
+        reds = [screen.get_at((x + px + shiver, y + py))[:3] for shiver in (-1, 0, 1)]  # it shivers by a pixel
+        assert any(r > 200 and r > b + 100 for r, g, b in reds)  # burning red
+    p1(app)["pos"] = free_spot(app, 3, 20)
+    for _ in range(main.CRAB_TRAIL_FRAMES + 1):
+        main.update(app, 0, 0)
+    assert app["crab_trail"] == []  # far again: the streaks fade away
+
+
+def test_the_crab_turns_to_stone_in_its_new_looks(app):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    main.update(app, 0, 0)
+    state = play_two(KEY_FUSED)
+    state["room"], state["flags"]["partner_room"] = "deck", "deck"
+    app["state"] = state
+    main.update(app, 0, 0)
+    stone = app["petrify"]
+    stone["age"] = main.PETRIFY_CRACK - 1
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    x, y = main.crab_place({"pos": stone["pos"]})
+    cx, cy = main.crab_look.CENTER
+    r, g, b = screen.get_at((x + cx, y + cy))[:3]
+    assert max(r, g, b) - min(r, g, b) < 40  # grey: the whole crab, in stone
+
+
+# --- The chase music, the red warning, the crab's footprint, players down never in its way ---
+
+
+def test_the_chase_music_plays_while_the_crab_hunts_nearby_and_fades_after(app, looped, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch, player_at=(4, 10))
+    me = main.player_rect(p1(app)["pos"])
+    app["players"][1]["pos"] = free_spot(app, 14, 22)
+    crab["pos"] = (me.x + (main.DASH_TILES - 1) * main.TILE, me.y)  # within the reach of Flash's dash
+    main.update(app, 0, 0)
+    assert looped["chase"] == ("chase", main.CHASE_VOLUME, 0.0)
+    bed = main.ambience(app)[0]
+    assert looped["bed"][1] == pytest.approx(bed[1] * main.CHASE_DUCK)  # the sea, quieter meanwhile
+    crab["pos"] = (me.x + 3 * main.TILE, me.y)
+    main.update(app, 0, 0)
+    assert looped["chase"][0] == "chase_near"  # close: faster
+    crab["pos"] = (me.x + (main.DASH_TILES + 3) * main.TILE, me.y)  # too far
+    for _ in range(main.CHASE_HOLD - 1):
+        main.update(app, 0, 0)
+        assert looped["chase"][0] == "chase"  # it goes on a little...
+    for _ in range(2):
+        main.update(app, 0, 0)
+    assert looped["chase"][0] is None  # ...then fades
+    assert looped["bed"][1] == pytest.approx(bed[1])
+    crab["pos"] = (me.x + 3 * main.TILE, me.y)
+    crab["stun"] = 100
+    app["chase_left"] = 0
+    main.update(app, 0, 0)
+    assert looped["chase"][0] is None  # stunned, it hunts nobody
+
+
+def test_the_chase_music_is_tense_and_faster_when_the_crab_is_close():
+    far_length, far = sounds.LOOPS["chase"]
+    near_length, near = sounds.LOOPS["chase_near"]
+    assert near_length < far_length  # the same sixteen eighths, faster
+    bass = [voice for voice in far if voice["wave"] == "triangle"]
+    assert len(bass) == 16 and min(voice["freq"] for voice in bass) < 90  # deep
+    stabs = {round(voice["freq"]) for voice in far if voice["wave"] == "pulse12"}
+    assert stabs == {330, 466}  # E and its tritone
+    assert any(voice["wave"] == "pulse25" for voice in near) and not any(voice["wave"] == "pulse25" for voice in far)
+
+
+def test_a_loop_of_short_hits_is_as_loud_at_its_start_as_later():
+    length, voices = sounds.LOOPS["chase"]
+    data = sounds.loop_samples(length, voices, 8000)
+    eighth = length / 16
+    first = max(abs(value) for value in data[:int(0.05 * 8000)])
+    ninth = max(abs(value) for value in data[int(8 * eighth * 8000):int((8 * eighth + 0.05) * 8000)])
+    assert first == pytest.approx(ninth, rel=0.2)  # the first beat is not faded in
+
+
+def test_the_sea_and_the_drips_are_quieter_and_the_drips_sparser():
+    assert main.SEA_INSIDE_VOLUME < main.SEA_VOLUME <= 0.35 and main.DRIPS_VOLUME <= 0.35
+    length, voices = sounds.LOOPS["drips"]
+    drops = [voice for voice in voices if voice["wave"] == "triangle" and voice["volume"] >= 0.3]
+    assert len(drops) / length <= 0.5  # a drop every two seconds or more
+
+
+def test_the_crab_glows_red_in_the_doorway_before_it_comes_in(app, monkeypatch):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    door = main.door_rect("deck_to_cabin")
+    crab_in(app, "deck", (door.centerx - 6, door.bottom + 2 * main.TILE))
+    warning = main.crab_warning(app)
+    assert warning is not None and warning[0] == "cabin_to_deck" and 0.4 < warning[1] < 1
+    app["crab"]["pos"] = (door.centerx - 6, door.bottom + main.TILE // 2)
+    assert main.crab_warning(app)[1] > warning[1]  # nearer: stronger
+    app["crab"]["pos"] = (door.centerx - 6, door.bottom + 8 * main.TILE)
+    assert main.crab_warning(app) is None  # far from the door: nothing yet
+    crab_in(app, "cabin", main.spawn_in_front_of("cabin_to_deck"))
+    app["crab"]["away"] = 10  # coming through
+    assert main.crab_warning(app) == ("cabin_to_deck", 1.0)
+    app["crab"]["away"] = 0
+    assert main.crab_warning(app) is None  # in: the crab itself is there to see
+
+
+def test_the_red_glow_shows_in_the_dark(app, monkeypatch):
+    two_playing(app, TINCTURES_FOUND, partner_room="corridor")
+    app["state"]["room"] = "corridor"
+    main.place_at_entry(app)
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    p1(app)["pos"] = free_spot(app, 14, 3)
+    app["players"][1]["pos"] = free_spot(app, 15, 3)
+    crab_in(app, "corridor", free_spot(app, 4, 3))
+    screen = pygame.Surface(main.room_surface("corridor").get_size())
+    main.draw_room(app, screen)
+    lit = screen.get_at(main.crab_rect(app["crab"]).midbottom)[:3]
+    monkeypatch.setitem(effects.FX, "lights", False)
+    main.draw_room(app, screen)
+    dark = screen.get_at(main.crab_rect(app["crab"]).midbottom)[:3]
+    assert lit[0] > dark[0] + 20 and lit[0] > lit[2]  # red, in the dark
+
+
+def test_the_crab_never_sinks_into_the_barrels(app):
+    never_inside = []
+    for difficulty in ("hard", "easy"):
+        two_playing(app, FIRST_HALF)
+        app["state"]["flags"]["crab_difficulty"] = difficulty
+        awake_crab(app)
+        p1(app)["pos"] = free_spot(app, 2, 3)
+        app["players"][1]["pos"] = free_spot(app, 1, 1)  # behind the barrels, in the corner
+        app["crab"]["pos"] = free_spot(app, 6, 6)
+        solids = main.solid_rects(main.room_state(app["state"], "deck"))
+        for _ in range(900):
+            main.update(app, 0, 0)
+            never_inside.append(main.crab_foot(app["crab"]["pos"]).collidelist(solids) == -1)
+            if len(app["downed"]) == 2 or app["state"]["ending"]:
+                break
+        assert len(app["downed"]) == 2 or app["state"]["ending"] == "caught", difficulty  # it got them both
+    assert all(never_inside)  # its footprint, wider than its body, never inside anything
+
+
+def test_a_player_down_is_never_in_the_crabs_way(app, monkeypatch):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    app["crab"]["pos"] = free_spot(app, 3, 16)
+    p1(app)["pos"] = free_spot(app, 7, 16)          # down, right in its way...
+    app["players"][1]["pos"] = free_spot(app, 11, 16)  # ...to the other one
+    app["downed"] = {1: main.DOWN_FRAMES}
+    crossed = False
+    for _ in range(600):
+        main.update(app, 0, 0)
+        crossed = crossed or main.crab_rect(app["crab"]).colliderect(main.player_rect(p1(app)["pos"]))
+        if 2 in app["downed"]:
+            break
+    assert crossed and 2 in app["downed"]  # straight over them
+
+
+def test_a_crab_caught_on_a_corner_gets_itself_loose(app, monkeypatch):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    p1(app)["pos"] = free_spot(app, 12, 20)
+    app["players"][1]["pos"] = free_spot(app, 12, 20)
+    barrel = main.thing_rect("deck_barrel_1")
+    app["crab"]["pos"] = (barrel.left - 3, barrel.bottom - 4)  # wedged against the barrel, off the middle of any tile
+    monkeypatch.setattr(main, "move_crab", lambda app: None)  # as if every step were blocked
+    for _ in range(main.CRAB_STUCK_FRAMES - 1):
+        main.update(app, 0, 0)
+    assert app["crab"]["pos"] == (barrel.left - 3, barrel.bottom - 4)
+    main.update(app, 0, 0)
+    body = main.crab_rect(app["crab"])
+    assert body.center in [main.tile_rect(*tile).center for tile in main.free_tiles(app["state"], "deck")]
+    assert pygame.Vector2(body.center).distance_to((barrel.left - 3 + 6, barrel.bottom + 2)) <= 1.5 * main.TILE
+
+
+def test_the_hard_crab_walks_straight_where_it_can():
+    free = {(x, y) for x in range(10) for y in range(10)} - {(5, 2), (5, 3)}
+    way = main.path_to(free, (2, 2), [(8, 2)])
+    assert way[0] != (2, 2) and way[-1] == (8, 2) and (5, 2) not in way
+    assert main.path_to(free, (2, 2), [(2, 2)]) == [(2, 2)]
+    assert main.path_to(free - {(1, 2), (3, 2), (2, 1), (2, 3)}, (2, 2), [(8, 2)]) is None
+    wall = [main.tile_rect(5, 2)]
+    start = main.player_rect((0, 0))
+    start.center = main.tile_rect(2, 2).center
+    assert main.straight_way(start.topleft, main.tile_rect(2, 6).center, wall)
+    assert not main.straight_way(start.topleft, main.tile_rect(8, 2).center, wall)
 
 
 ================================================================================
@@ -19066,6 +20552,122 @@ def test_the_giant_claw_keeps_its_red_shell():
 
 
 ================================================================================
+# FILE: plot_twist/test_crab.py
+================================================================================
+
+"""Tests for the crab that hunts the players: drawn pixel by pixel, in every pose."""
+
+import pygame
+import pytest
+
+import crab
+
+SHELL_TONES = {crab.OUTLINE, crab.SHADOW, crab.BASE, crab.LIGHT, crab.GLINT}
+EYES = {crab.EYE, crab.PUPIL, crab.HUNT_EYE, crab.HUNT_PUPIL, crab.DAZED_EYE}
+
+
+def pixels(picture):
+    return {(x, y): tuple(picture.get_at((x, y)))[:3] for x in range(picture.get_width())
+            for y in range(picture.get_height()) if picture.get_at((x, y)).a}
+
+
+def test_the_crab_is_painted_in_five_tones_of_shell_and_its_eyes():
+    picture = crab.picture(crab.pose())
+    assert picture.get_size() == crab.SIZE
+    used = set(pixels(picture).values())
+    assert SHELL_TONES <= used  # outline, shadow, crimson, coral, glint
+    assert used <= SHELL_TONES | EYES
+    assert len(pixels(picture)) > 300  # a big crab, not a speck
+
+
+def test_the_light_falls_on_the_top_and_the_shadow_underneath():
+    painted = pixels(crab.picture(crab.pose()))
+    cx, cy = crab.CENTER
+    top = [painted[(x, y)] for (x, y) in painted if abs(x - cx) < 5 and cy - 4 <= y <= cy - 2]
+    bottom = [painted[(x, y)] for (x, y) in painted if abs(x - cx) < 5 and cy + 3 <= y <= cy + 5]
+    assert top.count(crab.LIGHT) > top.count(crab.SHADOW)
+    assert bottom.count(crab.SHADOW) > bottom.count(crab.LIGHT)
+
+
+def test_a_dark_outline_goes_all_around_it():
+    painted = pixels(crab.picture(crab.pose()))
+    for (x, y), color in painted.items():
+        if any((x + dx, y + dy) not in painted for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+            assert color == crab.OUTLINE, (x, y)
+
+
+def test_spines_stand_out_of_the_shell_and_eyes_on_stalks_above_it():
+    painted = pixels(crab.picture(crab.pose()))
+    cx, cy = crab.CENTER
+    rx, ry = crab.SHELL
+    outside = [(x, y) for (x, y), color in painted.items() if color == crab.LIGHT
+               and ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 > 1.3 and y < cy and abs(x - cx) < 13]
+    assert len(outside) >= 4  # the pale tips of the spines, on both sides
+    eyes = [(x, y) for (x, y), color in painted.items() if color == crab.EYE]
+    assert eyes and all(y < cy - ry for _, y in eyes)  # up on their stalks
+
+
+def test_the_legs_walk_in_two_groups_over_four_frames():
+    frames = [pygame.image.tobytes(crab.picture(crab.pose(legs=frame)), "RGBA") for frame in range(4)]
+    assert frames[1] == frames[3]  # all on the floor
+    assert frames[0] != frames[1] and frames[2] != frames[1] and frames[0] != frames[2]  # one group, then the other
+    assert crab.pose(legs=5)["legs"] == 1
+
+
+def test_the_claws_shut_tip_to_tip_and_gape():
+    def gap(opening):
+        """The clear pixels between the two fingers of the right claw, a little below their tips."""
+        painted = pixels(crab.picture(crab.pose(claws=opening)))
+        palm_x = crab.CENTER[0] + crab.CLAW_AT[0]
+        claw = [(x, y) for (x, y) in painted if abs(x - palm_x) <= 6]
+        top = min(y for _, y in claw)
+        widest = 0
+        for row in range(top, top + 6):
+            xs = sorted(x for x, y in claw if y == row)
+            widest = max(widest, (xs[-1] - xs[0] + 1) - len(xs))
+        return widest
+    shut, half, wide = gap(0.0), gap(0.5), gap(1.0)
+    assert shut == 0 < half < wide  # one point, tip to tip; then apart, wider and wider
+    assert crab.pose(claws=0.6)["claws"] == 0.625 and crab.pose(claws=7)["claws"] == 1.0  # a few steps, kept in range
+    assert pygame.image.tobytes(crab.picture(crab.pose(claws=0.5)), "RGBA") not in (
+        pygame.image.tobytes(crab.picture(crab.pose(claws=0.0)), "RGBA"),
+        pygame.image.tobytes(crab.picture(crab.pose(claws=1.0)), "RGBA"))
+    assert half
+
+
+def test_breathing_lifts_the_shell_but_not_the_feet():
+    still = pixels(crab.picture(crab.pose(breath=0)))
+    breathing = pixels(crab.picture(crab.pose(breath=1)))
+    assert min(y for (x, y) in breathing) == min(y for (x, y) in still) - 1  # the shell and the eyes rise
+    assert max(y for (x, y) in breathing) == max(y for (x, y) in still)      # the legs stay on the floor
+    assert max(y for (x, y) in still) <= crab.FEET
+
+
+def test_its_eyes_burn_when_it_hunts_and_droop_when_it_is_dazed():
+    calm = set(pixels(crab.picture(crab.pose(eyes="calm"))).values())
+    hunt = set(pixels(crab.picture(crab.pose(eyes="hunt"))).values())
+    dazed = set(pixels(crab.picture(crab.pose(eyes="dazed"))).values())
+    assert crab.EYE in calm and crab.HUNT_EYE not in calm
+    assert crab.HUNT_EYE in hunt and crab.HUNT_PUPIL in hunt and crab.EYE not in hunt
+    assert crab.DAZED_EYE in dazed and crab.PUPIL not in dazed
+    for x, y in crab.eye_points(crab.pose(eyes="hunt")):
+        assert pixels(crab.picture(crab.pose(eyes="hunt"))).get((x, y)) in (crab.HUNT_EYE, crab.HUNT_PUPIL)
+
+
+def test_its_pupils_look_where_it_looks():
+    def pupils(look):
+        return sorted(point for point, color in pixels(crab.picture(crab.pose(look=look))).items() if color == crab.PUPIL)
+    left, right = pupils((-1, 0)), pupils((1, 0))
+    assert len(left) == len(right) == 2 and all(a[0] < b[0] for a, b in zip(left, right))
+
+
+def test_each_pose_is_painted_once():
+    first = crab.picture(crab.pose(legs=2, claws=0.75, eyes="hunt"))
+    assert crab.picture(crab.pose(legs=2, claws=0.75, eyes="hunt")) is first
+    assert crab.picture(crab.pose(legs=2, claws=0.75, eyes="calm")) is not first
+
+
+================================================================================
 # FILE: plot_twist/test_graphics.py
 ================================================================================
 
@@ -19414,95 +21016,56 @@ def test_the_scarf_of_flash_flies_behind_while_running():
 # FILE: plot_twist/test_sounds.py
 ================================================================================
 
-"""Tests for the sound effects: square waves made in code, and a game that runs the same without audio."""
+"""Tests for the sounds: the voices of an 8-bit sound chip made in code, their envelopes, sweeps and
+filters, the effects and the loops, and a game that runs the same without audio."""
+
+import math
 
 import pygame
 import pytest
 
 import sounds
 
-PEAK = int(32767 * sounds.VOLUME)
+RATE = 8000
 
 
-def test_a_note_is_a_square_wave_of_the_right_length():
-    """1000 Hz at 8000 samples per second: four samples up, four down, for as long as the note lasts."""
-    data = sounds.samples([(1000, 0.01)], 8000)
-    assert len(data) == 80
-    assert list(data[:16]) == ([PEAK] * 4 + [-PEAK] * 4) * 2
+def plain(wave, freq, length=0.1, **more):
+    """A voice at full volume all along: no attack, no release, so its samples are just the wave."""
+    return sounds.layer(wave, freq, length, attack=0.0, release=0.0, **more)
 
 
-def test_each_note_fades_out_at_its_very_end():
-    data = sounds.samples([(1000, 0.01)], 8000)
-    assert 0 < abs(data[-1]) < PEAK
-    assert abs(data[-1]) < abs(data[-30])
+def crossings(data):
+    """How many times the sound goes from below zero to above it."""
+    return sum(1 for index in range(1, len(data)) if data[index - 1] < 0 <= data[index])
 
 
-def test_a_pause_is_silence():
-    data = sounds.samples([(0, 0.01)], 8000)
-    assert len(data) == 80
-    assert set(data) == {0}
+def brightness(data):
+    """How much the sound jumps from one sample to the next, on average: high for a hiss, low for a rumble."""
+    return sum(abs(data[index] - data[index - 1]) for index in range(1, len(data))) / max(len(data) - 1, 1)
 
 
-def test_every_channel_gets_the_same_sample():
-    mono = sounds.samples([(1000, 0.01)], 8000)
-    stereo = sounds.samples([(1000, 0.01)], 8000, channels=2)
-    assert list(stereo[0::2]) == list(mono)
-    assert list(stereo[1::2]) == list(mono)
+def loudness(data):
+    return math.sqrt(sum(value * value for value in data) / max(len(data), 1))
 
 
-def test_every_effect_is_short():
-    for name, notes in sounds.EFFECTS.items():
-        assert notes, name
-        assert 0 < sum(length for _, length in notes) < 1, name
+# --- The voices of the chip ------------------------------------------------------------------
 
 
-def test_without_audio_everything_is_silent(monkeypatch):
-    """No mixer (no sound card): nothing is loaded, and playing anything does nothing and breaks nothing."""
-    monkeypatch.setattr(pygame.mixer, "get_init", lambda: None)
-    sounds.load()
-    assert sounds._loaded == {}
-    for name in list(sounds.EFFECTS) + [None, "no_such_sound"]:
-        sounds.play(name)
-
-
-def test_with_audio_every_effect_is_made_for_the_mixer(monkeypatch):
-    """With a mixer (here SDL's silent "dummy" one), each effect becomes a sound as long as its notes."""
-    monkeypatch.setenv("SDL_AUDIODRIVER", "dummy")
-    pygame.mixer.init(frequency=22050, size=-16, channels=2)
-    try:
-        sounds.load()
-        rate = pygame.mixer.get_init()[0]
-        assert set(sounds._loaded) == set(sounds.EFFECTS)
-        for name, notes in sounds.EFFECTS.items():
-            expected = sum(int(rate * length) for _, length in notes) / rate
-            assert sounds._loaded[name].get_length() == pytest.approx(expected, abs=0.002), name
-        sounds.play("ding")
-    finally:
-        sounds._loaded.clear()
-        pygame.mixer.quit()
-
-
-def test_a_negative_frequency_is_noise_held_for_as_long_as_it_says():
-    """-1000 at 8000 samples per second: a level every 8 samples, up or down with no pattern, the same every time."""
-    data = sounds.samples([(-1000, 0.1)], 8000)
+@pytest.mark.parametrize("wave, duty", [("pulse12", 0.125), ("pulse25", 0.25), ("square", 0.5)])
+def test_a_pulse_is_up_for_its_duty_of_each_period(wave, duty):
+    data = sounds.voice_samples(plain(wave, 500), RATE)
     assert len(data) == 800
-    levels = [data[index] for index in range(0, 720, 8)]
-    for index in range(0, 720, 8):
-        assert set(data[index:index + 8]) == {data[index]}  # held between two steps
-    assert set(levels) == {PEAK, -PEAK}  # as loud as a square wave, both ways
-    runs = [len(run) for run in "".join("u" if level > 0 else "d" for level in levels).replace("ud", "u d").replace("du", "d u").split()]
-    assert len(set(runs)) > 2  # runs of different lengths: not a regular wave
-    assert list(data) == list(sounds.samples([(-1000, 0.1)], 8000))
-    assert 0 < abs(data[-1]) < PEAK  # it fades out like a note
+    assert set(data) == {1.0, -1.0}
+    assert sum(1 for value in data if value > 0) / len(data) == pytest.approx(duty, abs=0.01)
+    assert crossings(data) == pytest.approx(50, abs=1)  # 500 Hz for a tenth of a second
 
 
-def test_low_noise_is_rougher_than_high_noise():
-    low = sounds.samples([(-50, 0.2)], 8000)
-    high = sounds.samples([(-4000, 0.2)], 8000)
-
-    def changes(data):
-        return sum(1 for index in range(1, len(data) - 100) if (data[index] > 0) != (data[index - 1] > 0))
-    assert changes(low) < 12 < 200 < changes(high)
+def test_the_triangle_has_sixteen_levels_and_is_symmetric():
+    data = sounds.voice_samples(plain("triangle", 125, 0.096), RATE)  # twelve whole periods
+    levels = sorted(set(data))
+    assert len(levels) == 16 and levels[0] == -1.0 and levels[-1] == 1.0
+    assert sum(data) == pytest.approx(0, abs=1)  # as much down as up
+    assert sounds.TRIANGLE == list(range(15, -1, -1)) + list(range(16))  # it falls, then rises again
 
 
 def test_the_register_of_the_noise_never_gets_stuck():
@@ -19514,10 +21077,251 @@ def test_the_register_of_the_noise_never_gets_stuck():
     assert len(seen) == 2000  # no short loop
 
 
-def test_the_statue_and_the_claw_have_their_sounds():
-    for name, noisy in (("crumble", True), ("snap", True), ("shatter", True)):
-        notes = sounds.EFFECTS[name]
-        assert any(frequency < 0 for frequency, _ in notes) == noisy, name
-    assert min(frequency for frequency, _ in sounds.EFFECTS["crumble"] if frequency > 0) < 60   # deep
-    assert sum(length for _, length in sounds.EFFECTS["snap"]) < 0.15                            # dry
-    assert max(-frequency for frequency, _ in sounds.EFFECTS["shatter"] if frequency < 0) > 8000  # sharp
+def test_the_short_noise_loops_quickly_and_rings_like_metal():
+    register, seen = sounds.NOISE_SEED, []
+    for _ in range(400):
+        register = sounds.noise_bit(register, short=True)
+        seen.append(register)
+    assert len(set(seen)) < 100  # a loop of 93 steps or less: a pitch, not a hiss
+    noise = sounds.voice_samples(plain("noise", 4000, 0.2), RATE)
+    metal = sounds.voice_samples(plain("metal", 4000, 0.2), RATE)
+    assert set(noise) == set(metal) == {1.0, -1.0}
+    assert noise != metal
+
+
+def test_noise_is_held_between_two_steps_and_lower_is_rougher():
+    data = sounds.voice_samples(plain("noise", 1000), RATE)
+    for start in range(7, 720, 8):
+        assert len(set(data[start:start + 8])) == 1  # a new level 1000 times a second: every 8 samples
+    low = sounds.voice_samples(plain("noise", 50, 0.2), RATE)
+    high = sounds.voice_samples(plain("noise", 4000, 0.2), RATE)
+    assert crossings(low) < 12 < 100 < crossings(high)
+    assert data == sounds.voice_samples(plain("noise", 1000), RATE)  # the same noise every time
+
+
+# --- Envelopes, sweeps, filters ----------------------------------------------------------------
+
+
+def test_the_envelope_rises_falls_holds_and_dies_in_sixteen_steps():
+    voice = sounds.layer("square", 100, 0.5, attack=0.1, decay=0.1, sustain=0.5, release=0.2)
+    levels = [sounds.envelope(voice, step / 100) for step in range(80)]
+    assert levels[0] == 0.0 and levels[10] == 1.0          # attack
+    assert levels[20] == 0.5 and levels[45] == 0.5         # decay, then sustain
+    assert 0 < levels[60] < 0.5 and levels[71] == 0.0      # release, to silence
+    assert all(level * sounds.STEPS == int(level * sounds.STEPS) for level in levels)  # 16 steps
+    assert levels[:11] == sorted(levels[:11]) and levels[50:] == sorted(levels[50:], reverse=True)
+
+
+def test_a_struck_voice_dies_away_by_itself():
+    voice = sounds.hit("square", 440, 0.2)
+    assert sounds.envelope(voice, 0.002) == 1.0
+    assert sounds.envelope(voice, 0.1) == pytest.approx(0.5, abs=1 / 16)
+    assert sounds.envelope(voice, 0.199) == pytest.approx(1 / 16)  # its last step...
+    assert sounds.envelope(voice, 0.2 + voice["release"]) == 0.0  # ...then silence
+
+
+def test_the_pitch_glides_to_its_target_by_equal_steps():
+    voice = plain("square", 200, 1.0, to=800)
+    assert sounds.pitch(voice, 0) == pytest.approx(200)
+    assert sounds.pitch(voice, 0.5) == pytest.approx(400)  # half the way: an octave of the two
+    assert sounds.pitch(voice, 1.0) == pytest.approx(800)
+    data = sounds.voice_samples(voice, RATE)
+    assert crossings(data[:2000]) < crossings(data[-2000:])  # it rises
+    quick = plain("square", 200, 1.0, to=800, sweep=0.1)
+    assert sounds.pitch(quick, 0.5) == pytest.approx(800)  # there in a tenth of a second, then it stays
+
+
+def test_vibrato_wavers_and_tremolo_beats():
+    voice = plain("square", 400, 1.0, vibrato=(5, 1.0))
+    pitches = [sounds.pitch(voice, step / 100) for step in range(100)]
+    assert max(pitches) == pytest.approx(400 * 2 ** (1 / 12), rel=0.01)
+    assert min(pitches) == pytest.approx(400 * 2 ** (-1 / 12), rel=0.01)
+    beating = sounds.voice_samples(plain("square", 400, 1.0, tremolo=(4, 0.8)), RATE)
+    parts = [loudness(beating[start:start + 400]) for start in range(0, 8000, 400)]
+    assert max(parts) > 3 * min(parts)
+
+
+def test_a_lowpass_muffles_and_a_highpass_thins():
+    raw = sounds.voice_samples(plain("noise", 8000), RATE)
+    muffled = sounds.voice_samples(plain("noise", 8000, lowpass=300), RATE)
+    thin = sounds.voice_samples(plain("square", 50, highpass=2000), RATE)
+    assert brightness(muffled) < brightness(raw) / 4
+    assert loudness(thin) < 0.5 * loudness(sounds.voice_samples(plain("square", 50), RATE))
+    opening = sounds.voice_samples(plain("noise", 8000, 1.0, lowpass=200, lowpass_to=3000), RATE)
+    assert brightness(opening[:1000]) < brightness(opening[-1000:])  # the filter opens: a whoosh
+
+
+def test_voices_are_mixed_at_their_start():
+    effect = [sounds.hit("square", 500, 0.05), sounds.hit("square", 500, 0.05, start=0.2)]
+    data = sounds.render(effect, RATE)
+    assert len(data) == int(sounds.effect_length(effect) * RATE)
+    assert loudness(data[1000:1500]) == 0  # the pause between them
+    assert loudness(data[1600:1800]) > 0
+
+
+def test_loud_mixes_bend_instead_of_cracking():
+    data = sounds.pcm([0.0, 0.5, 4.0, -4.0, 40.0], channels=2, repeat=2)
+    assert len(data) == 5 * 4 and data[0] == 0
+    assert list(data[4:8]) == [data[4]] * 4  # held, and the same on both sides
+    assert 0 < data[4] < data[8] < data[16] <= 32767 and data[12] == -data[8]
+
+
+# --- The effects ----------------------------------------------------------------------------
+
+
+def test_every_effect_is_short_and_heard():
+    for name, voices in sounds.EFFECTS.items():
+        assert voices, name
+        assert 0 < sounds.effect_length(voices) < 1.5, name
+        assert loudness(sounds.render(voices, RATE)) > 0.05, name
+
+
+def test_the_effects_all_sound_different():
+    rendered = {name: sounds.render(voices, RATE) for name, voices in sounds.EFFECTS.items()}
+    pictures = {(len(data), round(loudness(data), 3), round(brightness(data), 3)) for data in rendered.values()}
+    assert len(pictures) == len(rendered)
+
+
+def test_a_puddle_splashes_where_wood_knocks():
+    wood = sounds.render(sounds.EFFECTS["step_wood"], RATE)
+    puddle = sounds.render(sounds.EFFECTS["step_puddle"], RATE)
+    assert len(puddle) > 2 * len(wood)  # a splash lasts
+    assert any(voice["lowpass_to"] for voice in sounds.EFFECTS["step_puddle"])  # the water closes over the foot
+    floors = {name for name in sounds.EFFECTS if name.startswith("step_")}
+    assert floors == {"step_wood", "step_stone", "step_tiles", "step_earth", "step_puddle"}
+    stone = sounds.render(sounds.EFFECTS["step_stone"], RATE)
+    earth = sounds.render(sounds.EFFECTS["step_earth"], RATE)
+    assert brightness(stone) > brightness(earth)  # stone clicks, earth thuds
+
+
+def test_a_locked_door_thuds_and_rattles():
+    voices = sounds.EFFECTS["locked"]
+    assert any(voice["wave"] == "triangle" and voice["to"] < voice["freq"] for voice in voices)  # the thud
+    rattles = [voice for voice in voices if voice["wave"] == "metal"]
+    assert len(rattles) >= 3 and len({voice["start"] for voice in rattles}) == len(rattles)
+
+
+def test_the_claws_click_and_through_a_wall_they_are_muffled():
+    near = sounds.render(sounds.EFFECTS["claw_click"], RATE)
+    far = sounds.render(sounds.EFFECTS["claw_click_far"], RATE)
+    assert sounds.effect_length(sounds.EFFECTS["claw_click"]) < 0.1
+    assert brightness(far) < brightness(near) / 2
+    assert all(voice["lowpass"] for voice in sounds.EFFECTS["claw_click_far"])
+
+
+def test_the_dash_is_a_rush_of_air_that_opens():
+    voices = sounds.EFFECTS["dash"]
+    air = next(voice for voice in voices if voice["wave"] == "noise")
+    assert air["lowpass_to"] > air["lowpass"] and air["attack"] > 0.01
+    assert any(voice["to"] and voice["to"] > voice["freq"] for voice in voices)  # and a rising pitch
+
+
+def test_the_statue_rumbles_and_the_glass_tinkles():
+    crumble = sounds.render(sounds.EFFECTS["crumble"], RATE)
+    shatter = sounds.render(sounds.EFFECTS["shatter"], RATE)
+    assert len(crumble) > len(shatter) and brightness(shatter) > brightness(crumble)
+    assert min(voice["to"] or voice["freq"] for voice in sounds.EFFECTS["crumble"] if voice["wave"] == "triangle") < 50
+    tinkles = [voice for voice in sounds.EFFECTS["shatter"] if voice["wave"] == "pulse12"]
+    assert len(tinkles) >= 8 and min(voice["freq"] for voice in tinkles) > 2000
+    pebbles = [voice for voice in sounds.EFFECTS["crumble"] if voice["highpass"]]
+    assert len({voice["start"] for voice in pebbles}) >= 6  # bouncing at different moments
+    assert sounds.EFFECTS["crumble"] == sounds.EFFECTS["crumble"]  # and always the same ones
+
+
+# --- The loops -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", list(sounds.LOOPS))
+def test_a_loop_fades_into_its_own_start(name):
+    length, voices = sounds.LOOPS[name]
+    data = sounds.loop_samples(length, voices, RATE)
+    assert len(data) == int(length * RATE)
+    assert abs(data[-1] - data[0]) < 0.25  # no click at the seam
+    assert loudness(data) > 0.02
+    assert 0.9 < length <= 8.0
+
+
+def test_the_sea_swells_and_inside_the_ship_it_is_muffled():
+    length, voices = sounds.LOOPS["sea"]
+    sea = sounds.loop_samples(length, voices, RATE)
+    parts = [loudness(sea[start:start + 1600]) for start in range(0, len(sea) - 1600, 1600)]
+    assert max(parts) > 1.5 * min(parts)  # waves
+    far = sounds.loop_samples(*sounds.LOOPS["sea_far"][:1], sounds.LOOPS["sea_far"][1], RATE)
+    assert brightness(far) < brightness(sea)
+
+
+# --- Playing: left and right, loops that fade, no audio ---------------------------------------
+
+
+def test_left_and_right_keep_the_same_loudness():
+    assert sounds.sides(1.0, 0.0) == (pytest.approx(1.0), pytest.approx(1.0))
+    assert sounds.sides(1.0, -1.0) == (pytest.approx(1.0), pytest.approx(0.0, abs=1e-9))
+    assert sounds.sides(0.5, 1.0) == (pytest.approx(0.0, abs=1e-9), pytest.approx(0.5))
+    left, right = sounds.sides(1.0, 0.5)
+    assert left < right and left ** 2 + right ** 2 >= 1.0
+    assert sounds.sides(3.0, 9.0) == sounds.sides(1.0, 1.0)  # out of range: kept in it
+
+
+def test_without_audio_everything_is_silent(monkeypatch):
+    """No mixer (no sound card): nothing is loaded, and playing anything does nothing and breaks nothing."""
+    monkeypatch.setattr(pygame.mixer, "get_init", lambda: None)
+    sounds.load()
+    assert sounds._loaded == {}
+    for name in list(sounds.EFFECTS) + [None, "no_such_sound"]:
+        sounds.play(name, 0.5, -0.3)
+    sounds.loop("bed", "sea", 0.5)
+    sounds.update_loops()
+    assert sounds.loop_volume("bed", "sea") > 0  # the fades are kept all the same: the game does not care
+    sounds._loops.clear()
+
+
+def test_a_new_loop_fades_in_as_the_old_one_fades_out(monkeypatch):
+    monkeypatch.setattr(pygame.mixer, "get_init", lambda: None)
+    sounds.load()
+    sounds.loop("bed", "sea", 0.6)
+    for _ in range(sounds.LOOP_FADE_FRAMES):
+        sounds.update_loops()
+    assert sounds.loop_volume("bed", "sea") == pytest.approx(0.6)
+    sounds.loop("bed", "drips", 0.5)  # a new room
+    for _ in range(sounds.LOOP_FADE_FRAMES // 2):
+        sounds.update_loops()
+    assert 0 < sounds.loop_volume("bed", "sea") < 0.6 and 0 < sounds.loop_volume("bed", "drips") < 0.5  # both, crossing
+    for _ in range(sounds.LOOP_FADE_FRAMES):
+        sounds.update_loops()
+    assert sounds.loop_volume("bed", "sea") == 0 and [sound["name"] for sound in sounds._loops["bed"]] == ["drips"]
+    sounds.loop("bed", None)
+    for _ in range(sounds.LOOP_FADE_FRAMES):
+        sounds.update_loops()
+    assert sounds._loops["bed"] == []
+    sounds._loops.clear()
+
+
+def test_with_audio_every_sound_is_made_and_loops_have_channels_of_their_own(monkeypatch):
+    """With a mixer (here SDL's silent "dummy" one), each effect and loop becomes a sound of its length."""
+    monkeypatch.setenv("SDL_AUDIODRIVER", "dummy")
+    pygame.mixer.init(frequency=22050, size=-16, channels=2)
+    try:
+        sounds.load()
+        assert set(sounds._loaded) == set(sounds.EFFECTS) | set(sounds.LOOPS)
+        for name, voices in sounds.EFFECTS.items():
+            assert sounds._loaded[name].get_length() == pytest.approx(sounds.effect_length(voices), abs=0.003), name
+        for name, (length, _) in sounds.LOOPS.items():
+            assert sounds._loaded[name].get_length() == pytest.approx(length, abs=0.003), name
+        assert len(sounds._free) == sounds.LOOP_CHANNELS
+        sounds.play("ding", 0.5, 0.7)
+        sounds.loop("bed", "sea", 0.5, -0.4)
+        assert len(sounds._free) == sounds.LOOP_CHANNELS - 1
+        channel = sounds._loops["bed"][0]["channel"]
+        assert channel.get_busy() and sounds.loop_volume("bed", "sea") == 0.0  # it starts silent and fades in
+        for _ in range(sounds.LOOP_FADE_FRAMES):
+            sounds.update_loops()
+        assert sounds.loop_volume("bed", "sea") == pytest.approx(0.5)
+        sounds.loop("bed", None)
+        for _ in range(sounds.LOOP_FADE_FRAMES):
+            sounds.update_loops()
+        assert not channel.get_busy() and len(sounds._free) == sounds.LOOP_CHANNELS  # stopped, and given back
+    finally:
+        sounds._loaded.clear()
+        sounds._loops.clear()
+        sounds._free.clear()
+        pygame.mixer.quit()

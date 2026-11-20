@@ -2,9 +2,44 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v41](versions/v41.md) - A ray, a dash, a crab of stone, and two claws to choose from (2026-11-17)
+## [v45](versions/v45.md) - The crab's chase music, its red warning, and a crab that no longer gets stuck (2026-11-20)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- When the crab hunts within the reach of Flash's dash (8 tiles) of the player, a chase plays on a loop of its own: a deep triangle ostinato in E leaning on its tritone, a hissing hi-hat and a snare, a stab of the tritone at each bar. When the crab is close enough to lunge it is faster (180 beats a minute instead of 140), with a nervous pulse over it. It goes on two seconds after the crab has gone, then fades; meanwhile the sound of the room is quieter. Stunned, the crab hunts nobody: no chase.
+- The crab has a faint red halo, stronger when it hunts. When it comes near a door from the next room (within 5 tiles), its red glow beats in the dark of that doorway, stronger as it comes, and fully as it comes through: the players on the other side know it is coming. Both are drawn over the darkness, so they show in the dark rooms too.
+- The crab no longer sinks into the barrels in the top left corner of the deck, nor into anything else: it bumps into things with a footprint as wide as a tile, wider than its body (it still catches the players with its body, as before), and it finds its way with that footprint, going through doors by their middle. If it ever has somewhere to go but cannot move for half a second, it gets itself loose, back to the middle of the nearest tile where it fits. A player down never stands in its way: it walks over them.
+- Its movements are smoother: its claws no longer jump from one opening to the next but move toward it a little each frame, opening and shutting in a wave as it chases (painted in 8 steps instead of 4); it gapes when a player comes within 4 tiles and stops only when they are a tile farther, so it does not flicker at the edge; its shiver before a lunge is slower; and the hard crab walks straight to the farthest tile of its way it can reach in a straight line, instead of from tile to tile.
+- The sea is quieter: 0.35 on the deck instead of 0.55, 0.22 inside the ship instead of 0.3. The water drips less: three drops every six seconds instead of four every three, at 0.35 instead of 0.6. Loops made of short hits now sound the same all the way round: the hits at their start come again after their end, which fades into the start.
+
+## [v44](versions/v44.md) - A crab with legs, claws and burning eyes (2026-11-17)
+
+In commit [`c0ae12d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/c0ae12d2754a187f7718a518556a38b55f934973/plot_twist).
+
+- The crab that hunts the players is drawn pixel by pixel, no longer a small copy of the crab of the final room: a new module, crab.py, paints it in any pose at the size of the small screen, and keeps each pose it painted. Its shell has five tones (a very dark red, almost violet, outline; a deep shadow underneath; crimson; coral where the light falls, on the top; a pale glint), a dither where the light turns to shadow, a seam across its back, a row of spines along the front of each side and two small horns. Its eyes stand on stalks, with a pupil that looks at its prey and a glint. Its claws are on arms in segments, banded where they join, with a round palm and two fingers.
+- It is animated part by part. Its three legs on each side walk in two groups over four pictures, like a crab's; its claws open and shut in rhythm as it chases, and gape as it shivers when a player is close, about to lunge; standing still it breathes, the shell rising by a pixel while the legs stay on the floor. Stunned by the wizard its eyes droop under the stars.
+- It is anchored to the floor by a wide oval shadow; its legs kick up foam on the wet deck and in the damp rooms, and dust elsewhere, as it runs. When it hunts its eyes burn red with a glow that beats, and when it is about to lunge they leave red streaks behind. It is bigger than before (40 by 30 pixels with its legs and claws) and hits the same as before: its body has not changed. When the key is fused, this crab is the one that turns to stone.
+- Looked at for reference: the enemies of clear-code-projects/Zelda (an animation for each state, its frame restarting when the state changes, a flicker) and the examples of kitao/pyxel (pictures chosen from the frame count, each enemy a little out of step with the others).
+
+## [v43](versions/v43.md) - Sound like an 8-bit console: rooms, footsteps, and a crab you can hear coming (2026-11-17)
+
+In commit [`1f83eb3`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/1f83eb31f481f64046a729aa5690d9e2f1dd5b2c/plot_twist).
+
+- A new synthesizer in sounds.py, with the voices of an 8-bit console's sound chip: pulse waves up for 1/8, 1/4 or half of each period, a triangle in 32 steps of 16 levels for the deep notes, and the noise of a 15-bit shift register, in its long mode (a hiss) and its short one (it rings like metal). Every voice has an ADSR envelope moving in 16 steps like the chip's volume, a pitch that can glide (equal steps of pitch), vibrato, tremolo, and one-pole low-pass and high-pass filters (the low-pass can open or close as the sound goes on). Each effect is a few voices layered, mixed with a gentle saturation instead of clipping.
+- Every effect was remade with them, and new ones were added: footsteps on wood, stone, tiles and earth, a splash in a puddle, a thud and a rattle when a door does not open, the crab's claws clicking (and muffled through a wall), its hiss when it charges. Flash's dash is a rush of air that opens; the statue crumbles with a crack, a falling rumble, grinding and pebbles bouncing; the glass shatters with a burst, a ringing hiss and shards tinkling.
+- Quiet loops play on mixer channels of their own: the sea on the deck (it swells and falls), the same sea muffled inside the ship, water dripping with its echo in the damp rooms, and the hum of a machine near the generators and the portals, louder the nearer the player is and from its side. The loops fade into their own start, so there is no click, and when the player changes room the old one fades out as the new one fades in.
+- Sounds come from where they are, in stereo: the other player's footsteps from their side, quieter farther away; the crab's claws from its side of the screen and louder as it comes near, faster with a hiss when it charges; in the next room, through an open door, muffled and from that door. Each computer hears from its own player (from the partner's, once out of the game). The mixer opens at 22050 Hz in stereo, the rate the sounds are made at; making them all takes about half a second when the game starts.
+- Looked at for reference: the sound chip of an 8-bit console in fogleman/nes (its duty table, its triangle, its noise register and its envelope, sweep and filters) and the sound of kitao/pyxel (its four tones, its envelopes and its glide).
+
+## [v42](versions/v42.md) - The easy crab at its old speed (2026-11-17)
+
+In commit [`ebfcc0c`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/ebfcc0cb8ca1e627688b747c5ca04bda45f325b0/plot_twist).
+
+- The easy crab moves again at the speed it had before the previous version, the same as the hard one (0.6 of a player's speed instead of 0.8). How it hunts does not change.
+
+## [v41](versions/v41.md) - A ray, a dash, a crab of stone, and two claws to choose from (2026-11-17)
+
+In commit [`c11126d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/c11126d54aba61225dc40d03485357c0424b9dab/plot_twist).
 
 - The choice of the crab is two frames side by side, chosen with Left and Right: a common crab's claw for the easy one (sandy orange, a round speckled palm, blunt jaws with knobbly teeth) and the red claw of the end of the game for the hard one (long hooked jaws with sharp teeth, a saw of spikes, a glow that beats like blood). The highlighted claw slowly opens and shuts its jaws; the other frame is dark. The claws are drawn by claw.py, with the same shell as the giant claw in other tones (the giant claw is unchanged).
 - The easy crab is faster (0.8 of a player's speed instead of 0.6): blind to other rooms and taking the long way round, it was too slow to be a threat.
