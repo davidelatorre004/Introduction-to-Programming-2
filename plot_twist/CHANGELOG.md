@@ -2,9 +2,19 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
-## [v44](versions/v44.md) - A crab with legs, claws and burning eyes (2026-11-17)
+## [v45](versions/v45.md) - The crab's chase music, its red warning, and a crab that no longer gets stuck (2026-11-20)
 
 In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+
+- When the crab hunts within the reach of Flash's dash (8 tiles) of the player, a chase plays on a loop of its own: a deep triangle ostinato in E leaning on its tritone, a hissing hi-hat and a snare, a stab of the tritone at each bar. When the crab is close enough to lunge it is faster (180 beats a minute instead of 140), with a nervous pulse over it. It goes on two seconds after the crab has gone, then fades; meanwhile the sound of the room is quieter. Stunned, the crab hunts nobody: no chase.
+- The crab has a faint red halo, stronger when it hunts. When it comes near a door from the next room (within 5 tiles), its red glow beats in the dark of that doorway, stronger as it comes, and fully as it comes through: the players on the other side know it is coming. Both are drawn over the darkness, so they show in the dark rooms too.
+- The crab no longer sinks into the barrels in the top left corner of the deck, nor into anything else: it bumps into things with a footprint as wide as a tile, wider than its body (it still catches the players with its body, as before), and it finds its way with that footprint, going through doors by their middle. If it ever has somewhere to go but cannot move for half a second, it gets itself loose, back to the middle of the nearest tile where it fits. A player down never stands in its way: it walks over them.
+- Its movements are smoother: its claws no longer jump from one opening to the next but move toward it a little each frame, opening and shutting in a wave as it chases (painted in 8 steps instead of 4); it gapes when a player comes within 4 tiles and stops only when they are a tile farther, so it does not flicker at the edge; its shiver before a lunge is slower; and the hard crab walks straight to the farthest tile of its way it can reach in a straight line, instead of from tile to tile.
+- The sea is quieter: 0.35 on the deck instead of 0.55, 0.22 inside the ship instead of 0.3. The water drips less: three drops every six seconds instead of four every three, at 0.35 instead of 0.6. Loops made of short hits now sound the same all the way round: the hits at their start come again after their end, which fades into the start.
+
+## [v44](versions/v44.md) - A crab with legs, claws and burning eyes (2026-11-17)
+
+In commit [`c0ae12d`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/c0ae12d2754a187f7718a518556a38b55f934973/plot_twist).
 
 - The crab that hunts the players is drawn pixel by pixel, no longer a small copy of the crab of the final room: a new module, crab.py, paints it in any pose at the size of the small screen, and keeps each pose it painted. Its shell has five tones (a very dark red, almost violet, outline; a deep shadow underneath; crimson; coral where the light falls, on the top; a pale glint), a dither where the light turns to shadow, a seam across its back, a row of spines along the front of each side and two small horns. Its eyes stand on stalks, with a pupil that looks at its prey and a glint. Its claws are on arms in segments, banded where they join, with a round palm and two fingers.
 - It is animated part by part. Its three legs on each side walk in two groups over four pictures, like a crab's; its claws open and shut in rhythm as it chases, and gape as it shivers when a player is close, about to lunge; standing still it breathes, the shell rising by a pixel while the legs stay on the floor. Stunned by the wizard its eyes droop under the stars.

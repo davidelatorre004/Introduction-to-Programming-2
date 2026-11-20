@@ -3472,26 +3472,30 @@ def player_rect(position):
     return pygame.Rect(round(position[0]), round(position[1]), PLAYER_SIZE, PLAYER_SIZE)
 
 
-def move(position, dx, dy, solids):
+def move(position, dx, dy, solids, widen=0):
     """Move the player by (dx, dy) pixels and return the new position, stopping against solids.
 
     It moves along x first and then along y, so the player slides along a wall
-    instead of sticking to it when walking diagonally.
+    instead of sticking to it when walking diagonally. `widen` pixels more on each
+    side are solid too: the crab's footprint is wider than its body.
     """
     x, y = position
+    if widen:  # the crab: what its footprint already overlaps does not push it (it would push it the wrong way)
+        start = player_rect(position).inflate(2 * widen, 0)
+        solids = [solid for solid in solids if not start.colliderect(solid)]
     if dx != 0:
         x += dx
-        rect = player_rect((x, y))
+        rect = player_rect((x, y)).inflate(2 * widen, 0)
         for solid in solids:
             if rect.colliderect(solid):
                 if dx > 0:
                     rect.right = solid.left
                 else:
                     rect.left = solid.right
-                x = rect.x
+                x = rect.x + widen
     if dy != 0:
         y += dy
-        rect = player_rect((x, y))
+        rect = player_rect((x, y)).inflate(2 * widen, 0)
         for solid in solids:
             if rect.colliderect(solid):
                 if dy > 0:
@@ -3848,6 +3852,9 @@ def new_app(fonts):
         "charging": False,       # the crab is charging the player on this computer (see crab_audio)
         "charge_at": -10 ** 6,   # the frame its charge was last heard
         "crab_trail": [],        # where the crab's burning eyes were in the last frames of a charge
+        "crab_claws": 0.25,      # how open its claws are on this screen: they move toward the pose, a little a frame
+        "crab_lunging": False,   # it is about to lunge (see crab_telegraph)
+        "chase_left": 0,         # frames the music of a chase goes on before it fades (see chase_music)
         "act_held": False,       # E is held down on this keyboard (to help a player up)
         "partner_reviving": False,  # E is held down on the other computer, as it said
         "seen": {},              # what this computer has already told about the crab (see crab_news)
@@ -4726,9 +4733,14 @@ def move_player(app, player, dx, dy):
 # Now and then it gives up the chase and goes to its corner of the room for a while.
 
 CRAB_SPEED = PLAYER_SPEED * 0.6    # pixels per frame: slower than the players
+CRAB_WIDEN = 2                     # its footprint is this many pixels wider than its body on each side
+CRAB_STUCK_FRAMES = 30             # frames it may stand still with somewhere to go before it gets itself loose
 CRAB_LEG_FRAMES = 5                # frames each of the 4 pictures of its walk lasts
-CRAB_CLAW_RHYTHM = (0.0, 0.25, 0.5, 0.25)  # how open its claws are as it chases, one after the other...
-CRAB_CLAW_BEAT = 7                 # ...each for this many frames
+CRAB_CLAW_PERIOD = 28             # frames its claws take to open and shut once as it chases...
+CRAB_CLAW_CHASE = (0.0, 0.5)       # ...from shut to half open
+CRAB_CLAW_SPEED = 0.08             # how much the opening of its claws can change in a frame: they move, they never jump
+CRAB_SHIVER = (0, 1, 0, -1)        # its shiver before a lunge, a step every 3 frames
+CRAB_LOOKAHEAD = 6                 # how many tiles of its way the crab looks ahead, to walk straight where it can
 CRAB_BREATH_FRAMES = 70            # standing still, it breathes in and out in this many frames
 CRAB_SHADOW = (28, 8)              # the wide oval under it, on the floor
 CRAB_DUST_EVERY = 6                # frames between two puffs from its legs as it runs
@@ -4778,7 +4790,7 @@ def new_crab():
             # Only for the easy crab: the way it goes, the tile it walks to, chasing or going to its
             # corner and for how long, the door it roams to when it sees nobody and for how long,
             # and how many doors it has taken at random.
-            "heading": (0, 1), "next": None, "mode": "chase", "clock": 0,
+            "heading": (0, 1), "next": None, "mode": "chase", "clock": 0, "stuck": 0,
             "roam": None, "roam_clock": 0, "turns": 0}
 
 
@@ -4815,15 +4827,24 @@ def crab_rect(crab):
     return player_rect(crab["pos"])
 
 
+def crab_foot(position):
+    """The crab's footprint on the floor: as wide as its shell, wider than its body. What it bumps
+    into with; it catches the players with its body, as before."""
+    return player_rect(position).inflate(2 * CRAB_WIDEN, 0)
+
+
 def free_tiles(state, room):
-    """The tiles of a room the crab can walk on: the floor that nothing solid covers, and the open doors."""
+    """The tiles of a room the crab can walk on: where its footprint, in the middle of the tile, touches
+    nothing solid; and the open doors, which it goes through by their middle."""
     seen = room_state(state, room)
     solids = solid_rects(seen)
     columns, rows = room_size(room)
-    free = set()
+    free = set(open_door_tiles(state, room))
+    foot = crab_foot((0, 0))
     for col in range(columns):
         for row in range(rows):
-            if tile_rect(col, row).collidelist(solids) == -1:
+            foot.center = tile_rect(col, row).center
+            if foot.collidelist(solids) == -1:
                 free.add((col, row))
     return free
 
@@ -4832,28 +4853,6 @@ def tile_of(position):
     """The tile of the room grid under the middle of a body (see tile_rect: the rooms start below the bar)."""
     x, y = player_rect(position).center
     return (x // TILE, (y - HUD_HEIGHT) // TILE)
-
-
-def next_tile(free, start, goals):
-    """The first tile to walk to on the shortest way from `start` to any of `goals`, or None.
-
-    A plain search over the free tiles, in the four directions: rooms are small.
-    """
-    goals = set(goals)
-    if start in goals:
-        return start
-    first = {start: None}
-    queue = collections.deque([start])
-    while queue:
-        tile = queue.popleft()
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            near = (tile[0] + dx, tile[1] + dy)
-            if near in free and near not in first:
-                first[near] = near if tile == start else first[tile]
-                if near in goals:
-                    return first[near]
-                queue.append(near)
-    return None
 
 
 def door_toward(state, room, rooms):
@@ -4904,7 +4903,7 @@ def step_crab(crab, goal, solids, speed=CRAB_SPEED):
     move_x = step * dx / distance
     move_y = step * dy / distance
     before = crab["pos"]
-    crab["pos"] = move(crab["pos"], move_x, move_y, solids)
+    crab["pos"] = move(crab["pos"], move_x, move_y, solids, CRAB_WIDEN)
     crab["moving"] = crab["pos"] != before
     if crab["moving"]:
         crab["walk"] += 1
@@ -4941,13 +4940,55 @@ def move_crab(app):
             return
         col, row, width, height = door_tiles(door)
         goals = [(col + dx, row + dy) for dx in range(width) for dy in range(height)]
-    tile = next_tile(free, start, goals)
-    if tile is None:
+    way = path_to(free, start, goals)
+    if way is None:
         return
+    solids = solid_rects(seen)
+    tile = way[0]
+    for ahead in reversed(way[:CRAB_LOOKAHEAD]):  # the farthest tile of its way it can walk to in a straight line
+        if ahead not in open_door_tiles(state, crab["room"]) and straight_way(crab["pos"], tile_rect(*ahead).center, solids):
+            tile = ahead
+            break
     goal = tile_rect(*tile).center
     if tile == start and target[0] == "door":
         goal = door_rect(target[1]).center
-    step_crab(crab, goal, solid_rects(seen))
+    step_crab(crab, goal, solids)
+
+
+def path_to(free, start, goals):
+    """The tiles of the shortest way from `start` to any of `goals` (start left out), or None.
+    [start] when it is already there."""
+    goals = set(goals)
+    if start in goals:
+        return [start]
+    came = {start: None}
+    queue = collections.deque([start])
+    while queue:
+        tile = queue.popleft()
+        if tile in goals:
+            way = []
+            while tile != start:
+                way.append(tile)
+                tile = came[tile]
+            return way[::-1]
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            near = (tile[0] + dx, tile[1] + dy)
+            if near in free and near not in came:
+                came[near] = tile
+                queue.append(near)
+    return None
+
+
+def straight_way(position, point, solids):
+    """True if the crab's footprint can slide in a straight line from `position` until its middle is at `point`."""
+    body = crab_rect({"pos": position})
+    dx, dy = point[0] - body.centerx, point[1] - body.centery
+    steps = max(int(math.hypot(dx, dy) // 3), 1)
+    for step in range(1, steps + 1):
+        share = step / steps
+        if crab_foot((position[0] + dx * share, position[1] + dy * share)).collidelist(solids) != -1:
+            return False
+    return True
 
 
 def open_door_tiles(state, room):
@@ -5049,6 +5090,11 @@ def move_easy_crab(app):
     tile = tuple(crab["next"])
     goal = tile_rect(*tile).center
     body = crab_rect(crab)
+    if tile in doors:  # a door: through the middle of its opening, as soon as it touches it
+        if body.colliderect(door_rect(doors[tile]).inflate(2, 2)):
+            goal = body.center
+        else:
+            goal = door_rect(doors[tile]).center
     if math.hypot(goal[0] - body.centerx, goal[1] - body.centery) > CRAB_SPEED:
         step_crab(crab, goal, solids)
         if not crab["moving"]:
@@ -5185,9 +5231,46 @@ def update_crab(app):
         crab["wait"] -= 1
         crab["moving"] = False
         return
+    before = crab["pos"]
     move_crab(app)
+    watch_for_stuck(app, before)
     if crab["away"] == 0:
         catch_players(app)
+
+
+def wants_to_move(app):
+    """True if the crab has somewhere to go: a player to chase or a door to take (not running from the
+    ghost, which ends in a corner, nor waiting with nobody to reach)."""
+    if engine.crab_difficulty(app["state"]) == "easy":
+        return easy_target(app)[0] in ("chase", "scatter", "roam")
+    target = crab_target(app)
+    return target is not None and target[0] in ("player", "door")
+
+
+def watch_for_stuck(app, before):
+    """If the crab has somewhere to go but has not moved for CRAB_STUCK_FRAMES frames (caught on a
+    corner), it gets loose: back to the middle of the nearest tile where it fits, at most a tile away."""
+    crab = app["crab"]
+    if crab["away"] > 0 or crab["pos"] != before or not wants_to_move(app):
+        crab["stuck"] = 0
+        return
+    crab["stuck"] = crab.get("stuck", 0) + 1
+    if crab["stuck"] < CRAB_STUCK_FRAMES:
+        return
+    crab["stuck"] = 0
+    crab["next"] = None
+    body = crab_rect(crab)
+    solids = solid_rects(room_state(app["state"], crab["room"]))
+    tiles = sorted(free_tiles(app["state"], crab["room"]),
+                   key=lambda tile: pygame.Vector2(tile_rect(*tile).center).distance_to(body.center))
+    for tile in tiles:
+        center = tile_rect(*tile).center
+        if pygame.Vector2(center).distance_to(body.center) > 1.5 * TILE:
+            break
+        place = (crab["pos"][0] + center[0] - body.centerx, crab["pos"][1] + center[1] - body.centery)
+        if crab_foot(place).collidelist(solids) == -1 and tile not in open_door_tiles(app["state"], crab["room"]):
+            crab["pos"] = place
+            return
 
 
 def crab_news(app):
@@ -5518,14 +5601,32 @@ def crab_target_player(app):
 
 
 def crab_telegraph(app):
-    """True when the crab is about to lunge: hunting, and a player is within CHARGE_DISTANCE."""
+    """True when the crab is about to lunge: hunting, and a player is within CHARGE_DISTANCE. Once
+    it is, it stays so until the player is a tile farther: it does not flicker at the edge."""
     crab = app["crab"]
     target = crab_target_player(app)
     if target is None or crab["stun"] > 0:
         return False
     body = crab_rect(crab).center
     other = player_rect(app["players"][target - 1]["pos"]).center
-    return math.hypot(other[0] - body[0], other[1] - body[1]) < CHARGE_DISTANCE
+    reach = CHARGE_DISTANCE + (TILE if app["crab_lunging"] else 0)
+    return math.hypot(other[0] - body[0], other[1] - body[1]) < reach
+
+
+def claws_wanted(app):
+    """How open the crab's claws should be: gaping before a lunge, opening and shutting smoothly as it
+    chases, a little open otherwise, shut when it is stunned."""
+    crab = app["crab"]
+    if crab["stun"] > 0:
+        return 0.0
+    if crab_target_player(app) is None:
+        return 0.25
+    if crab_telegraph(app):
+        return 1.0
+    if crab["moving"]:
+        low, high = CRAB_CLAW_CHASE
+        return low + (high - low) * (0.5 - 0.5 * math.cos(2 * math.pi * app["frame"] / CRAB_CLAW_PERIOD))
+    return 0.25
 
 
 def crab_pose(app):
@@ -5540,17 +5641,11 @@ def crab_pose(app):
     legs = (crab["walk"] // CRAB_LEG_FRAMES) % 4 if crab["moving"] else 1
     breath = 0 if crab["moving"] else (app["frame"] // (CRAB_BREATH_FRAMES // 2)) % 2
     if target is None:
-        return crab_look.pose(legs, 0.25, breath, "calm", crab["facing"])
+        return crab_look.pose(legs, app["crab_claws"], breath, "calm", crab["facing"])
     body = crab_rect(crab).center
     other = player_rect(app["players"][target - 1]["pos"]).center
     look = (sign(other[0] - body[0]), sign(other[1] - body[1]))
-    if crab_telegraph(app):
-        claws = 1.0  # gaping: it is about to lunge
-    elif crab["moving"]:
-        claws = CRAB_CLAW_RHYTHM[(app["frame"] // CRAB_CLAW_BEAT) % len(CRAB_CLAW_RHYTHM)]
-    else:
-        claws = 0.25
-    return crab_look.pose(legs, claws, breath, "hunt", look)
+    return crab_look.pose(legs, app["crab_claws"], breath, "hunt", look)
 
 
 def crab_place(crab):
@@ -5566,7 +5661,12 @@ def update_crab_looks(app):
         streak["age"] += 1
     app["crab_trail"] = [streak for streak in app["crab_trail"] if streak["age"] < CRAB_TRAIL_FRAMES]
     crab = app["crab"]
-    if app["state"] is None or crab is None or crab["away"] > 0 or crab["room"] != view(app)["room"]:
+    if app["state"] is None or crab is None:
+        return
+    wanted = claws_wanted(app)  # the claws move toward it, a little each frame
+    app["crab_claws"] += max(-CRAB_CLAW_SPEED, min(CRAB_CLAW_SPEED, wanted - app["crab_claws"]))
+    app["crab_lunging"] = crab_telegraph(app)
+    if crab["away"] > 0 or crab["room"] != view(app)["room"]:
         return
     if crab["moving"] and effects.FX["dust"] and app["frame"] % CRAB_DUST_EVERY == 0:
         info = story.ROOMS[crab["room"]]
@@ -5575,7 +5675,7 @@ def update_crab_looks(app):
         side = 1 if (app["frame"] // CRAB_DUST_EVERY) % 2 else -1  # one side, then the other
         effects.spawn(app["fx"], body.centerx + side * 14, body.bottom, 3, colors, speed=0.5, life=16, up=0.5,
                       gravity=0.04)
-    if crab["moving"] and crab_telegraph(app):
+    if crab["moving"] and app["crab_lunging"]:
         x, y = crab_place(crab)
         points = [(x + px, y + py) for px, py in crab_look.eye_points(crab_pose(app))]
         app["crab_trail"].append({"room": crab["room"], "points": points, "age": 0})
@@ -5590,8 +5690,8 @@ def draw_crab(app, screen):
     screen.blit(shadow, shadow.get_rect(center=(body.centerx + 1, body.bottom - 1)))
     crab_pose_now = crab_pose(app)
     x, y = crab_place(crab)
-    if crab_telegraph(app):
-        x += 1 if (app["frame"] // 2) % 2 else -1  # it shivers, ready to lunge
+    if app["crab_lunging"]:
+        x += CRAB_SHIVER[(app["frame"] // 3) % len(CRAB_SHIVER)]  # it shivers, ready to lunge
     for streak in app["crab_trail"]:
         if streak["room"] == crab["room"]:
             fade = 1 - streak["age"] / CRAB_TRAIL_FRAMES
@@ -6117,9 +6217,13 @@ def handle_message(app, message):
 # open door, they are muffled and come from that door. Each computer hears from its own
 # player: nothing of this goes through the network, only what is already there.
 
-SEA_VOLUME = 0.55        # the sea, on the deck
-SEA_INSIDE_VOLUME = 0.3  # ...and from inside the ship
-DRIPS_VOLUME = 0.6       # the water dripping in the damp rooms
+SEA_VOLUME = 0.35        # the sea, on the deck
+SEA_INSIDE_VOLUME = 0.22  # ...and from inside the ship
+DRIPS_VOLUME = 0.35      # the water dripping in the damp rooms
+CHASE_VOLUME = 0.5       # the music of a chase
+CHASE_RANGE = DASH_TILES * TILE  # it plays when the crab hunts within this distance: as far as Flash dashes
+CHASE_HOLD = 2 * FPS     # it goes on this long after the crab has gone, then fades
+CHASE_DUCK = 0.6         # meanwhile the sound of the room is this much as loud
 HUM_VOLUME = 0.45        # a machine's hum, right next to it
 HUM_RANGE = 6 * TILE     # how far it is heard
 HUM_OFF = 0.35           # a generator that is off hums less
@@ -6182,11 +6286,43 @@ def ambience(app):
     return bed, hum
 
 
+def chase_music(app):
+    """The music of a chase, on this computer: "chase" while the crab hunts in this player's room and is
+    within CHASE_RANGE of them, "chase_near" when it is close enough to lunge; it goes on for
+    CHASE_HOLD frames once that ends, then fades. None when there is no chase."""
+    crab = app["crab"]
+    state = app["state"]
+    if state is None or engine.is_over(state) or app["scene"] in ("ending", "shatter"):
+        app["chase_left"] = 0
+        return None
+    near = False
+    hunting = (crab is not None and crab["away"] == 0 and crab["stun"] == 0 and crab["room"] == view(app)["room"]
+               and crab_target_player(app) is not None)
+    if hunting:
+        body = crab_rect(crab).center
+        ear = player_rect(listener(app)["pos"]).center
+        distance = math.hypot(body[0] - ear[0], body[1] - ear[1])
+        hunting = distance < CHASE_RANGE
+        near = distance < CHARGE_DISTANCE
+    if hunting:
+        app["chase_left"] = CHASE_HOLD
+        return "chase_near" if near else "chase"
+    if app["chase_left"] > 0:
+        app["chase_left"] -= 1
+        return "chase"
+    return None
+
+
 def update_audio(app):
-    """Once a frame, on every computer: the loops of the room, the footsteps, the crab."""
+    """Once a frame, on every computer: the loops of the room (quieter during a chase), the music of a
+    chase, the footsteps, the crab."""
     bed, hum = ambience(app)
+    music = chase_music(app)
+    if bed is not None and music is not None:
+        bed = (bed[0], bed[1] * CHASE_DUCK)
     sounds.loop("bed", *(bed or (None,)))
     sounds.loop("hum", *(hum or (None,)))
+    sounds.loop("chase", music, CHASE_VOLUME)
     sounds.update_loops()
     if app["state"] is not None:
         footsteps(app)
@@ -6730,8 +6866,55 @@ def draw_soft_lights(app, surface, state, things):
             effects.soft_light(surface, light_center(app, thing), radius, color, light_strength(app, thing, change))
 
 
+CRAB_AURA = 26                 # the faint red halo around the crab: its radius...
+CRAB_AURA_COLOR = (70, 10, 10)  # ...and its colour, at its strongest
+DOOR_WARNING = 5 * TILE        # how far from a door the crab, in the next room, already glows in its doorway
+
+
+def crab_warning(app):
+    """The door of the room on screen where the crab's red glow shows in the dark, and how strong it
+    is (0 to 1), or None: the crab is in the next room coming near that door, or coming through it."""
+    crab = app["crab"]
+    state = app["state"]
+    if crab is None or state is None:
+        return None
+    room = view(app)["room"]
+    if crab["room"] == room:
+        if crab["away"] <= 0:
+            return None
+        body = crab_rect(crab).center  # coming through: right in front of the door it comes in by
+        door = min(doors_in(room), key=lambda door: pygame.Vector2(door_rect(door).center).distance_to(body),
+                   default=None)
+        return None if door is None else (door, 1.0)
+    door = door_between(state, room, crab["room"])
+    back = door_between(state, crab["room"], room)
+    if door is None or back is None:
+        return None
+    distance = pygame.Vector2(door_rect(back).center).distance_to(crab_rect(crab).center)
+    if distance >= DOOR_WARNING:
+        return None
+    return door, 1 - distance / DOOR_WARNING
+
+
+def draw_crab_aura(app, surface):
+    """A faint red halo around the crab, stronger when it hunts; and when it comes near a door from the
+    next room, its red glow in the dark of that doorway, beating, stronger as it comes. Drawn over
+    the darkness, so it shows in the dark rooms too."""
+    if not effects.FX["lights"]:
+        return
+    beat = effects.pulse(app["frame"], 0.12, 0.6, 1.0)
+    if crab_here(app) and app["crab"]["away"] <= 0:
+        strength = 0.8 if crab_target_player(app) is not None else 0.4
+        effects.glow(surface, crab_rect(app["crab"]).center, CRAB_AURA, CRAB_AURA_COLOR, strength * beat)
+    warning = crab_warning(app)
+    if warning is not None:
+        door, strength = warning
+        effects.glow(surface, door_rect(door).center, CRAB_AURA, (110, 14, 10), strength * beat)
+
+
 def draw_lights(app, surface, things):
     """The light of the room, added on top: lanterns, crystals, the blue fire of the cauldron."""
+    draw_crab_aura(app, surface)
     if not effects.FX["lights"] and not effects.FX["cauldron"]:
         return
     frame = app["frame"]
@@ -9874,6 +10057,7 @@ CLAW_AT = (14, -4)         # the middle of the palm of its claw
 PALM = 8                   # how round the palm is (its radius squared)
 FINGER = 6                 # how long the fingers are
 FINGER_SHUT = -0.26        # radians each finger leans in when the claw is shut: their tips meet...
+CLAW_STEPS = 8             # how many openings of the claws are painted, between shut and gaping
 FINGER_OPEN = 0.55         # ...and out when it gapes
 
 _pictures = {}
@@ -9881,7 +10065,7 @@ _pictures = {}
 
 def pose(legs=1, claws=0.0, breath=0, eyes="calm", look=(0, 1)):
     """A pose of the crab (see the top of this file), its values kept in their ranges."""
-    return {"legs": legs % 4, "claws": round(min(max(claws, 0.0), 1.0) * 4) / 4, "breath": 1 if breath else 0,
+    return {"legs": legs % 4, "claws": round(min(max(claws, 0.0), 1.0) * CLAW_STEPS) / CLAW_STEPS, "breath": 1 if breath else 0,
             "eyes": eyes, "look": (max(-1, min(1, look[0])), max(-1, min(1, look[1])))}
 
 
@@ -12225,8 +12409,8 @@ RENDER_RATE = 22050  # the sounds are made at most at this rate, then held to th
 NOISE_SEED = 1      # where the register of the noise starts: the same noise every time
 LOOP_FADE = 0.25    # seconds at the end of a loop that fade into its start: no click at the seam
 LOOP_FADE_FRAMES = 30  # frames a loop takes to fade in or out (half a second)
-LOOP_CHANNELS = 6   # mixer channels kept for the loops: two for each loop slot, to cross-fade
-LOOP_SLOTS = ("bed", "hum", "spare")  # what can loop at the same time
+LOOP_CHANNELS = 8   # mixer channels kept for the loops: two for each loop slot, to cross-fade
+LOOP_SLOTS = ("bed", "hum", "chase", "spare")  # what can loop at the same time
 
 DUTIES = {"pulse12": 0.125, "pulse25": 0.25, "square": 0.5}
 TRIANGLE = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
@@ -12356,17 +12540,39 @@ EFFECTS = {
 }
 EFFECTS["claw_click_far"] = muffled(EFFECTS["claw_click"], 900)  # in the next room, through the wall
 
+E2, G2, A2, BB2, CS3, D3 = 82.4, 98.0, 110.0, 116.5, 138.6, 146.8
+CHASE_BASS = (E2, E2, E2, G2, E2, E2, BB2, A2, E2, E2, E2, G2, E2, E2, D3, CS3)  # sixteen eighths, two bars
+
+
+def chase(eighth, near=False):
+    """The music of a chase, (length, voices): a deep triangle ostinato in E that leans on its tritone,
+    a hissing hi-hat on every eighth and a snare on the beats, a stab of the tritone at each bar.
+    Near, it is faster, the hats are sharper and a nervous pulse ticks over it."""
+    voices = []
+    for index, pitch in enumerate(CHASE_BASS):
+        when = index * eighth
+        voices.append(hit("triangle", pitch, eighth * 0.9, when, 1.0))
+        voices.append(hit("noise", 11000, 0.03, when, 0.25 if index % 2 == 0 else 0.4, highpass=5000))
+        if index % 4 == 2:
+            voices.append(hit("noise", 3000, 0.09, when, 0.55, lowpass=4000))
+        if index % 8 == 0:
+            voices += [hit("pulse12", 330, eighth * 0.6, when, 0.35), hit("pulse12", 466, eighth * 0.6, when, 0.3)]
+        if near:
+            voices.append(hit("pulse25", 659 if index % 2 == 0 else 622, eighth * 0.4, when + eighth / 2, 0.22))
+    return (len(CHASE_BASS) * eighth, voices)
+
+
 LOOPS = {
     # The sea on the deck: deep surf that swells and falls twice in four seconds, and the hiss of foam
     "sea": (4.0, [layer("noise", 3000, 4.0, volume=0.9, lowpass=500, attack=0.0, release=0.0, tremolo=(0.5, 0.7)),
                   layer("noise", 12000, 4.0, volume=0.25, lowpass=4000, highpass=1500, attack=0.0, release=0.0,
                         tremolo=(0.5, 0.9))]),
     # Water dripping in the dark: drops and their echo, now and then, on a breath of cave air
-    "drips": (3.2, [layer("noise", 2000, 3.2, volume=0.12, lowpass=300, attack=0.0, release=0.0)]
-              + [hit("triangle", pitch, 0.05, when, 0.6, to=pitch * 1.7) for when, pitch in
-                 ((0.35, 900), (1.3, 1100), (1.9, 820), (2.8, 1000))]
-              + [hit("triangle", pitch, 0.05, when + 0.09, 0.2, to=pitch * 1.7) for when, pitch in
-                 ((0.35, 900), (1.3, 1100), (1.9, 820), (2.8, 1000))]),
+    "drips": (6.0, [layer("noise", 2000, 6.0, volume=0.12, lowpass=300, attack=0.0, release=0.0)]
+              + [hit("triangle", pitch, 0.05, when, 0.5, to=pitch * 1.7) for when, pitch in
+                 ((0.6, 900), (2.9, 1100), (4.4, 820))]
+              + [hit("triangle", pitch, 0.05, when + 0.09, 0.15, to=pitch * 1.7) for when, pitch in
+                 ((0.6, 900), (2.9, 1100), (4.4, 820))]),
     # A machine hums: the mains, its overtones, and a faint crackle
     "hum": (1.0, [layer("triangle", 60, 1.0, attack=0.0, release=0.0, vibrato=(3, 0.05)),
                   layer("pulse12", 120, 1.0, volume=0.25, attack=0.0, release=0.0, lowpass=900),
@@ -12374,6 +12580,8 @@ LOOPS = {
                   layer("metal", 8000, 1.0, volume=0.06, attack=0.0, release=0.0, highpass=4000, tremolo=(7, 0.9))]),
 }
 LOOPS["sea_far"] = (LOOPS["sea"][0], muffled(LOOPS["sea"][1], 250))  # the sea from inside the ship
+LOOPS["chase"] = chase(60 / 140 / 2)               # the crab is after you: 140 beats a minute...
+LOOPS["chase_near"] = chase(60 / 180 / 2, near=True)  # ...and when it is close, 180
 
 _loaded = {}    # effect or loop name -> pygame Sound, once load() has run with audio
 _loops = {}     # slot -> list of the loops playing in it (see loop)
@@ -12505,10 +12713,14 @@ def pcm(mix, channels=1, repeat=1):
 
 def loop_samples(length, voices, rate):
     """A loop as floats: the voices that last the whole loop go on past its end for LOOP_FADE seconds
-    (they are periodic: the same as its start), and that end fades into the start."""
+    (they are periodic: the same as its start), the short ones of its first LOOP_FADE seconds come
+    again after its end, and that end fades into the start: it sounds the same all the way round."""
     longer = [dict(voice, length=voice["length"] + LOOP_FADE) if voice["length"] >= length else voice
               for voice in voices]
-    return seamless(render(longer, rate, length + LOOP_FADE), rate)
+    again = [dict(voice, start=voice["start"] + length) for voice in voices
+             if voice["length"] < length and voice["start"] < LOOP_FADE]
+    return seamless(render(longer + again, rate, length + LOOP_FADE), rate)
+
 
 
 def effect_length(voices):
@@ -19001,15 +19213,17 @@ def crab_on_deck(app, monkeypatch, player_at=(3, 18), crab_moving=True):
 
 def test_the_crab_walks_its_legs_and_works_its_claws_as_it_chases(app, monkeypatch):
     crab = crab_on_deck(app, monkeypatch)
-    legs, claws = set(), set()
-    for walked in range(0, 4 * main.CRAB_LEG_FRAMES * 2):
+    legs, openings = set(), []
+    for walked in range(2 * main.CRAB_CLAW_PERIOD):
         crab["walk"] = walked
-        app["frame"] = walked * 2
+        main.update(app, 0, 0)
         pose = main.crab_pose(app)
         legs.add(pose["legs"])
-        claws.add(pose["claws"])
+        openings.append(app["crab_claws"])
         assert pose["eyes"] == "hunt"
-    assert legs == {0, 1, 2, 3} and claws == set(main.CRAB_CLAW_RHYTHM)
+    assert legs == {0, 1, 2, 3}
+    assert min(openings) < 0.1 and max(openings) > 0.4  # they open and shut...
+    assert all(abs(b - a) <= main.CRAB_CLAW_SPEED + 1e-9 for a, b in zip(openings, openings[1:]))  # ...smoothly
     assert main.crab_pose(app)["look"][0] == -1  # it looks at its prey, on its left
 
 
@@ -19017,14 +19231,20 @@ def test_the_crab_gapes_and_shivers_before_it_lunges(app, monkeypatch):
     crab = crab_on_deck(app, monkeypatch)
     body = main.crab_rect(crab)
     p1(app)["pos"] = (body.x - 2 * main.TILE, body.y)
-    assert main.crab_telegraph(app) and main.crab_pose(app)["claws"] == 1.0
-    places = set()
-    for frame in range(4):
-        app["frame"] = frame
-        screen = pygame.Surface(main.room_surface("deck").get_size())
-        main.draw_room(app, screen)
-        places.add(app["frame"] // 2 % 2)
-    assert places == {0, 1}
+    assert main.crab_telegraph(app)
+    for _ in range(int(1 / main.CRAB_CLAW_SPEED) + 1):
+        main.update(app, 0, 0)
+    assert app["crab_lunging"] and main.crab_pose(app)["claws"] == 1.0  # wide open, once they got there
+    shivers = {main.CRAB_SHIVER[(frame // 3) % len(main.CRAB_SHIVER)] for frame in range(12)}
+    assert shivers == {-1, 0, 1}
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    p1(app)["pos"] = (body.x - main.CHARGE_DISTANCE - main.TILE // 2, body.y)  # just past the edge: still lunging
+    main.update(app, 0, 0)
+    assert app["crab_lunging"]
+    p1(app)["pos"] = (body.x - main.CHARGE_DISTANCE - 2 * main.TILE, body.y)  # a tile farther: it stops
+    main.update(app, 0, 0)
+    assert not app["crab_lunging"]
     app["hidden"] = {1: 100, 2: 100}  # nobody to see: no lunge, calm eyes
     assert not main.crab_telegraph(app) and main.crab_pose(app)["eyes"] == "calm"
 
@@ -19106,6 +19326,163 @@ def test_the_crab_turns_to_stone_in_its_new_looks(app):
     cx, cy = main.crab_look.CENTER
     r, g, b = screen.get_at((x + cx, y + cy))[:3]
     assert max(r, g, b) - min(r, g, b) < 40  # grey: the whole crab, in stone
+
+
+# --- The chase music, the red warning, the crab's footprint, players down never in its way ---
+
+
+def test_the_chase_music_plays_while_the_crab_hunts_nearby_and_fades_after(app, looped, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch, player_at=(4, 10))
+    me = main.player_rect(p1(app)["pos"])
+    app["players"][1]["pos"] = free_spot(app, 14, 22)
+    crab["pos"] = (me.x + (main.DASH_TILES - 1) * main.TILE, me.y)  # within the reach of Flash's dash
+    main.update(app, 0, 0)
+    assert looped["chase"] == ("chase", main.CHASE_VOLUME, 0.0)
+    bed = main.ambience(app)[0]
+    assert looped["bed"][1] == pytest.approx(bed[1] * main.CHASE_DUCK)  # the sea, quieter meanwhile
+    crab["pos"] = (me.x + 3 * main.TILE, me.y)
+    main.update(app, 0, 0)
+    assert looped["chase"][0] == "chase_near"  # close: faster
+    crab["pos"] = (me.x + (main.DASH_TILES + 3) * main.TILE, me.y)  # too far
+    for _ in range(main.CHASE_HOLD - 1):
+        main.update(app, 0, 0)
+        assert looped["chase"][0] == "chase"  # it goes on a little...
+    for _ in range(2):
+        main.update(app, 0, 0)
+    assert looped["chase"][0] is None  # ...then fades
+    assert looped["bed"][1] == pytest.approx(bed[1])
+    crab["pos"] = (me.x + 3 * main.TILE, me.y)
+    crab["stun"] = 100
+    app["chase_left"] = 0
+    main.update(app, 0, 0)
+    assert looped["chase"][0] is None  # stunned, it hunts nobody
+
+
+def test_the_chase_music_is_tense_and_faster_when_the_crab_is_close():
+    far_length, far = sounds.LOOPS["chase"]
+    near_length, near = sounds.LOOPS["chase_near"]
+    assert near_length < far_length  # the same sixteen eighths, faster
+    bass = [voice for voice in far if voice["wave"] == "triangle"]
+    assert len(bass) == 16 and min(voice["freq"] for voice in bass) < 90  # deep
+    stabs = {round(voice["freq"]) for voice in far if voice["wave"] == "pulse12"}
+    assert stabs == {330, 466}  # E and its tritone
+    assert any(voice["wave"] == "pulse25" for voice in near) and not any(voice["wave"] == "pulse25" for voice in far)
+
+
+def test_a_loop_of_short_hits_is_as_loud_at_its_start_as_later():
+    length, voices = sounds.LOOPS["chase"]
+    data = sounds.loop_samples(length, voices, 8000)
+    eighth = length / 16
+    first = max(abs(value) for value in data[:int(0.05 * 8000)])
+    ninth = max(abs(value) for value in data[int(8 * eighth * 8000):int((8 * eighth + 0.05) * 8000)])
+    assert first == pytest.approx(ninth, rel=0.2)  # the first beat is not faded in
+
+
+def test_the_sea_and_the_drips_are_quieter_and_the_drips_sparser():
+    assert main.SEA_INSIDE_VOLUME < main.SEA_VOLUME <= 0.35 and main.DRIPS_VOLUME <= 0.35
+    length, voices = sounds.LOOPS["drips"]
+    drops = [voice for voice in voices if voice["wave"] == "triangle" and voice["volume"] >= 0.3]
+    assert len(drops) / length <= 0.5  # a drop every two seconds or more
+
+
+def test_the_crab_glows_red_in_the_doorway_before_it_comes_in(app, monkeypatch):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    door = main.door_rect("deck_to_cabin")
+    crab_in(app, "deck", (door.centerx - 6, door.bottom + 2 * main.TILE))
+    warning = main.crab_warning(app)
+    assert warning is not None and warning[0] == "cabin_to_deck" and 0.4 < warning[1] < 1
+    app["crab"]["pos"] = (door.centerx - 6, door.bottom + main.TILE // 2)
+    assert main.crab_warning(app)[1] > warning[1]  # nearer: stronger
+    app["crab"]["pos"] = (door.centerx - 6, door.bottom + 8 * main.TILE)
+    assert main.crab_warning(app) is None  # far from the door: nothing yet
+    crab_in(app, "cabin", main.spawn_in_front_of("cabin_to_deck"))
+    app["crab"]["away"] = 10  # coming through
+    assert main.crab_warning(app) == ("cabin_to_deck", 1.0)
+    app["crab"]["away"] = 0
+    assert main.crab_warning(app) is None  # in: the crab itself is there to see
+
+
+def test_the_red_glow_shows_in_the_dark(app, monkeypatch):
+    two_playing(app, TINCTURES_FOUND, partner_room="corridor")
+    app["state"]["room"] = "corridor"
+    main.place_at_entry(app)
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    p1(app)["pos"] = free_spot(app, 14, 3)
+    app["players"][1]["pos"] = free_spot(app, 15, 3)
+    crab_in(app, "corridor", free_spot(app, 4, 3))
+    screen = pygame.Surface(main.room_surface("corridor").get_size())
+    main.draw_room(app, screen)
+    lit = screen.get_at(main.crab_rect(app["crab"]).midbottom)[:3]
+    monkeypatch.setitem(effects.FX, "lights", False)
+    main.draw_room(app, screen)
+    dark = screen.get_at(main.crab_rect(app["crab"]).midbottom)[:3]
+    assert lit[0] > dark[0] + 20 and lit[0] > lit[2]  # red, in the dark
+
+
+def test_the_crab_never_sinks_into_the_barrels(app):
+    never_inside = []
+    for difficulty in ("hard", "easy"):
+        two_playing(app, FIRST_HALF)
+        app["state"]["flags"]["crab_difficulty"] = difficulty
+        awake_crab(app)
+        p1(app)["pos"] = free_spot(app, 2, 3)
+        app["players"][1]["pos"] = free_spot(app, 1, 1)  # behind the barrels, in the corner
+        app["crab"]["pos"] = free_spot(app, 6, 6)
+        solids = main.solid_rects(main.room_state(app["state"], "deck"))
+        for _ in range(900):
+            main.update(app, 0, 0)
+            never_inside.append(main.crab_foot(app["crab"]["pos"]).collidelist(solids) == -1)
+            if len(app["downed"]) == 2 or app["state"]["ending"]:
+                break
+        assert len(app["downed"]) == 2 or app["state"]["ending"] == "caught", difficulty  # it got them both
+    assert all(never_inside)  # its footprint, wider than its body, never inside anything
+
+
+def test_a_player_down_is_never_in_the_crabs_way(app, monkeypatch):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    app["crab"]["pos"] = free_spot(app, 3, 16)
+    p1(app)["pos"] = free_spot(app, 7, 16)          # down, right in its way...
+    app["players"][1]["pos"] = free_spot(app, 11, 16)  # ...to the other one
+    app["downed"] = {1: main.DOWN_FRAMES}
+    crossed = False
+    for _ in range(600):
+        main.update(app, 0, 0)
+        crossed = crossed or main.crab_rect(app["crab"]).colliderect(main.player_rect(p1(app)["pos"]))
+        if 2 in app["downed"]:
+            break
+    assert crossed and 2 in app["downed"]  # straight over them
+
+
+def test_a_crab_caught_on_a_corner_gets_itself_loose(app, monkeypatch):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    p1(app)["pos"] = free_spot(app, 12, 20)
+    app["players"][1]["pos"] = free_spot(app, 12, 20)
+    barrel = main.thing_rect("deck_barrel_1")
+    app["crab"]["pos"] = (barrel.left - 3, barrel.bottom - 4)  # wedged against the barrel, off the middle of any tile
+    monkeypatch.setattr(main, "move_crab", lambda app: None)  # as if every step were blocked
+    for _ in range(main.CRAB_STUCK_FRAMES - 1):
+        main.update(app, 0, 0)
+    assert app["crab"]["pos"] == (barrel.left - 3, barrel.bottom - 4)
+    main.update(app, 0, 0)
+    body = main.crab_rect(app["crab"])
+    assert body.center in [main.tile_rect(*tile).center for tile in main.free_tiles(app["state"], "deck")]
+    assert pygame.Vector2(body.center).distance_to((barrel.left - 3 + 6, barrel.bottom + 2)) <= 1.5 * main.TILE
+
+
+def test_the_hard_crab_walks_straight_where_it_can():
+    free = {(x, y) for x in range(10) for y in range(10)} - {(5, 2), (5, 3)}
+    way = main.path_to(free, (2, 2), [(8, 2)])
+    assert way[0] != (2, 2) and way[-1] == (8, 2) and (5, 2) not in way
+    assert main.path_to(free, (2, 2), [(2, 2)]) == [(2, 2)]
+    assert main.path_to(free - {(1, 2), (3, 2), (2, 1), (2, 3)}, (2, 2), [(8, 2)]) is None
+    wall = [main.tile_rect(5, 2)]
+    start = main.player_rect((0, 0))
+    start.center = main.tile_rect(2, 2).center
+    assert main.straight_way(start.topleft, main.tile_rect(2, 6).center, wall)
+    assert not main.straight_way(start.topleft, main.tile_rect(8, 2).center, wall)
 
 
 ================================================================================
@@ -20251,7 +20628,7 @@ def test_the_claws_shut_tip_to_tip_and_gape():
         return widest
     shut, half, wide = gap(0.0), gap(0.5), gap(1.0)
     assert shut == 0 < half < wide  # one point, tip to tip; then apart, wider and wider
-    assert crab.pose(claws=0.6)["claws"] == 0.5 and crab.pose(claws=7)["claws"] == 1.0  # a few steps, kept in range
+    assert crab.pose(claws=0.6)["claws"] == 0.625 and crab.pose(claws=7)["claws"] == 1.0  # a few steps, kept in range
     assert pygame.image.tobytes(crab.picture(crab.pose(claws=0.5)), "RGBA") not in (
         pygame.image.tobytes(crab.picture(crab.pose(claws=0.0)), "RGBA"),
         pygame.image.tobytes(crab.picture(crab.pose(claws=1.0)), "RGBA"))
@@ -20861,7 +21238,7 @@ def test_a_loop_fades_into_its_own_start(name):
     assert len(data) == int(length * RATE)
     assert abs(data[-1] - data[0]) < 0.25  # no click at the seam
     assert loudness(data) > 0.02
-    assert 0.9 < length <= 4.0
+    assert 0.9 < length <= 8.0
 
 
 def test_the_sea_swells_and_inside_the_ship_it_is_muffled():

@@ -51,6 +51,7 @@ CLAW_AT = (14, -4)         # the middle of the palm of its claw
 PALM = 8                   # how round the palm is (its radius squared)
 FINGER = 6                 # how long the fingers are
 FINGER_SHUT = -0.26        # radians each finger leans in when the claw is shut: their tips meet...
+CLAW_STEPS = 8             # how many openings of the claws are painted, between shut and gaping
 FINGER_OPEN = 0.55         # ...and out when it gapes
 
 _pictures = {}
@@ -58,7 +59,7 @@ _pictures = {}
 
 def pose(legs=1, claws=0.0, breath=0, eyes="calm", look=(0, 1)):
     """A pose of the crab (see the top of this file), its values kept in their ranges."""
-    return {"legs": legs % 4, "claws": round(min(max(claws, 0.0), 1.0) * 4) / 4, "breath": 1 if breath else 0,
+    return {"legs": legs % 4, "claws": round(min(max(claws, 0.0), 1.0) * CLAW_STEPS) / CLAW_STEPS, "breath": 1 if breath else 0,
             "eyes": eyes, "look": (max(-1, min(1, look[0])), max(-1, min(1, look[1])))}
 
 

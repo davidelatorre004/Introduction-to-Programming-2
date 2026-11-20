@@ -220,7 +220,7 @@ def test_a_loop_fades_into_its_own_start(name):
     assert len(data) == int(length * RATE)
     assert abs(data[-1] - data[0]) < 0.25  # no click at the seam
     assert loudness(data) > 0.02
-    assert 0.9 < length <= 4.0
+    assert 0.9 < length <= 8.0
 
 
 def test_the_sea_swells_and_inside_the_ship_it_is_muffled():

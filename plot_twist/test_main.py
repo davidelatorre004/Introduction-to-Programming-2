@@ -4152,15 +4152,17 @@ def crab_on_deck(app, monkeypatch, player_at=(3, 18), crab_moving=True):
 
 def test_the_crab_walks_its_legs_and_works_its_claws_as_it_chases(app, monkeypatch):
     crab = crab_on_deck(app, monkeypatch)
-    legs, claws = set(), set()
-    for walked in range(0, 4 * main.CRAB_LEG_FRAMES * 2):
+    legs, openings = set(), []
+    for walked in range(2 * main.CRAB_CLAW_PERIOD):
         crab["walk"] = walked
-        app["frame"] = walked * 2
+        main.update(app, 0, 0)
         pose = main.crab_pose(app)
         legs.add(pose["legs"])
-        claws.add(pose["claws"])
+        openings.append(app["crab_claws"])
         assert pose["eyes"] == "hunt"
-    assert legs == {0, 1, 2, 3} and claws == set(main.CRAB_CLAW_RHYTHM)
+    assert legs == {0, 1, 2, 3}
+    assert min(openings) < 0.1 and max(openings) > 0.4  # they open and shut...
+    assert all(abs(b - a) <= main.CRAB_CLAW_SPEED + 1e-9 for a, b in zip(openings, openings[1:]))  # ...smoothly
     assert main.crab_pose(app)["look"][0] == -1  # it looks at its prey, on its left
 
 
@@ -4168,14 +4170,20 @@ def test_the_crab_gapes_and_shivers_before_it_lunges(app, monkeypatch):
     crab = crab_on_deck(app, monkeypatch)
     body = main.crab_rect(crab)
     p1(app)["pos"] = (body.x - 2 * main.TILE, body.y)
-    assert main.crab_telegraph(app) and main.crab_pose(app)["claws"] == 1.0
-    places = set()
-    for frame in range(4):
-        app["frame"] = frame
-        screen = pygame.Surface(main.room_surface("deck").get_size())
-        main.draw_room(app, screen)
-        places.add(app["frame"] // 2 % 2)
-    assert places == {0, 1}
+    assert main.crab_telegraph(app)
+    for _ in range(int(1 / main.CRAB_CLAW_SPEED) + 1):
+        main.update(app, 0, 0)
+    assert app["crab_lunging"] and main.crab_pose(app)["claws"] == 1.0  # wide open, once they got there
+    shivers = {main.CRAB_SHIVER[(frame // 3) % len(main.CRAB_SHIVER)] for frame in range(12)}
+    assert shivers == {-1, 0, 1}
+    screen = pygame.Surface(main.room_surface("deck").get_size())
+    main.draw_room(app, screen)
+    p1(app)["pos"] = (body.x - main.CHARGE_DISTANCE - main.TILE // 2, body.y)  # just past the edge: still lunging
+    main.update(app, 0, 0)
+    assert app["crab_lunging"]
+    p1(app)["pos"] = (body.x - main.CHARGE_DISTANCE - 2 * main.TILE, body.y)  # a tile farther: it stops
+    main.update(app, 0, 0)
+    assert not app["crab_lunging"]
     app["hidden"] = {1: 100, 2: 100}  # nobody to see: no lunge, calm eyes
     assert not main.crab_telegraph(app) and main.crab_pose(app)["eyes"] == "calm"
 
@@ -4257,3 +4265,160 @@ def test_the_crab_turns_to_stone_in_its_new_looks(app):
     cx, cy = main.crab_look.CENTER
     r, g, b = screen.get_at((x + cx, y + cy))[:3]
     assert max(r, g, b) - min(r, g, b) < 40  # grey: the whole crab, in stone
+
+
+# --- The chase music, the red warning, the crab's footprint, players down never in its way ---
+
+
+def test_the_chase_music_plays_while_the_crab_hunts_nearby_and_fades_after(app, looped, monkeypatch):
+    crab = crab_on_deck(app, monkeypatch, player_at=(4, 10))
+    me = main.player_rect(p1(app)["pos"])
+    app["players"][1]["pos"] = free_spot(app, 14, 22)
+    crab["pos"] = (me.x + (main.DASH_TILES - 1) * main.TILE, me.y)  # within the reach of Flash's dash
+    main.update(app, 0, 0)
+    assert looped["chase"] == ("chase", main.CHASE_VOLUME, 0.0)
+    bed = main.ambience(app)[0]
+    assert looped["bed"][1] == pytest.approx(bed[1] * main.CHASE_DUCK)  # the sea, quieter meanwhile
+    crab["pos"] = (me.x + 3 * main.TILE, me.y)
+    main.update(app, 0, 0)
+    assert looped["chase"][0] == "chase_near"  # close: faster
+    crab["pos"] = (me.x + (main.DASH_TILES + 3) * main.TILE, me.y)  # too far
+    for _ in range(main.CHASE_HOLD - 1):
+        main.update(app, 0, 0)
+        assert looped["chase"][0] == "chase"  # it goes on a little...
+    for _ in range(2):
+        main.update(app, 0, 0)
+    assert looped["chase"][0] is None  # ...then fades
+    assert looped["bed"][1] == pytest.approx(bed[1])
+    crab["pos"] = (me.x + 3 * main.TILE, me.y)
+    crab["stun"] = 100
+    app["chase_left"] = 0
+    main.update(app, 0, 0)
+    assert looped["chase"][0] is None  # stunned, it hunts nobody
+
+
+def test_the_chase_music_is_tense_and_faster_when_the_crab_is_close():
+    far_length, far = sounds.LOOPS["chase"]
+    near_length, near = sounds.LOOPS["chase_near"]
+    assert near_length < far_length  # the same sixteen eighths, faster
+    bass = [voice for voice in far if voice["wave"] == "triangle"]
+    assert len(bass) == 16 and min(voice["freq"] for voice in bass) < 90  # deep
+    stabs = {round(voice["freq"]) for voice in far if voice["wave"] == "pulse12"}
+    assert stabs == {330, 466}  # E and its tritone
+    assert any(voice["wave"] == "pulse25" for voice in near) and not any(voice["wave"] == "pulse25" for voice in far)
+
+
+def test_a_loop_of_short_hits_is_as_loud_at_its_start_as_later():
+    length, voices = sounds.LOOPS["chase"]
+    data = sounds.loop_samples(length, voices, 8000)
+    eighth = length / 16
+    first = max(abs(value) for value in data[:int(0.05 * 8000)])
+    ninth = max(abs(value) for value in data[int(8 * eighth * 8000):int((8 * eighth + 0.05) * 8000)])
+    assert first == pytest.approx(ninth, rel=0.2)  # the first beat is not faded in
+
+
+def test_the_sea_and_the_drips_are_quieter_and_the_drips_sparser():
+    assert main.SEA_INSIDE_VOLUME < main.SEA_VOLUME <= 0.35 and main.DRIPS_VOLUME <= 0.35
+    length, voices = sounds.LOOPS["drips"]
+    drops = [voice for voice in voices if voice["wave"] == "triangle" and voice["volume"] >= 0.3]
+    assert len(drops) / length <= 0.5  # a drop every two seconds or more
+
+
+def test_the_crab_glows_red_in_the_doorway_before_it_comes_in(app, monkeypatch):
+    two_playing(app, FIRST_HALF + [act("enter", "deck_to_cabin")])
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    door = main.door_rect("deck_to_cabin")
+    crab_in(app, "deck", (door.centerx - 6, door.bottom + 2 * main.TILE))
+    warning = main.crab_warning(app)
+    assert warning is not None and warning[0] == "cabin_to_deck" and 0.4 < warning[1] < 1
+    app["crab"]["pos"] = (door.centerx - 6, door.bottom + main.TILE // 2)
+    assert main.crab_warning(app)[1] > warning[1]  # nearer: stronger
+    app["crab"]["pos"] = (door.centerx - 6, door.bottom + 8 * main.TILE)
+    assert main.crab_warning(app) is None  # far from the door: nothing yet
+    crab_in(app, "cabin", main.spawn_in_front_of("cabin_to_deck"))
+    app["crab"]["away"] = 10  # coming through
+    assert main.crab_warning(app) == ("cabin_to_deck", 1.0)
+    app["crab"]["away"] = 0
+    assert main.crab_warning(app) is None  # in: the crab itself is there to see
+
+
+def test_the_red_glow_shows_in_the_dark(app, monkeypatch):
+    two_playing(app, TINCTURES_FOUND, partner_room="corridor")
+    app["state"]["room"] = "corridor"
+    main.place_at_entry(app)
+    monkeypatch.setattr(main, "update_crab", lambda app: None)
+    p1(app)["pos"] = free_spot(app, 14, 3)
+    app["players"][1]["pos"] = free_spot(app, 15, 3)
+    crab_in(app, "corridor", free_spot(app, 4, 3))
+    screen = pygame.Surface(main.room_surface("corridor").get_size())
+    main.draw_room(app, screen)
+    lit = screen.get_at(main.crab_rect(app["crab"]).midbottom)[:3]
+    monkeypatch.setitem(effects.FX, "lights", False)
+    main.draw_room(app, screen)
+    dark = screen.get_at(main.crab_rect(app["crab"]).midbottom)[:3]
+    assert lit[0] > dark[0] + 20 and lit[0] > lit[2]  # red, in the dark
+
+
+def test_the_crab_never_sinks_into_the_barrels(app):
+    never_inside = []
+    for difficulty in ("hard", "easy"):
+        two_playing(app, FIRST_HALF)
+        app["state"]["flags"]["crab_difficulty"] = difficulty
+        awake_crab(app)
+        p1(app)["pos"] = free_spot(app, 2, 3)
+        app["players"][1]["pos"] = free_spot(app, 1, 1)  # behind the barrels, in the corner
+        app["crab"]["pos"] = free_spot(app, 6, 6)
+        solids = main.solid_rects(main.room_state(app["state"], "deck"))
+        for _ in range(900):
+            main.update(app, 0, 0)
+            never_inside.append(main.crab_foot(app["crab"]["pos"]).collidelist(solids) == -1)
+            if len(app["downed"]) == 2 or app["state"]["ending"]:
+                break
+        assert len(app["downed"]) == 2 or app["state"]["ending"] == "caught", difficulty  # it got them both
+    assert all(never_inside)  # its footprint, wider than its body, never inside anything
+
+
+def test_a_player_down_is_never_in_the_crabs_way(app, monkeypatch):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    app["crab"]["pos"] = free_spot(app, 3, 16)
+    p1(app)["pos"] = free_spot(app, 7, 16)          # down, right in its way...
+    app["players"][1]["pos"] = free_spot(app, 11, 16)  # ...to the other one
+    app["downed"] = {1: main.DOWN_FRAMES}
+    crossed = False
+    for _ in range(600):
+        main.update(app, 0, 0)
+        crossed = crossed or main.crab_rect(app["crab"]).colliderect(main.player_rect(p1(app)["pos"]))
+        if 2 in app["downed"]:
+            break
+    assert crossed and 2 in app["downed"]  # straight over them
+
+
+def test_a_crab_caught_on_a_corner_gets_itself_loose(app, monkeypatch):
+    two_playing(app, FIRST_HALF)
+    awake_crab(app)
+    p1(app)["pos"] = free_spot(app, 12, 20)
+    app["players"][1]["pos"] = free_spot(app, 12, 20)
+    barrel = main.thing_rect("deck_barrel_1")
+    app["crab"]["pos"] = (barrel.left - 3, barrel.bottom - 4)  # wedged against the barrel, off the middle of any tile
+    monkeypatch.setattr(main, "move_crab", lambda app: None)  # as if every step were blocked
+    for _ in range(main.CRAB_STUCK_FRAMES - 1):
+        main.update(app, 0, 0)
+    assert app["crab"]["pos"] == (barrel.left - 3, barrel.bottom - 4)
+    main.update(app, 0, 0)
+    body = main.crab_rect(app["crab"])
+    assert body.center in [main.tile_rect(*tile).center for tile in main.free_tiles(app["state"], "deck")]
+    assert pygame.Vector2(body.center).distance_to((barrel.left - 3 + 6, barrel.bottom + 2)) <= 1.5 * main.TILE
+
+
+def test_the_hard_crab_walks_straight_where_it_can():
+    free = {(x, y) for x in range(10) for y in range(10)} - {(5, 2), (5, 3)}
+    way = main.path_to(free, (2, 2), [(8, 2)])
+    assert way[0] != (2, 2) and way[-1] == (8, 2) and (5, 2) not in way
+    assert main.path_to(free, (2, 2), [(2, 2)]) == [(2, 2)]
+    assert main.path_to(free - {(1, 2), (3, 2), (2, 1), (2, 3)}, (2, 2), [(8, 2)]) is None
+    wall = [main.tile_rect(5, 2)]
+    start = main.player_rect((0, 0))
+    start.center = main.tile_rect(2, 2).center
+    assert main.straight_way(start.topleft, main.tile_rect(2, 6).center, wall)
+    assert not main.straight_way(start.topleft, main.tile_rect(8, 2).center, wall)

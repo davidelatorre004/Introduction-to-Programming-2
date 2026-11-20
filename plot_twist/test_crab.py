@@ -71,7 +71,7 @@ def test_the_claws_shut_tip_to_tip_and_gape():
         return widest
     shut, half, wide = gap(0.0), gap(0.5), gap(1.0)
     assert shut == 0 < half < wide  # one point, tip to tip; then apart, wider and wider
-    assert crab.pose(claws=0.6)["claws"] == 0.5 and crab.pose(claws=7)["claws"] == 1.0  # a few steps, kept in range
+    assert crab.pose(claws=0.6)["claws"] == 0.625 and crab.pose(claws=7)["claws"] == 1.0  # a few steps, kept in range
     assert pygame.image.tobytes(crab.picture(crab.pose(claws=0.5)), "RGBA") not in (
         pygame.image.tobytes(crab.picture(crab.pose(claws=0.0)), "RGBA"),
         pygame.image.tobytes(crab.picture(crab.pose(claws=1.0)), "RGBA"))

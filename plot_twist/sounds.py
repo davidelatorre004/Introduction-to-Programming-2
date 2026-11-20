@@ -43,8 +43,8 @@ RENDER_RATE = 22050  # the sounds are made at most at this rate, then held to th
 NOISE_SEED = 1      # where the register of the noise starts: the same noise every time
 LOOP_FADE = 0.25    # seconds at the end of a loop that fade into its start: no click at the seam
 LOOP_FADE_FRAMES = 30  # frames a loop takes to fade in or out (half a second)
-LOOP_CHANNELS = 6   # mixer channels kept for the loops: two for each loop slot, to cross-fade
-LOOP_SLOTS = ("bed", "hum", "spare")  # what can loop at the same time
+LOOP_CHANNELS = 8   # mixer channels kept for the loops: two for each loop slot, to cross-fade
+LOOP_SLOTS = ("bed", "hum", "chase", "spare")  # what can loop at the same time
 
 DUTIES = {"pulse12": 0.125, "pulse25": 0.25, "square": 0.5}
 TRIANGLE = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
@@ -174,17 +174,39 @@ EFFECTS = {
 }
 EFFECTS["claw_click_far"] = muffled(EFFECTS["claw_click"], 900)  # in the next room, through the wall
 
+E2, G2, A2, BB2, CS3, D3 = 82.4, 98.0, 110.0, 116.5, 138.6, 146.8
+CHASE_BASS = (E2, E2, E2, G2, E2, E2, BB2, A2, E2, E2, E2, G2, E2, E2, D3, CS3)  # sixteen eighths, two bars
+
+
+def chase(eighth, near=False):
+    """The music of a chase, (length, voices): a deep triangle ostinato in E that leans on its tritone,
+    a hissing hi-hat on every eighth and a snare on the beats, a stab of the tritone at each bar.
+    Near, it is faster, the hats are sharper and a nervous pulse ticks over it."""
+    voices = []
+    for index, pitch in enumerate(CHASE_BASS):
+        when = index * eighth
+        voices.append(hit("triangle", pitch, eighth * 0.9, when, 1.0))
+        voices.append(hit("noise", 11000, 0.03, when, 0.25 if index % 2 == 0 else 0.4, highpass=5000))
+        if index % 4 == 2:
+            voices.append(hit("noise", 3000, 0.09, when, 0.55, lowpass=4000))
+        if index % 8 == 0:
+            voices += [hit("pulse12", 330, eighth * 0.6, when, 0.35), hit("pulse12", 466, eighth * 0.6, when, 0.3)]
+        if near:
+            voices.append(hit("pulse25", 659 if index % 2 == 0 else 622, eighth * 0.4, when + eighth / 2, 0.22))
+    return (len(CHASE_BASS) * eighth, voices)
+
+
 LOOPS = {
     # The sea on the deck: deep surf that swells and falls twice in four seconds, and the hiss of foam
     "sea": (4.0, [layer("noise", 3000, 4.0, volume=0.9, lowpass=500, attack=0.0, release=0.0, tremolo=(0.5, 0.7)),
                   layer("noise", 12000, 4.0, volume=0.25, lowpass=4000, highpass=1500, attack=0.0, release=0.0,
                         tremolo=(0.5, 0.9))]),
     # Water dripping in the dark: drops and their echo, now and then, on a breath of cave air
-    "drips": (3.2, [layer("noise", 2000, 3.2, volume=0.12, lowpass=300, attack=0.0, release=0.0)]
-              + [hit("triangle", pitch, 0.05, when, 0.6, to=pitch * 1.7) for when, pitch in
-                 ((0.35, 900), (1.3, 1100), (1.9, 820), (2.8, 1000))]
-              + [hit("triangle", pitch, 0.05, when + 0.09, 0.2, to=pitch * 1.7) for when, pitch in
-                 ((0.35, 900), (1.3, 1100), (1.9, 820), (2.8, 1000))]),
+    "drips": (6.0, [layer("noise", 2000, 6.0, volume=0.12, lowpass=300, attack=0.0, release=0.0)]
+              + [hit("triangle", pitch, 0.05, when, 0.5, to=pitch * 1.7) for when, pitch in
+                 ((0.6, 900), (2.9, 1100), (4.4, 820))]
+              + [hit("triangle", pitch, 0.05, when + 0.09, 0.15, to=pitch * 1.7) for when, pitch in
+                 ((0.6, 900), (2.9, 1100), (4.4, 820))]),
     # A machine hums: the mains, its overtones, and a faint crackle
     "hum": (1.0, [layer("triangle", 60, 1.0, attack=0.0, release=0.0, vibrato=(3, 0.05)),
                   layer("pulse12", 120, 1.0, volume=0.25, attack=0.0, release=0.0, lowpass=900),
@@ -192,6 +214,8 @@ LOOPS = {
                   layer("metal", 8000, 1.0, volume=0.06, attack=0.0, release=0.0, highpass=4000, tremolo=(7, 0.9))]),
 }
 LOOPS["sea_far"] = (LOOPS["sea"][0], muffled(LOOPS["sea"][1], 250))  # the sea from inside the ship
+LOOPS["chase"] = chase(60 / 140 / 2)               # the crab is after you: 140 beats a minute...
+LOOPS["chase_near"] = chase(60 / 180 / 2, near=True)  # ...and when it is close, 180
 
 _loaded = {}    # effect or loop name -> pygame Sound, once load() has run with audio
 _loops = {}     # slot -> list of the loops playing in it (see loop)
@@ -323,10 +347,14 @@ def pcm(mix, channels=1, repeat=1):
 
 def loop_samples(length, voices, rate):
     """A loop as floats: the voices that last the whole loop go on past its end for LOOP_FADE seconds
-    (they are periodic: the same as its start), and that end fades into the start."""
+    (they are periodic: the same as its start), the short ones of its first LOOP_FADE seconds come
+    again after its end, and that end fades into the start: it sounds the same all the way round."""
     longer = [dict(voice, length=voice["length"] + LOOP_FADE) if voice["length"] >= length else voice
               for voice in voices]
-    return seamless(render(longer, rate, length + LOOP_FADE), rate)
+    again = [dict(voice, start=voice["start"] + length) for voice in voices
+             if voice["length"] < length and voice["start"] < LOOP_FADE]
+    return seamless(render(longer + again, rate, length + LOOP_FADE), rate)
+
 
 
 def effect_length(voices):
