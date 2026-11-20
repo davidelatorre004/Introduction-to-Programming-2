@@ -2,9 +2,19 @@
 
 Newest first. Each version has its own page in [`versions/`](versions/), with how to play it.
 
+## [v49](versions/v49.md) - Ready to hand in: a clean repository, and nothing from the network trusted (2026-11-21)
+
+In the `main` branch (https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/main/plot_twist).
+
+- The repository holds the game only: the files of other assignments at its top (Payment_Splitter.py, splitit, Workflows and a __pycache__ folder) are gone, and a .gitignore keeps caches, the virtual environment and the save file out of it. A README at the top gives the team's names and student numbers, where to download the game, and the commands to run it and its tests.
+- Nothing that comes from the other computer of a game for two is trusted any more. Every message is checked before it is used: a player's position, direction and timers, the crab, the players down, the outcome of an action and its number. Anything malformed or out of range is ignored, and an action that is not one the game could offer is refused (engine.is_valid_action, then perform() inside a guard). Before, a broken or hostile computer on the same network could crash the host or the other player with a single message (79 different ways, found by sending every kind of message with missing or wrong fields).
+- A line of JSON nested too deep to read no longer crashes the game, from the network or from the save file; lines far too long are skipped.
+- pytest is now a development dependency only (the game needs nothing but pygame, pinned); no known vulnerability in the pinned dependencies (pip-audit). No keys or passwords in the repository or its history.
+- New tests: test_net.py (messages that arrive whole, broken and hostile lines skipped, a line that never ends), hostile messages to the host and to the computer that joined, the check of actions, a save file nested too deep.
+
 ## [v48](versions/v48.md) - A storm that grows with the puzzles, and seagulls before it (2026-11-20)
 
-On the `main` branch.
+In commit [`bf99fff`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/bf99fffa4f0d16970e891be277cad2e50a1982b2/plot_twist).
 
 - One storm grows through the whole game, in a new module, weather.py. The opening bolt is its first sign; the calm lasts until the player walks into the cabin. With the first puzzle (the generators) the sky darkens bit by bit, clouds gather and drift over the deck, and far lightning flashes now and then, with no thunder. With the second (the tiles of the hold) the rain starts, light at first, slanted more and more by the wind, and the thunder follows the flashes. During the third (the remedy) it keeps growing with every tincture found and poured in, and it is at its worst when only the last one is left: heavy diagonal rain, puddles on the deck, bolts across the sky, near thunder that shakes the ship. It then stays at its worst until the end.
 - The storm follows the puzzles of story.py (circuits, floor puzzles, potion puzzles), whatever their order, and moves there slowly (from calm to its worst in 8 seconds). It never goes back: a puzzle that starts over does not calm it. A saved game resumes in its own weather.
@@ -16,7 +26,7 @@ On the `main` branch.
 
 ## [v47](versions/v47.md) - Bookshelves, a helm open on the sea, and portals you walk out of (2026-11-20)
 
-In the latest commit of the branch [`claude/funny-ramanujan-ffrx60`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/claude/funny-ramanujan-ffrx60/plot_twist).
+In commit [`b2f1f1a`](https://github.com/davidelatorre004/Introduction-to-Programming-2/tree/b2f1f1a4f46943260297112e80fe2aba7e9f9caa/plot_twist).
 
 - The empty room to the right of the cabin is lined all round with bookshelves of dark wood veined with red, their books mostly red: every tile along its walls, but the four in front of the door to the cabin, so the way in stays free. The anvil still appears in the middle.
 - The top wall of the helm is open on the sea: two rows of stormy waves, the bow of the ship cutting through them with foam along its sides, and a wooden railing in front that casts its shadow on the floor. Nobody can go out there: those rows are as solid as a wall (a new "view" of a room in story.py). The ship's wheel stands right below the railing, in the middle of the room (an object can now be shifted by a few pixels off the grid); the chart tables and the bookshelf that stood on the first row moved down by one.

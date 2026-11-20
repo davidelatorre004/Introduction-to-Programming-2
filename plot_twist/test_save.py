@@ -94,3 +94,10 @@ def test_another_path_can_be_given(tmp_path):
     save.save_game(mid_game(), other)
     assert save.load_game(other) == mid_game()
     assert save.load_game() is None
+
+
+
+def test_a_save_file_nested_too_deep_is_not_a_save(tmp_path):
+    path = tmp_path / "savegame.json"
+    path.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
+    assert save.load_game(str(path)) is None  # and the game does not crash on it

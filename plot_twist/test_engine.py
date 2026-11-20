@@ -2117,3 +2117,20 @@ def test_the_place_of_a_dropped_item_is_checked_on_restore():
         assert engine.restore_state(restorable(flags={"dropped_wand": wrong})) is None, wrong
     both = restorable(inventory=["wand"], flags={"dropped_wand": "hold,3,4"})
     assert engine.restore_state(both) is None  # in hand and on the floor
+
+
+
+def test_an_action_from_another_computer_is_checked_before_it_is_played():
+    state = engine.new_game(two_players=True)
+    for target in [thing["id"] for thing in engine.things_here(state)]:
+        for action in engine.actions_for(state, target):
+            assert engine.is_valid_action(action), action  # everything the game itself offers
+    assert engine.is_valid_action({"verb": "ability"}) and engine.is_valid_action({"verb": "drop", "at": [1, 2]})
+    assert engine.is_valid_action({"verb": "give", "item": "wand"})
+    wrong = [None, [], "pick_up", {}, {"verb": "fly"}, {"verb": ["pick_up"]}, {"verb": "pick_up"},
+             {"verb": "pick_up", "target": "nowhere"}, {"verb": "pick_up", "target": ["wand"]},
+             {"verb": "pick_up", "target": 3}, {"verb": "give", "item": "dragon"}, {"verb": "give"},
+             {"verb": "use_item", "item": "wand"}, {"verb": "use_item", "item": "wand", "target": {}},
+             {"verb": "examine", "target": None}]
+    for action in wrong:
+        assert not engine.is_valid_action(action), action

@@ -1,0 +1,9 @@
+# Python's caches and the virtual environment uv makes
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.DS_Store
+# The game's save file (written by plot_twist/save.py), and its temporary copy while saving
+savegame.json
+savegame.json.tmp

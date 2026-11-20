@@ -44,8 +44,9 @@ def load_game(path=None):
     try:
         with open(path, encoding="utf-8") as file:
             data = json.load(file)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         # OSError: no file, or it cannot be read. ValueError: it is not valid JSON text.
+        # RecursionError: JSON nested too deep to read: not a save file of this game.
         return None
     if not isinstance(data, dict) or data.get("version") != VERSION or "state" not in data:
         return None

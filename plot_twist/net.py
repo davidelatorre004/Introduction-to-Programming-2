@@ -66,10 +66,12 @@ class Connection:
         messages = []
         while b"\n" in self.incoming:
             line, self.incoming = self.incoming.split(b"\n", 1)
+            if len(line) > MAX_LINE:
+                continue  # far too long to be one of ours: skip it
             try:
                 message = json.loads(line)
-            except ValueError:
-                continue  # a broken line: skip it
+            except (ValueError, RecursionError):
+                continue  # a broken line, or nested too deep to read: skip it
             if isinstance(message, dict):
                 messages.append(message)
         return messages

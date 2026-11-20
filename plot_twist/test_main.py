@@ -6,6 +6,7 @@ save file in a temporary folder.
 """
 
 import collections
+import copy
 import socket
 import time
 
@@ -4560,3 +4561,92 @@ def test_lightning_flashes_a_little_more_often_once_the_key_is_fused(app, monkey
     early, late = flashes(FIRST_HALF), flashes(KEY_FUSED)
     assert early < late < early * 1.4  # more often, but only a little
     assert main.STORM_EVERY_LATE < main.STORM_EVERY
+
+
+
+# --- Nothing that comes from the other computer is trusted ---
+
+
+class Listening:
+    """A connection that keeps what the game sends, and receives nothing."""
+    closed = False
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, message):
+        self.sent.append(message)
+
+    def poll(self):
+        return []
+
+    def close(self):
+        self.closed = True
+
+
+def on_the_network(app, role):
+    two_playing(app, FIRST_HALF)
+    app["net"] = {"role": role, "host": None, "conn": Listening(), "pending": {}, "next_id": 0,
+                  "sent_state": None, "address": "127.0.0.1"}
+    return app["net"]["conn"]
+
+
+HOSTILE = [
+    {"t": "do", "id": 1, "action": {"verb": "examine", "target": [], "item": None}},
+    {"t": "do", "id": 1, "action": {"verb": "fly", "target": "wand"}},
+    {"t": "do", "id": 1, "action": {"verb": "enter", "target": "wand"}},  # a real id, but not a door
+    {"t": "do", "id": [1], "action": {"verb": "ability"}},
+    {"t": "do", "id": 1},
+    {"t": "sync", "player": {"pos": None, "facing": [0, 1], "moving": False, "walk": 0}},
+    {"t": "sync", "player": {"pos": [1e308, 1], "facing": [0, 1], "moving": False, "walk": 0}},
+    {"t": "sync", "player": {"pos": [10, 10], "facing": [5, 5], "moving": False, "walk": 0}},
+    {"t": "sync", "player": {"pos": [10, 10], "facing": [0, 1], "moving": "yes", "walk": -1}},
+    {"t": "sync", "player": {"pos": [10, 10], "facing": [0, 1], "moving": False, "walk": 0, "dash": 99}},
+    {"t": "sync", "player": "everything"},
+    {"t": "picked", "character": ["wizard"]},
+    {"t": "picked", "character": "dragon"},
+    {"t": "pick"},
+    {"t": "pick", "taken": {"x": 1}},
+    {"t": "done", "id": [], "state": None, "outcome": {}},
+    {"t": "done", "id": 1, "state": None, "outcome": "fine"},
+    {"t": "start", "state": "a game", "text": 7},
+    {"t": "sync", "crab": {"room": "space", "pos": [1, 1]}, "downed": {"1": "soon", "9": 4}, "hidden": []},
+    {"t": "sync", "crab": {"room": "deck", "pos": [1, 1], "facing": [0, 1], "moving": True,
+                           "walk": -3, "wait": 0, "away": 0, "stun": 0}},
+    {"t": 12},
+    {},
+]
+
+
+def test_a_hostile_or_broken_message_crashes_nothing_and_changes_nothing(app):
+    for role in ("host", "client"):
+        for message in HOSTILE:
+            conn = on_the_network(app, role)
+            before = copy.deepcopy(app["state"])
+            other = dict(app["players"][1 - app["me"]])
+            main.handle_message(app, message)
+            if app["state"] is None:  # a game that is not one: the computer that joined goes back to the menu
+                assert role == "client" and message["t"] == "start" and app["scene"] == "menu"
+                assert app["notice"] == story.MESSAGES["partner_left"]
+                continue
+            for _ in range(2):
+                main.update(app, 0, 0)
+            main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+            assert app["state"]["flags"] == before["flags"] and app["state"]["inventory"] == before["inventory"], message
+            if message.get("t") == "sync":
+                assert app["players"][1 - app["me"]]["pos"] == other["pos"], message  # its position ignored
+            done = [sent for sent in conn.sent if sent.get("t") == "done"]
+            if role == "host" and message.get("t") == "do":
+                assert done and done[-1]["outcome"]["ok"] is False, message  # an action refused, not played
+            assert app["crab"] is None or main.clean_crab(app["crab"]) is not None
+
+
+def test_a_well_formed_message_still_goes_through(app):
+    conn = on_the_network(app, "host")
+    partner = app["players"][1]
+    main.handle_message(app, {"t": "sync", "player": {"pos": [40, 50], "facing": [1, 0], "moving": True,
+                                                       "walk": 3, "dash": 0}})
+    assert partner["pos"] == (40, 50) and partner["facing"] == (1, 0)
+    main.handle_message(app, {"t": "do", "id": 4, "action": {"verb": "examine", "target": "deck_barrel_1",
+                                                             "item": None}})
+    assert conn.sent[-1]["t"] == "done" and conn.sent[-1]["id"] == 4 and conn.sent[-1]["outcome"]["ok"]

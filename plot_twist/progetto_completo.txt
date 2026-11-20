@@ -1777,7 +1777,7 @@ MESSAGES = {
     "label_activate": "Activate: {name}",
     # The window title and the menus.
     "title": "Plot Twist",
-    "window_title": "Plot Twist · F11: full screen",
+    "window_title": "Plot Twist · F11: full screen · F10: soft lightning",
     "subtitle": "A mystery in the middle of the sea",
     "menu_new_game": "New game",
     "menu_resume": "Resume",
@@ -1864,6 +1864,9 @@ MESSAGES = {
     "clues_none": "No clues yet.",
     # Shown if the save file cannot be written (for example, the disk is full).
     "save_failed": "The game cannot be saved: progress from here on could be lost.",
+    # F10 turns the flashes of the lightning soft, and back.
+    "soft_flashes_on": "Soft lightning: on",
+    "soft_flashes_off": "Soft lightning: off",
 }
 
 
@@ -2670,6 +2673,32 @@ def perform(state, action, player=1):
     return seen_by(new, player), outcome
 
 
+VERBS = ("pick_up", "enter", "use_item", "give", "ability", "drop", "examine", "activate", "step_on",
+         "leave_zone", "travel")
+
+
+def is_valid_action(action):
+    """True for an action in the shape perform() expects, with ids the story knows: what comes from
+    another computer is checked with this before it is played (perform() raises on anything else)."""
+    if not isinstance(action, dict) or not isinstance(action.get("verb"), str) or action["verb"] not in VERBS:
+        return False
+    verb = action["verb"]
+    if verb in ("ability", "drop"):
+        return True  # no target; drop() checks the tile itself
+    if verb in ("use_item", "give") and not _is_id(action.get("item"), story.ITEMS):
+        return False
+    if verb == "give":
+        return True
+    target = action.get("target")
+    if not isinstance(target, str):
+        return False
+    try:
+        _kind(target)
+    except ValueError:
+        return False
+    return True
+
+
 def _perform(state, action, player):
     """perform(), on the game as the player sees it."""
     verb = action["verb"]
@@ -3195,8 +3224,9 @@ def load_game(path=None):
     try:
         with open(path, encoding="utf-8") as file:
             data = json.load(file)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         # OSError: no file, or it cannot be read. ValueError: it is not valid JSON text.
+        # RecursionError: JSON nested too deep to read: not a save file of this game.
         return None
     if not isinstance(data, dict) or data.get("version") != VERSION or "state" not in data:
         return None
@@ -3241,6 +3271,7 @@ import scenery
 import sounds
 import sprites
 import story
+import weather
 from pixel_font import PixelFont
 
 # --- Sizes -----------------------------------------------------------------------
@@ -3876,6 +3907,7 @@ def new_app(fonts):
         "fade": 0,               # frames left before the room is out of the dark
         "flash_frames": 0,       # frames left of the tiles blinking red after a mistake
         "fx": effects.new_fx(),  # the visual effects: particles, dissolves, the warp (see effects.py)
+        "weather": weather.new_weather(),  # the storm that grows with the puzzles (see weather.py)
         "inventory_scroll": 0,   # how many rows the list of items is scrolled down
         "inventory_player": 1,   # whose items the inventory screen shows: who opened it
         "actor": 1,              # who pressed E last: the player the chosen action is for
@@ -4689,6 +4721,7 @@ def update(app, dx, dy, act=False):
     update_ability_effects(app)
     update_crumble(app)
     update_effects(app)
+    update_weather(app)
     update_audio(app)
     update_crab_looks(app)
     if app["scene"] == "shatter":
@@ -5511,8 +5544,13 @@ def update_crumble(app):
 
 
 def room_shake(app):
-    """How far the room is pushed aside in this frame: the ship shaking while the statue crumbles."""
-    return effects.shake_offset(app["frame"], app["crumble"], CRUMBLE_FRAMES, CRUMBLE_SHAKE)
+    """How far the room is pushed aside in this frame: the ship shaking while the statue crumbles,
+    or under the strongest thunder of the storm."""
+    dx, dy = effects.shake_offset(app["frame"], app["crumble"], CRUMBLE_FRAMES, CRUMBLE_SHAKE)
+    if effects.FX["weather"] and app["state"] is not None:
+        tx, ty = weather.shake(app["weather"], app["frame"], thunder_shake(view(app)["room"]))
+        dx, dy = dx + tx, dy + ty
+    return (dx, dy)
 
 
 def draw_trembling_statue(app, screen):
@@ -5638,14 +5676,14 @@ def crab_info(app):
 
 
 def take_crab_info(app, info):
-    """Copy what the host said about the crab and the players down."""
-    crab = info.get("crab")
-    if isinstance(crab, dict):
+    """Copy what the host said about the crab and the players down (checked: see handle_message)."""
+    crab = clean_crab(info.get("crab"))
+    if crab is not None:
         crab = dict(crab, pos=tuple(crab["pos"]), facing=tuple(crab["facing"]))
     app["crab"] = crab
-    app["downed"] = {int(number): frames for number, frames in info.get("downed", {}).items()}
-    app["revive"] = {int(number): frames for number, frames in info.get("revive", {}).items()}
-    app["hidden"] = {int(number): frames for number, frames in info.get("hidden", {}).items()}
+    app["downed"] = {int(number): frames for number, frames in clean_timers(info.get("downed")).items()}
+    app["revive"] = {int(number): frames for number, frames in clean_timers(info.get("revive")).items()}
+    app["hidden"] = {int(number): frames for number, frames in clean_timers(info.get("hidden")).items()}
 
 
 def can_move(app):
@@ -6261,19 +6299,87 @@ def start_for_two(app):
     begin_game(app, state, opening_text)
 
 
+# What comes from the other computer is never trusted: each message is checked before it is used,
+# and anything malformed or out of range is ignored (an action is refused). A broken or hostile
+# computer on the network cannot crash this one, nor put the game in a state it could not reach.
+
+MAX_FRAMES = 10 ** 7     # the largest count of frames a message may carry (a timer, a walk)
+MAX_PIXELS = 10 ** 4     # positions are within this many pixels of the corner of a room
+
+
+def is_number(value):
+    """True for a finite int or float (not a bool, not NaN or infinity)."""
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def is_count(value, top=MAX_FRAMES):
+    """True for a whole number from 0 to `top` (not a bool)."""
+    return type(value) is int and 0 <= value <= top
+
+
+def is_position(value):
+    """True for [x, y] in pixels, both finite and within MAX_PIXELS."""
+    return (isinstance(value, (list, tuple)) and len(value) == 2
+            and all(is_number(number) and abs(number) <= MAX_PIXELS for number in value))
+
+
+def is_facing(value):
+    """True for one of the four directions a player or the crab can face."""
+    return isinstance(value, (list, tuple)) and tuple(value) in TOWARD.values()
+
+
+def is_character(value):
+    return isinstance(value, str) and value in story.CHARACTERS
+
+
+def clean_player_info(info):
+    """A player's info from the other computer (see player_info) if it is well formed, else None."""
+    if not isinstance(info, dict) or not is_position(info.get("pos")) or not is_facing(info.get("facing")):
+        return None
+    if not isinstance(info.get("moving"), bool) or not is_count(info.get("walk")):
+        return None
+    if not is_count(info.get("dash", 0), DASH_FRAMES):
+        return None
+    return info
+
+
+def clean_timers(value):
+    """Timers for each player (number -> frames, the numbers as text) if well formed, else {}."""
+    if not isinstance(value, dict):
+        return {}
+    return {key: frames for key, frames in value.items() if key in ("1", "2") and is_count(frames)}
+
+
+def clean_crab(crab):
+    """The crab as the host sent it, if well formed; else None (no crab to draw)."""
+    if not isinstance(crab, dict) or not isinstance(crab.get("room"), str) or crab["room"] not in story.ROOMS:
+        return None
+    if not is_position(crab.get("pos")) or not is_facing(crab.get("facing")) or not isinstance(crab.get("moving"), bool):
+        return None
+    if not all(is_count(crab.get(key)) for key in ("walk", "wait", "away", "stun")):
+        return None
+    return crab
+
+
+def is_outcome(outcome):
+    """True for an outcome in the shape the engine gives: ok, event and text."""
+    return (isinstance(outcome, dict) and isinstance(outcome.get("ok"), bool)
+            and isinstance(outcome.get("event"), str) and isinstance(outcome.get("text"), str))
+
+
 def handle_message(app, message):
-    """One message from the other computer."""
+    """One message from the other computer, checked before it is used (see above)."""
     kind = message.get("t")
     connection = app["net"]
-    if kind == "pick" and connection["role"] == "client" and (message.get("taken") in story.CHARACTERS
+    if kind == "pick" and connection["role"] == "client" and (is_character(message.get("taken"))
                                                                  or message.get("taken") is None):
         if app["scene"] != "character":
             open_choice_for_two(app)  # the host is there: time to choose
-        take_character(app, message["taken"])
+        take_character(app, message.get("taken"))
         return
     if kind == "picked" and connection["role"] == "host" and app["lobby"] is not None:
         character = message.get("character")
-        if character not in story.CHARACTERS or character == app["picked"]:
+        if not is_character(character) or character == app["picked"]:
             send(app, {"t": "pick", "taken": app["picked"]})  # not that one: choose again
             return
         take_character(app, character)
@@ -6286,11 +6392,13 @@ def handle_message(app, message):
             open_main_menu(app)
             return
         app["me"] = 1
-        begin_game(app, state, message.get("text"))
+        text = message.get("text")
+        begin_game(app, state, text if isinstance(text, str) else None)
     elif kind == "sync" and len(app["players"]) == 2:
         other = app["players"][1 - app["me"]]
-        if isinstance(message.get("player"), dict):
-            take_player_info(other, message["player"])
+        info = clean_player_info(message.get("player"))
+        if info is not None:
+            take_player_info(other, info)
         if connection["role"] == "client" and "state" in message:
             state = engine.restore_state(message["state"])
             if state is not None:
@@ -6300,18 +6408,28 @@ def handle_message(app, message):
         else:
             app["partner_reviving"] = bool(message.get("reviving"))
     elif kind == "do" and connection["role"] == "host" and app["state"] is not None:
-        # The other player asks for an action: the host plays it as player 2.
-        state, outcome = engine.perform(app["state"], message["action"], 2)
+        # The other player asks for an action: the host plays it as player 2, if it is one.
+        action = message.get("action")
+        refused = (app["state"], {"ok": False, "event": "nothing_happens", "text": story.MESSAGES["nothing_happens"]})
+        if not is_count(message.get("id")) or not engine.is_valid_action(action):
+            state, outcome = refused
+        else:
+            try:
+                state, outcome = engine.perform(app["state"], action, 2)
+            except ValueError:
+                state, outcome = refused  # a real id, but nothing this verb acts on
         if outcome["ok"]:
             app["state"] = state
             save_progress(app)
-            if message["action"].get("verb") == "ability":
+            if action.get("verb") == "ability":
                 apply_ability(app, 2)
             heart_helps(app, outcome, 2)
         send(app, {"t": "done", "id": message.get("id"), "state": app["state"], "outcome": outcome})
         connection["sent_state"] = app["state"]
     elif kind == "done" and connection["role"] == "client":
-        waiting = connection["pending"].pop(message.get("id"), None)
+        if not is_count(message.get("id")) or not is_outcome(message.get("outcome")):
+            return
+        waiting = connection["pending"].pop(message["id"], None)
         state = engine.restore_state(message.get("state"))
         if waiting is None or state is None:
             return
@@ -6436,6 +6554,9 @@ def update_audio(app):
     sounds.loop("bed", *(bed or (None,)))
     sounds.loop("hum", *(hum or (None,)))
     sounds.loop("chase", music, CHASE_VOLUME)
+    rain, wind = weather_sounds(app)
+    sounds.loop("rain", *(rain or (None,)))
+    sounds.loop("wind", *(wind or (None,)))
     sounds.update_loops()
     if app["state"] is not None:
         footsteps(app)
@@ -6628,7 +6749,8 @@ def update_effects(app):
                     color = cauldron_color(state)
                     x, y = liquid_center(thing["id"])
                     effects.spawn(fx, x + rng.randint(-4, 4), y, 1, [lighter(color)], speed=0.1, life=36, up=0.35)
-        if effects.FX["ambient"] and story.ROOMS[room].get("damp") and rng.random() < 1 / DRIP_EVERY:
+        chance = drip_chance(app, room)  # a drop from the ceiling: more of them in the rain
+        if effects.FX["ambient"] and chance > 0 and rng.random() < chance:
             ceiling = floor_rect(room)  # a drop from the foot of the back wall, falling onto the floor
             x = rng.randint(ceiling.left + 2, ceiling.right - 3)
             effects.add_drip(fx, x, ceiling.top, ceiling.top + rng.randint(10, 46))
@@ -6852,6 +6974,231 @@ def draw_darkness(app, surface, state, things):
     surface.blit(layer, (0, 0))
 
 
+# --- The weather: one storm that grows with the puzzles (see weather.py) -----------------------
+#
+# The level of the storm follows the puzzles of story.py (the circuits, the floor puzzles and
+# the potion puzzles): how many are solved, and how far the player has got in the others. The
+# opening bolt is its first sign; the calm lasts until the player walks into the room of a
+# puzzle. On the deck the whole storm is seen and heard: the clouds, the wind, the rain, the
+# bolts and the puddles. Inside the ship it is the darker light, the flashes through the
+# portholes, the rain and the wind muffled by the deck above, the thunder, and the ceiling
+# leaking in the heavy rain. The mine is deep in the rock: nothing of the storm reaches it.
+# Each computer of a game for two has its own storm, from the same progress.
+
+WEATHER_INSIDE = 0.35        # how much of the weather reaches a room inside the ship
+ROOM_WEATHER = {"mine": 0.0}  # rooms where it is different: none at all in the mine
+RAIN_VOLUME = 0.5            # the rain on the deck, at its heaviest
+WIND_VOLUME = 0.45           # the wind on the deck, at its strongest
+WEATHER_INSIDE_VOLUME = 0.6  # rain, wind and thunder heard from inside the ship (muffled, too)
+LEAK_FROM = 0.5              # rain heavier than this leaks through the deck into the rooms below
+LANTERN_WIND = 1.2           # how much more a lantern on the deck swings in the strongest wind
+PUDDLE_SHARE = 0.07          # how many tiles of the deck get a puddle in the rain, of the free ones
+
+_puddles = {}                # room -> the tiles where its puddles form, found once
+
+
+def puzzle_progress(state):
+    """How far the player is with the puzzles: (solved, total, share), where `share` (from 0 to 1)
+    is how far the player has got in the puzzle they are furthest on, of those not solved yet.
+
+    A circuit counts the generators turned on since its start; a floor puzzle the tiles lit, phase
+    after phase; a potion the ingredients found and poured in. Each one reaches 1 when only its
+    last step is left, so the storm is at its worst just before the last puzzle is solved.
+    """
+    flags = state["flags"]
+    solved = 0
+    total = 0
+    share = 0.0
+    for circuit in story.CIRCUITS.values():
+        total += 1
+        if flags[circuit["solved_flag"]]:
+            solved += 1
+            continue
+        on_at_start = 0
+        on_now = 0
+        for switch in circuit["switches"]:
+            if story.FLAGS[switch]:
+                on_at_start += 1
+            if flags[switch]:
+                on_now += 1
+        left = len(circuit["switches"]) - 1 - on_at_start  # the last generator solves it
+        if left > 0:
+            share = max(share, (on_now - on_at_start) / left)
+    for puzzle in story.FLOOR_PUZZLES.values():
+        total += 1
+        if flags[puzzle["solved_flag"]]:
+            solved += 1
+            continue
+        steps = 0
+        done = flags[puzzle["step_flag"]]
+        for number, phase in enumerate(puzzle["phases"], start=1):
+            steps += len(phase["steps"])
+            if number < flags[puzzle["phase_flag"]]:
+                done += len(phase["steps"])  # the phases already played
+        if steps > 1:
+            share = max(share, done / (steps - 1))
+    for potion in story.POTION_PUZZLES.values():
+        total += 1
+        if flags[potion["solved_flag"]]:
+            solved += 1
+            continue
+        found = 0
+        for item in potion["recipe"]:
+            if engine.has_item(state, item) or flags["dropped_" + item] is not None:
+                found += 1
+        units = 2 * len(potion["recipe"])  # each ingredient is found, then poured in
+        share = max(share, (found + flags[potion["step_flag"]]) / (units - 1))
+    return solved, total, max(0.0, min(1.0, share))
+
+
+def puzzle_rooms():
+    """The rooms where the puzzles are: walking into one of them, the storm begins to come."""
+    rooms = []
+    for table in (story.CIRCUITS, story.FLOOR_PUZZLES, story.POTION_PUZZLES):
+        for puzzle in table.values():
+            rooms.append(puzzle["room"])
+    return rooms
+
+
+def storm_target(state):
+    """Where the progress of the player puts the storm, from 0 (the calm) to 1 (its worst)."""
+    solved, total, share = puzzle_progress(state)
+    started = False
+    for room in puzzle_rooms():
+        if state["flags"].get("visited_" + room):
+            started = True
+    return weather.storm_level(solved, total, share, started)
+
+
+def weather_exposure(room):
+    """How much of the weather reaches a room: all of it on the deck, less inside the ship."""
+    if story.ROOMS[room]["outdoor"]:
+        return 1.0
+    return ROOM_WEATHER.get(room, WEATHER_INSIDE)
+
+
+def thunder_shake(room):
+    """How many pixels the strongest thunder shakes the room at most: more on the deck, none in the mine."""
+    exposure = weather_exposure(room)
+    if exposure <= 0:
+        return 0
+    return weather.SHAKE_POWER if exposure >= 1 else 1
+
+
+def deck_sky():
+    """Where the seagulls fly: the whole outdoor room (the deck and the sea around it), in pixels
+    of the room. None if no room is outdoors."""
+    for room, info in story.ROOMS.items():
+        if info["outdoor"]:
+            columns, rows = room_size(room)
+            return tile_rect(0, 0, columns, rows)
+    return None
+
+
+def update_weather(app):
+    """Once a frame: the storm moves toward where the progress puts it, and its thunder is heard.
+    Outside a game the weather goes back to the calm, ready for the next one."""
+    if not effects.FX["weather"]:
+        return
+    storm = app["weather"]
+    state = app["state"]
+    if state is None:
+        if not storm["fresh"]:
+            weather.reset(storm)
+        weather.update(storm, VIEW.size, deck_sky())  # the sea of the title screen still moves
+        return
+    weather.set_goal(storm, storm_target(state))
+    thunder = weather.update(storm, VIEW.size, deck_sky())
+    if thunder is None or engine.is_over(state) or app["scene"] in ("ending", "shatter"):
+        return
+    room = view(app)["room"]
+    if weather_exposure(room) <= 0:
+        return
+    if story.ROOMS[room]["outdoor"]:
+        sounds.play(thunder["name"], thunder["volume"])
+    else:
+        sounds.play("thunder_inside", thunder["volume"] * WEATHER_INSIDE_VOLUME)
+
+
+def weather_sounds(app):
+    """What the rain and the wind loop now: (name, volume) each, or None."""
+    state = app["state"]
+    if not effects.FX["weather"] or state is None or engine.is_over(state) or app["scene"] in ("ending", "shatter"):
+        return None, None
+    room = view(app)["room"]
+    if weather_exposure(room) <= 0:
+        return None, None
+    storm = app["weather"]
+    rain = weather.rain_amount(storm["level"]) * RAIN_VOLUME
+    wind = min(1.0, storm["wind"]) * WIND_VOLUME
+    if story.ROOMS[room]["outdoor"]:
+        return ("rain", rain) if rain > 0 else None, ("wind", wind)
+    rain *= WEATHER_INSIDE_VOLUME
+    wind *= WEATHER_INSIDE_VOLUME
+    return ("rain_far", rain) if rain > 0 else None, ("wind_far", wind)
+
+
+def draw_weather(app, screen, room, corner):
+    """The storm over the part of the room on screen (`corner` is where the camera looks)."""
+    if not effects.FX["weather"] or app["state"] is None:
+        return
+    columns, rows = room_size(room)
+    area = pygame.Rect(-corner[0], HUD_HEIGHT - corner[1], columns * TILE, rows * TILE).clip(VIEW)
+    outdoor = story.ROOMS[room]["outdoor"]
+    weather.draw(screen, area, app["weather"], outdoor, weather_exposure(room), corner)
+
+
+def drip_chance(app, room):
+    """How likely a drop is to fall from the ceiling in this frame: in the damp rooms, more so in
+    the rain; in the other rooms inside the ship, only once the rain is heavy enough to leak in."""
+    damp = story.ROOMS[room].get("damp")
+    usual = 1 / DRIP_EVERY if damp else 0.0
+    if not effects.FX["weather"] or story.ROOMS[room]["outdoor"] or weather_exposure(room) <= 0:
+        return usual
+    rain = weather.rain_amount(app["weather"]["level"])
+    if damp:
+        return (1 + 2 * rain) / DRIP_EVERY
+    if rain > LEAK_FROM:
+        return (rain - LEAK_FROM) / DRIP_EVERY
+    return 0.0
+
+
+def lantern_wind(app, lantern):
+    """How much more a lantern swings: in the wind on the deck, more as it blows harder."""
+    if not effects.FX["weather"] or not story.ROOMS[story.OBJECTS[lantern]["room"]]["outdoor"]:
+        return 1.0
+    return 1 + LANTERN_WIND * app["weather"]["wind"]
+
+
+def puddle_spots(room):
+    """The tiles of a room where puddles form in the rain: a few free tiles of its floor, never
+    under a thing, an item or in a doorway. Always the same ones."""
+    if room not in _puddles:
+        taken = [door_rect(door) for door in doors_in(room)]
+        for name, info in story.OBJECTS.items():
+            if info["room"] == room:
+                taken.append(thing_rect(name))
+        for name, info in story.ITEMS.items():
+            if info["room"] == room:
+                taken.append(thing_rect(name))
+        spots = []
+        columns, rows = room_size(room)
+        for col in range(1, columns - 1):
+            for row in range(1, rows - 1):
+                tile = tile_rect(col, row)
+                if scenery.hash01(col, row, 41) < PUDDLE_SHARE and tile.collidelist(taken) == -1:
+                    spots.append(tile)
+        _puddles[room] = spots
+    return _puddles[room]
+
+
+def toggle_soft_flashes(app):
+    """F10: soft lightning (pale flashes, one flicker, no shaking), or back to the full storm."""
+    storm = app["weather"]
+    storm["soft"] = not storm["soft"]
+    show_banner(app, story.MESSAGES["soft_flashes_on" if storm["soft"] else "soft_flashes_off"])
+
+
 # --- Atmosphere: the colour of the light, and soft lights -----------------------------------
 #
 # Every room has the colour of its light, multiplied into it (effects.lightmap): cold and
@@ -6931,7 +7278,8 @@ def ambient_of(room):
 
 def draw_atmosphere(app, surface, state, things):
     """Multiply the room by the colour of its light, warmer or more violet around some things;
-    on the deck, now and then, distant lightning brightens everything for an instant."""
+    on the deck, now and then, distant lightning brightens everything for an instant (when the
+    storm of weather.py is off: otherwise its lightning does that)."""
     if not effects.FX["atmosphere"]:
         return
     room = state["room"]
@@ -6942,7 +7290,7 @@ def draw_atmosphere(app, surface, state, things):
             effects.tint(layer, light_center(app, thing), tint[0], tint[1])
     surface.blit(layer, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
     every = STORM_EVERY_LATE if engine.key_fused(state) else STORM_EVERY
-    if story.ROOMS[room]["outdoor"] and app["frame"] % every in STORM_FRAMES:
+    if not effects.FX["weather"] and story.ROOMS[room]["outdoor"] and app["frame"] % every in STORM_FRAMES:
         surface.fill(STORM_FLASH, special_flags=pygame.BLEND_RGB_ADD)
 
 
@@ -7054,7 +7402,7 @@ def draw_lights(app, surface, things):
 def lantern_swing(app, lantern):
     """How a lantern swings now: an angle in degrees, and how far its light moves sideways."""
     rect = thing_rect(lantern)
-    angle = effects.LANTERN_SWING * math.sin(app["frame"] * 0.05 + rect.left * 0.13)
+    angle = effects.LANTERN_SWING * lantern_wind(app, lantern) * math.sin(app["frame"] * 0.05 + rect.left * 0.13)
     return angle, round(angle / effects.LANTERN_SWING * 2)
 
 
@@ -7163,7 +7511,9 @@ def draw_menu(app, screen, top):
 
 
 def wave_frame(app):
-    """Which picture of the moving tiles (the stormy sea) to show now."""
+    """Which picture of the moving tiles (the stormy sea) to show now: faster as the storm grows."""
+    if effects.FX["weather"]:
+        return weather.wave_frame(app["weather"], WAVE_FRAMES, SEA_PICTURES)
     return (app["frame"] // WAVE_FRAMES) % SEA_PICTURES
 
 
@@ -7611,6 +7961,8 @@ def draw_room(app, screen):
                     screen.blit(picture, tile_rect(col, row))
     if story.ROOMS[room]["outdoor"]:
         draw_railing(screen, room)
+        if effects.FX["weather"]:
+            weather.draw_puddles(screen, puddle_spots(room), app["weather"]["level"], app["frame"])
     if story.ROOMS[room].get("view") == "sea":
         draw_sea_view(app, screen, room)
     things = engine.things_here(state)
@@ -7991,7 +8343,10 @@ def draw_lightning(app, screen):
     for start in (0, 30):
         if start <= age < start + 5:  # the flash: white, fading fast
             veil = pygame.Surface(whole.size, pygame.SRCALPHA)
-            veil.fill((255, 255, 255, 230 - 45 * (age - start)))
+            white = 230 - 45 * (age - start)
+            if app["weather"]["soft"]:
+                white = round(white * weather.SOFT_FLASH)  # soft lightning (F10): a much paler flash
+            veil.fill((255, 255, 255, white))
             screen.blit(veil, (0, 0))
 
 
@@ -8012,6 +8367,7 @@ def draw_play_screen(app, screen, overlays=True):
     screen.set_clip(VIEW)
     screen.blit(whole, (-x + shake_x, -y + shake_y))
     screen.set_clip(None)
+    draw_weather(app, screen, room, (x, y))  # the storm: over the room, under the bar and the texts
     if app["fade"] > 0:
         # Just through a door: the room comes out of the dark.
         shade(screen, VIEW, 255 * app["fade"] // FADE_FRAMES)
@@ -8476,6 +8832,7 @@ def draw(app, screen):
 
 
 FULLSCREEN_KEY = pygame.K_F11
+SOFT_FLASHES_KEY = pygame.K_F10  # soft lightning: for players who are bothered by flashing lights
 
 
 def picture_area(window_size):
@@ -8523,6 +8880,8 @@ def main():
             elif event.type == pygame.KEYDOWN and event.key == FULLSCREEN_KEY:
                 fullscreen = not fullscreen  # F11: the whole screen, and back to the window
                 window = open_window(fullscreen)
+            elif event.type == pygame.KEYDOWN and event.key == SOFT_FLASHES_KEY:
+                toggle_soft_flashes(app)  # F10: softer lightning, and back
             elif event.type == pygame.KEYDOWN:
                 handle_key(app, event.key)
         pressed = pygame.key.get_pressed()
@@ -8589,6 +8948,7 @@ FX = {
     "scenery": True,        # floors and walls with details, walls with depth, shading and shadows of the furniture
     "ambient": True,        # small things that move: steam, drops from the ceiling, flames, a glint on puddles
     "atmosphere": True,     # the colour of the light in each room, and soft lights around what shines
+    "weather": True,        # the storm that grows with the puzzles: clouds, wind, rain, lightning, thunder (weather.py)
 }
 
 # --- Timing and sizes (frames are 1/60 of a second) --------------------------------------
@@ -10416,6 +10776,608 @@ def eye_points(crab_pose):
 
 
 ================================================================================
+# FILE: plot_twist/weather.py
+================================================================================
+
+"""The weather of Plot Twist: one storm that grows through the whole adventure.
+
+The bolt that opens a new game is its first sign. Then, as the three puzzles of the
+ship are solved (the generators of the cabin, the tiles of the hold, the remedy of the
+infirmary), the storm comes closer: the sky darkens and clouds gather, the wind rises,
+the rain starts and grows heavier, lightning flashes nearer and nearer and the thunder
+follows it sooner. It is at its worst just before the last puzzle is solved, and it
+stays that way until the end.
+
+How strong the storm is, is one number, the "level": 0 is the calm before the storm,
+1 the storm at its worst. storm_level() says where the level should be for the
+progress of the player; the level then moves there slowly, one small step a frame,
+so that the weather never jumps. It only goes up: a puzzle that starts over (a wrong
+tile, the generators going back when the player walks into the cabin) does not calm
+the storm. Everything else (how dark, how much rain, how strong the wind, how often
+lightning strikes) is worked out from the level.
+
+None of this changes the game: like effects.py, this module knows nothing about the
+rules. main.py tells it where the level should be (set_goal), calls update() once a
+frame, plays the thunder update() returns, and calls the draw_... functions.
+
+Before the rain, seagulls fly over the deck in a pattern that repeats (GULL_FLIGHTS); once
+it starts to rain no new ones come (the ones in the air fly on and away).
+
+Everything is drawn in hard pixels, like the rest of the game: rain drops are lines one
+pixel wide, the clouds are blocks of four pixels with a chequered edge, the seagulls
+pictures of sprites.py, the puddles plain ellipses. The randomness comes from a seeded generator, as in effects.py.
+"""
+
+import math
+import random
+
+import pygame
+
+import scenery
+import sprites
+
+# --- How the level follows the progress of the player -------------------------------------
+
+SEED = 11                  # the seed of the randomness of the weather
+LEVEL_SPEED = 1 / (8 * 60)  # how far the level moves in a frame: from calm to the worst storm in 8 seconds
+START = 0.08               # the level once the player has walked into the room of the first puzzle
+SOLVE_STEP = 0.06          # what solving a puzzle adds at once: the storm takes a step forward
+
+# --- What the level does: from which level each thing starts ------------------------------
+
+RAIN_FROM = 0.3            # the rain starts with the second puzzle (the first one is solved at 1/3)
+THUNDER_FROM = 0.3         # the thunder is heard from the second puzzle on
+NEAR_FROM = 0.62           # from here the thunder is near: a crack, then the rumble
+BOLT_FROM = 0.55           # from here a bolt can be seen across the sky of the deck
+SHAKE_FROM = 0.75          # from here the strongest thunder makes the ship shake
+LIGHTNING_FROM = 0.05      # below this, no lightning at all: the calm before the storm
+PUDDLE_FROM = 0.45         # from here puddles form on the deck
+
+# --- Sizes, speeds and colours ---------------------------------------------------------------
+
+MAX_DROPS = 170            # rain drops on screen in the worst of the storm
+DROPS_PER_FRAME = 3        # how many new drops can join in a frame: the rain thickens, it never pops in
+MAX_SPLASHES = 60
+SPLASH_FRAMES = 5          # how long a drop's splash stays on the floor
+WIND_SLANT = 2.4           # pixels a drop is pushed sideways in a frame, in the strongest wind
+NEAR_DROP = (174, 194, 226)  # a drop near the eye: long, fast, light
+FAR_DROP = (118, 136, 172)   # a drop far away: short, slow, darker
+SPLASH_COLOR = (196, 212, 236)
+# The seagulls fly over the deck in a pattern that repeats: each flight is (how far down the sky
+# its line is, from 0 at the top to 1 at the bottom; -1 flying left or 1 flying right; how many).
+GULL_FLIGHTS = [
+    (0.15, -1, 3),
+    (0.55, 1, 2),
+    (0.85, -1, 3),
+    (0.35, 1, 1),
+]
+GULL_V = [(0, 0), (14, -9), (14, 9)]  # where each one of a flight flies: (behind the leader, above or below)
+GULL_EVERY = 300           # frames between two flights (five seconds)
+GULL_FIRST = 120           # frames before the first flight of a game
+GULL_LAG = 4               # frames each one flaps after the one in front of it
+GULL_SPEED = 0.8           # pixels a frame
+GULL_WAVE = 4              # pixels each one rises and sinks as it flies...
+GULL_WAVE_SPEED = 0.04     # ...this slowly
+GULL_FLAP = 6              # frames each picture of the wings lasts
+GULL_WINGS = [0, 1, 2, 1]  # the pictures of a flap: up, level, down, level...
+GULL_GLIDE = 6             # ...then it glides, wings level, for this many pictures
+GULL_SIZE = 16             # the pictures are a tile, the seagull in the middle of it
+
+CLOUD_CELL = 4             # the clouds are drawn in blocks of this many pixels: big, chunky pixels
+CLOUD_SIZE = (96, 72)      # cells of the picture of the clouds, which repeats (384 x 288 pixels)
+CLOUD_STEPS = 20           # the clouds are made once for each of this many levels
+CLOUD_DRIFT = 0.5          # pixels a frame the clouds move, in the strongest wind
+CLOUD_LIGHT = (238, 240, 248)  # the shadow of a cloud in the calm (multiplied: a little darker)...
+CLOUD_DARK = (200, 204, 222)   # ...and in the storm
+CLOUD_EDGE = 0.05          # how wide the chequered edge of a cloud is, in noise
+
+SKY_DARK = (168, 174, 204)  # what the storm does to the deck at its worst (multiplied): darker, and blue
+FLASH_COLOR = (64, 68, 84)  # what a flash of lightning adds to the deck at its strongest
+INDOOR_FLASH = 0.4          # inside the ship a flash comes through the portholes: weaker
+SOFT_FLASH = 0.3            # with soft lightning (F10), a flash is this much as strong, and flickers once
+BOLT_GLOW = (150, 196, 236)
+BOLT_CORE = (244, 240, 228)
+WAVE_RUSH = 1.0             # how much faster the waves of the sea move in the worst storm
+
+# A flash of lightning flickers: (first frame, last frame, strength) of each flicker.
+FLICKERS = [(0, 2, 1.0), (5, 7, 0.55)]
+SOFT_FLICKERS = [(0, 3, 1.0)]
+FLASH_LENGTH = 8            # frames from the first flicker to the end of the last
+THUNDER_DELAY = 100         # frames between flash and thunder when the storm is far (it shortens as it comes)
+SHAKE_FRAMES = 18           # how long the ship shakes after the strongest thunder
+SHAKE_POWER = 2             # pixels, on the deck (one inside)
+
+PUDDLE_COLOR = (72, 86, 116)    # a puddle on the deck: the dark sky in it
+PUDDLE_LIGHT = (150, 170, 206)  # the light on its edge
+RIPPLE_EVERY = 23               # frames between two rings on a puddle (each puddle has its own moment)
+
+_cloud_noise = []          # the noise of the clouds, made once: one row of numbers for each row of cells
+_clouds = {}               # step of the level -> the picture of the clouds for it, made once
+
+
+# --- The level ------------------------------------------------------------------------------
+
+
+def clamp01(value):
+    """The number held between 0 and 1."""
+    return max(0.0, min(1.0, value))
+
+
+def mix(low, high, share):
+    """The number `share` of the way from `low` to `high`."""
+    return low + (high - low) * share
+
+
+def mix_color(one, two, share):
+    """The colour `share` of the way from `one` to `two`, in whole numbers."""
+    return tuple(round(mix(one[index], two[index], share)) for index in range(3))
+
+
+def storm_level(solved, total, share, started):
+    """Where the level should be: `solved` puzzles out of `total` are solved, `share` (from 0 to 1)
+    is how far the player has got in the next one, and `started` is True once the player has
+    walked into the room of a puzzle.
+
+    Each puzzle has its part of the way from 0 to 1. Solving one takes the storm a step forward
+    (SOLVE_STEP); working on one moves it on bit by bit. In the last puzzle the storm reaches 1
+    as soon as the last step is all that is left, just before the end. With every puzzle solved,
+    it stays at 1.
+    """
+    if total <= 0:
+        return 0.0
+    if solved >= total:
+        return 1.0
+    bottom = solved / total
+    top = (solved + 1) / total
+    if solved == 0:
+        bottom = START if started else 0.0  # before that, the calm: the bolt of the opening was only a sign
+    if solved < total - 1:
+        top -= SOLVE_STEP  # the rest of the way is the step taken when the puzzle is solved
+    return mix(bottom, top, clamp01(share))
+
+
+def darkness(level):
+    """How much of SKY_DARK the storm puts on the deck, from 0 to 1."""
+    return clamp01(level)
+
+
+def rain_amount(level):
+    """How heavy the rain is, from 0 (none) to 1 (the downpour)."""
+    return clamp01((level - RAIN_FROM) / (1 - RAIN_FROM))
+
+
+def wind_strength(level):
+    """How strong the wind blows, from a breath in the calm to 1 in the storm (gusts aside)."""
+    return clamp01(0.1 + 0.9 * level)
+
+
+def lightning_gap(level):
+    """The fewest and the most frames between two strikes of lightning: shorter as the storm comes."""
+    share = clamp01((level - LIGHTNING_FROM) / (1 - LIGHTNING_FROM))
+    return round(mix(840, 150, share)), round(mix(1560, 360, share))
+
+
+# --- The weather and its changes, frame by frame ----------------------------------------------
+
+
+def new_weather(seed=SEED):
+    """The weather at rest: no storm yet. A dict, like the effects (see the comments of its keys)."""
+    return {
+        "rng": random.Random(seed),
+        "fresh": True,           # nothing seen yet: the first goal is taken at once, without moving to it
+        "level": 0.0,            # how strong the storm is now, from 0 to 1
+        "goal": 0.0,             # where the level is going: the highest the progress has asked for
+        "soft": False,           # soft lightning (F10): weaker flashes, one flicker, no shaking
+        "frame": 0,              # frames of weather so far
+        "waves": 0.0,            # how far the waves of the sea have moved: faster in the storm
+        "wind": 0.0,             # how strong the wind blows in this frame, gusts included
+        "cloud_x": 0.0,          # how far the clouds have drifted
+        "cloud_y": 0.0,
+        "drops": [],             # the rain drops on screen: dicts, in pixels of the view
+        "splashes": [],          # where drops have just hit the floor: [x, y, age]
+        "gulls": [],             # the seagulls in the air: dicts, in pixels of the room (the deck)
+        "flight": 0,             # the next flight of GULL_FLIGHTS
+        "next_flight": GULL_FIRST,  # frames before it takes off
+        "next_strike": 0,        # frames before the next lightning (0: not chosen yet)
+        "flash": -1,             # frames since the last lightning, while it flashes; -1 otherwise
+        "power": 0.0,            # how strong that lightning is, from 0 to 1
+        "bolt": None,            # the points of its bolt, if it can be seen, in pixels of the view
+        "thunders": [],          # the thunder on its way, one for each strike: {"in": frames left, "name", "volume", "shake"}
+        "shake": 0,              # frames left of the ship shaking
+    }
+
+
+def reset(weather):
+    """Back to the calm, for a new game or one that is resumed: the next goal is taken at once.
+    Soft lightning stays as the player chose it."""
+    soft = weather["soft"]
+    weather.clear()
+    weather.update(new_weather())
+    weather["soft"] = soft
+
+
+def set_goal(weather, target):
+    """Where the progress of the player puts the storm. The first time, the level goes there at
+    once (a saved game resumes in its own weather); after that it moves there slowly, and only up."""
+    if weather["fresh"]:
+        weather["fresh"] = False
+        weather["level"] = target
+        weather["goal"] = target
+        return
+    weather["goal"] = max(weather["goal"], target)
+
+
+def update(weather, view_size, sky=None):
+    """Move the weather on by one frame. `view_size` is the size of the view of the room on screen,
+    where the rain falls; `sky` is the deck, in pixels of the room, where the seagulls fly (None: no
+    seagulls). Returns the thunder to play now, as a dict ("name", "volume"), or None."""
+    weather["frame"] += 1
+    if weather["level"] < weather["goal"]:
+        weather["level"] = min(weather["goal"], weather["level"] + LEVEL_SPEED)
+    level = weather["level"]
+    weather["waves"] += 1 + WAVE_RUSH * level
+    weather["wind"] = wind_now(weather)
+    weather["cloud_x"] += CLOUD_DRIFT * (0.25 + weather["wind"])
+    weather["cloud_y"] += CLOUD_DRIFT * 0.2
+    update_rain(weather, view_size)
+    update_gulls(weather, sky)
+    if weather["shake"] > 0:
+        weather["shake"] -= 1
+    return update_lightning(weather, view_size)
+
+
+def wind_now(weather):
+    """The wind of this frame: its strength for the level, rising and falling in slow gusts."""
+    frame = weather["frame"]
+    gust = 0.75 + 0.15 * math.sin(frame * 0.013) + 0.1 * math.sin(frame * 0.051 + 1.3)
+    return wind_strength(weather["level"]) * gust * 1.1
+
+
+def new_drop(weather, width, height, top):
+    """A rain drop starting somewhere above the view (or anywhere in it, when `top` is False).
+    Some are near (long, fast, light), the others far (short, slow, darker)."""
+    rng = weather["rng"]
+    near = rng.random() < 0.45
+    return {
+        "x": rng.uniform(-10, width + 70),  # also to the right of the view: the wind blows them left
+        "y": rng.uniform(-24, -4) if top else rng.uniform(0, height),
+        "speed": rng.uniform(5.0, 6.2) if near else rng.uniform(3.4, 4.4),
+        "length": rng.randint(5, 7) if near else rng.randint(3, 4),
+        "color": NEAR_DROP if near else FAR_DROP,
+        "land": rng.uniform(height * 0.15, height),  # where it hits the floor
+    }
+
+
+def update_rain(weather, view_size):
+    """The drops fall, slanted by the wind; each one that reaches its spot on the floor splashes
+    and starts again above the view. As the rain grows, a few new drops join each frame; as there
+    should be fewer, the drops that land are not replaced."""
+    width, height = view_size
+    wanted = round(MAX_DROPS * rain_amount(weather["level"]))
+    drops = weather["drops"]
+    joined = 0
+    while len(drops) < wanted and joined < DROPS_PER_FRAME:
+        drops.append(new_drop(weather, width, height, top=True))
+        joined += 1
+    slant = -WIND_SLANT * weather["wind"]
+    for drop in list(drops):
+        drop["y"] += drop["speed"]
+        drop["x"] += slant * drop["speed"] / 5
+        if drop["y"] >= drop["land"]:
+            if len(weather["splashes"]) < MAX_SPLASHES:
+                weather["splashes"].append([round(drop["x"]), round(drop["land"]), 0])
+            drops.remove(drop)
+            if len(drops) < wanted:
+                drops.append(new_drop(weather, width, height, top=True))
+    for splash in list(weather["splashes"]):
+        splash[2] += 1
+        if splash[2] >= SPLASH_FRAMES:
+            weather["splashes"].remove(splash)
+
+
+def start_flight(weather, sky):
+    """The next flight of the pattern takes off: its seagulls in a V, the leader in front, coming in
+    from one side of the sky (just outside it) on its line."""
+    height_share, heading, count = GULL_FLIGHTS[weather["flight"] % len(GULL_FLIGHTS)]
+    weather["flight"] += 1
+    if heading < 0:
+        x = sky.right + GULL_SIZE
+    else:
+        x = sky.left - 2 * GULL_SIZE
+    y = sky.top + round(height_share * (sky.height - GULL_SIZE))
+    for index in range(count):
+        back, side = GULL_V[index]
+        weather["gulls"].append({
+            "x": x - heading * back,  # the others behind the leader...
+            "line": y + side,         # ...and above or below it
+            "y": y + side,
+            "heading": heading,
+            "age": index * GULL_LAG,  # each one flaps a little after the one in front
+        })
+
+
+def update_gulls(weather, sky):
+    """Before the rain, the seagulls fly over the deck in a fixed pattern (GULL_FLIGHTS), one flight
+    every GULL_EVERY frames. Once it rains no new flight takes off; the seagulls in the air fly on
+    until they have left the sky. They fly in pixels of the room (`sky` is the deck), so they keep
+    their way when the player walks and the view scrolls: they leave the view like the ship does."""
+    gulls = weather["gulls"]
+    if sky is None:
+        gulls.clear()
+        return
+    if rain_amount(weather["level"]) == 0:
+        weather["next_flight"] -= 1
+        if weather["next_flight"] <= 0:
+            start_flight(weather, sky)
+            weather["next_flight"] = GULL_EVERY
+    for gull in list(gulls):
+        gull["age"] += 1
+        gull["x"] += gull["heading"] * GULL_SPEED
+        gull["y"] = gull["line"] + round(GULL_WAVE * math.sin(gull["age"] * GULL_WAVE_SPEED))  # a gentle wave
+        if gull["x"] < sky.left - 3 * GULL_SIZE or gull["x"] > sky.right + 3 * GULL_SIZE:
+            gulls.remove(gull)
+
+
+def gull_wings(gull):
+    """Which picture of the wings a seagull shows now: a few flaps, then a glide."""
+    step = (gull["age"] // GULL_FLAP) % (len(GULL_WINGS) + GULL_GLIDE)
+    if step < len(GULL_WINGS):
+        return GULL_WINGS[step]
+    return 1
+
+
+def update_lightning(weather, view_size):
+    """Lightning at irregular moments, more often as the storm comes, and its thunder after it:
+    late and soft while the storm is far, sooner and louder as it comes near. Returns the thunder
+    to play in this frame, or None."""
+    rng = weather["rng"]
+    level = weather["level"]
+    if weather["flash"] >= 0:
+        weather["flash"] += 1
+        if weather["flash"] > FLASH_LENGTH:
+            weather["flash"] = -1
+            weather["bolt"] = None
+    heard = None
+    for thunder in list(weather["thunders"]):  # first the thunder already on its way...
+        thunder["in"] -= 1
+        if thunder["in"] <= 0:
+            weather["thunders"].remove(thunder)
+            if thunder["shake"] and not weather["soft"]:
+                weather["shake"] = SHAKE_FRAMES
+            if heard is None or thunder["volume"] > heard["volume"]:
+                heard = {"name": thunder["name"], "volume": thunder["volume"]}  # two at once: the louder one
+    if level >= LIGHTNING_FROM:  # ...then, maybe, a new lightning
+        if weather["next_strike"] <= 0:
+            weather["next_strike"] = rng.randint(*lightning_gap(level))  # the first one waits too
+        else:
+            weather["next_strike"] -= 1
+            if weather["next_strike"] == 0:
+                strike(weather, view_size)
+                weather["next_strike"] = rng.randint(*lightning_gap(level))
+                if rng.random() < 0.25 * level:
+                    weather["next_strike"] = rng.randint(40, 70)  # now and then a second strike follows close
+    return heard
+
+
+def strike(weather, view_size):
+    """A lightning strikes now: the flash starts, a bolt may be seen, and its thunder is on its way."""
+    rng = weather["rng"]
+    level = weather["level"]
+    weather["power"] = rng.uniform(0.4, 1.0) * mix(0.35, 1.0, level)
+    weather["flash"] = 0
+    weather["bolt"] = None
+    if level >= BOLT_FROM and rng.random() < (level - 0.45) * 1.4:
+        width, height = view_size
+        start = (rng.randint(width // 6, width * 5 // 6), 0)
+        end = (start[0] + rng.randint(-60, 60), rng.randint(height * 2 // 5, height * 9 // 10))
+        weather["bolt"] = bolt_path(start, end, rng)
+    if level >= THUNDER_FROM:
+        near = level >= NEAR_FROM and weather["power"] > 0.55
+        weather["thunders"].append({
+            "in": 3 + round(THUNDER_DELAY * (1 - level) * rng.uniform(0.6, 1.0)),
+            "name": "thunder_near" if near else "thunder_far",
+            "volume": min(1.0, 0.3 + 0.7 * weather["power"] * level),
+            "shake": level >= SHAKE_FROM and weather["power"] > 0.7,
+        })
+
+
+def bolt_path(start, end, rng, steps=10, sway=10):
+    """The points of a jagged bolt from `start` to `end`."""
+    points = [start]
+    for step in range(1, steps):
+        along = step / steps
+        x = start[0] + (end[0] - start[0]) * along + rng.uniform(-sway, sway)
+        y = start[1] + (end[1] - start[1]) * along
+        points.append((round(x), round(y)))
+    points.append(end)
+    return points
+
+
+def flash_strength(weather):
+    """How bright the lightning is in this frame, from 0 (no flash) to 1: its power, in flickers."""
+    age = weather["flash"]
+    if age < 0:
+        return 0.0
+    flickers = SOFT_FLICKERS if weather["soft"] else FLICKERS
+    for first, last, strength in flickers:
+        if first <= age <= last:
+            fading = 1 - 0.4 * (age - first) / (last - first + 1)  # each flicker dims as it goes
+            soft = SOFT_FLASH if weather["soft"] else 1.0
+            return weather["power"] * strength * fading * soft
+    return 0.0
+
+
+def shake(weather, frame, power):
+    """How far the ship is pushed aside in this frame by the thunder: (dx, dy) in pixels, `power` at most."""
+    if weather["shake"] <= 0 or power <= 0:
+        return (0, 0)
+    reach = power * weather["shake"] / SHAKE_FRAMES
+    x = math.sin(frame * 12.9898 + 0.5) * 43758.5453
+    y = math.sin(frame * 78.233 + 2.1) * 24634.6345
+    x -= math.floor(x)
+    y -= math.floor(y)
+    return (round((2 * x - 1) * reach), round((2 * y - 1) * reach))
+
+
+def wave_frame(weather, frames_per_picture, pictures):
+    """Which picture of the stormy sea to show: the waves move faster as the storm grows."""
+    return int(weather["waves"] // frames_per_picture) % pictures
+
+
+# --- The clouds ---------------------------------------------------------------------------------
+
+
+def periodic_noise(x, y, size, seed):
+    """Smooth noise from 0 to 1, like scenery.value_noise, but its grid wraps around at the edges of
+    CLOUD_SIZE: the picture of the clouds can be repeated with no seam."""
+    columns, rows = CLOUD_SIZE[0] // size, CLOUD_SIZE[1] // size
+    gx, gy = x / size, y / size
+    x0, y0 = math.floor(gx), math.floor(gy)
+    fx, fy = gx - x0, gy - y0
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    left, right = x0 % columns, (x0 + 1) % columns
+    up, down = y0 % rows, (y0 + 1) % rows
+    top = mix(scenery.hash01(left, up, seed), scenery.hash01(right, up, seed), fx)
+    bottom = mix(scenery.hash01(left, down, seed), scenery.hash01(right, down, seed), fx)
+    return mix(top, bottom, fy)
+
+
+def cloud_noise():
+    """The noise of the clouds, one number for each cell, made once: big shapes, and smaller ones on them."""
+    if not _cloud_noise:
+        for y in range(CLOUD_SIZE[1]):
+            row = []
+            for x in range(CLOUD_SIZE[0]):
+                row.append(0.65 * periodic_noise(x, y, 24, SEED) + 0.35 * periodic_noise(x, y, 8, SEED + 1))
+            _cloud_noise.append(row)
+    return _cloud_noise
+
+
+def cloud_picture(level):
+    """The shadows of the clouds over the deck for this level, to multiply into it: white where
+    there is no cloud. More clouds and darker ones as the storm grows. Made once for each step."""
+    step = round(clamp01(level) * CLOUD_STEPS)
+    if step not in _clouds:
+        share = step / CLOUD_STEPS
+        line = mix(0.66, 0.38, share)  # the noise above this is cloud: lower and lower, more and more clouds
+        shadow = mix_color(CLOUD_LIGHT, CLOUD_DARK, share)
+        cells = pygame.Surface(CLOUD_SIZE)
+        cells.fill((255, 255, 255))
+        noise = cloud_noise()
+        for y in range(CLOUD_SIZE[1]):
+            for x in range(CLOUD_SIZE[0]):
+                value = noise[y][x]
+                if value > line + CLOUD_EDGE or (value > line and (x + y) % 2 == 0):
+                    cells.set_at((x, y), shadow)  # the edge is chequered: half a shadow, the 8-bit way
+        size = (CLOUD_SIZE[0] * CLOUD_CELL, CLOUD_SIZE[1] * CLOUD_CELL)
+        _clouds[step] = pygame.transform.scale(cells, size)  # no smoothing: big square pixels
+    return _clouds[step]
+
+
+def draw_clouds(screen, view, weather, camera):
+    """The shadows of the clouds drifting over the deck. They move with the wind and stay put on the
+    ship when the view scrolls: `camera` is where the view is in the room."""
+    picture = cloud_picture(weather["level"])
+    width, height = picture.get_size()
+    x = round(weather["cloud_x"] + camera[0]) % width
+    y = round(weather["cloud_y"] + camera[1]) % height
+    for dx in (0, width):
+        for dy in (0, height):
+            screen.blit(picture, (view.left - x + dx, view.top - y + dy), special_flags=pygame.BLEND_RGB_MULT)
+
+
+# --- Drawing ----------------------------------------------------------------------------------
+
+
+def sky_tint(level, exposure):
+    """What the storm multiplies into the view: white in the calm, darker and bluer as it grows.
+    `exposure` is how much of the weather reaches the room: 1 on the deck, less inside the ship."""
+    return mix_color((255, 255, 255), SKY_DARK, darkness(level) * exposure)
+
+
+def draw(screen, view, weather, outdoor, exposure, camera):
+    """The weather over the view of the room on screen: the darker sky, and on the deck the clouds,
+    the rain, the bolts and the seagulls; everywhere, the flashes of lightning. `exposure` (from 0 to 1)
+    is how much of it reaches the room: nothing at all in the mine, deep in the rock."""
+    if exposure <= 0:
+        return
+    screen.set_clip(view)
+    tint = sky_tint(weather["level"], exposure)
+    if tint != (255, 255, 255):
+        screen.fill(tint, view, special_flags=pygame.BLEND_RGB_MULT)
+    if outdoor:
+        draw_clouds(screen, view, weather, camera)
+        draw_rain(screen, view, weather)
+        draw_bolt(screen, view, weather)
+        draw_gulls(screen, weather, camera)
+    strength = flash_strength(weather) * (exposure if outdoor else exposure * INDOOR_FLASH)
+    if strength > 0:
+        add = tuple(round(part * strength) for part in FLASH_COLOR)
+        screen.fill(add, view, special_flags=pygame.BLEND_RGB_ADD)
+    screen.set_clip(None)
+
+
+def draw_rain(screen, view, weather):
+    """Each drop is a short slanted line, one pixel wide; each splash a dot, then a little crown."""
+    slant = -WIND_SLANT * weather["wind"]
+    for drop in weather["drops"]:
+        x = view.left + drop["x"]
+        y = view.top + drop["y"]
+        dx = slant * drop["speed"] / 5 * drop["length"] / drop["speed"]
+        tail = (round(x - dx), round(y - drop["length"]))
+        pygame.draw.line(screen, drop["color"], tail, (round(x), round(y)))
+    for x, y, age in weather["splashes"]:
+        x += view.left
+        y += view.top
+        if age < 2:
+            screen.fill(SPLASH_COLOR, (x, y, 1, 1))
+        else:
+            screen.fill(SPLASH_COLOR, (x - 2, y, 1, 1))
+            screen.fill(SPLASH_COLOR, (x + 2, y, 1, 1))
+            screen.fill(SPLASH_COLOR, (x, y - 1, 1, 1))
+
+
+def draw_gulls(screen, weather, camera):
+    """The seagulls, flapping and gliding. They are in pixels of the room, like everything on the
+    deck: `camera` is where the view is in the room, so they stay on their way when it scrolls."""
+    for gull in weather["gulls"]:
+        picture = sprites.image("seagull_" + str(gull_wings(gull)), flip=gull["heading"] > 0)
+        if picture is None:
+            continue
+        screen.blit(picture, (round(gull["x"]) - camera[0], round(gull["y"]) - camera[1]))
+
+
+def draw_bolt(screen, view, weather):
+    """The bolt of a lightning, while it flickers: a pale glow and a white core, in hard pixels."""
+    if weather["bolt"] is None or flash_strength(weather) <= 0:
+        return
+    points = [(view.left + x, view.top + y) for x, y in weather["bolt"]]
+    pygame.draw.lines(screen, BOLT_GLOW, False, points, 3)
+    pygame.draw.lines(screen, BOLT_CORE, False, points, 1)
+
+
+def draw_puddles(surface, spots, level, frame):
+    """The puddles on the deck, in room pixels: they form as the rain grows and spread as it pours,
+    and now and then a drop rings on them. `spots` are the tiles where they lie."""
+    wet = clamp01((level - PUDDLE_FROM) / (1 - PUDDLE_FROM))
+    if wet <= 0:
+        return
+    for index, spot in enumerate(spots):
+        grow = wet * (0.6 + 0.4 * scenery.hash01(index, 3, 17))  # each puddle its own size
+        area = pygame.Rect(0, 0, max(2, round(12 * grow)), max(1, round(5 * grow)))
+        area.center = spot.center
+        pygame.draw.ellipse(surface, PUDDLE_COLOR, area)
+        if area.width >= 6:
+            surface.fill(PUDDLE_LIGHT, (area.left + 2, area.top, area.width // 3, 1))  # the light on its edge
+            moment = (frame + index * 13) % RIPPLE_EVERY
+            if moment < 6:  # a drop falls in it: a ring that opens
+                ring = pygame.Rect(0, 0, 1 + moment, 1 + moment // 3)
+                ring.center = (area.left + 2 + round(scenery.hash01(index, frame // RIPPLE_EVERY, 5) * (area.width - 4)),
+                               area.centery)
+                pygame.draw.rect(surface, PUDDLE_LIGHT, ring, 1)
+
+
+================================================================================
 # FILE: plot_twist/net.py
 ================================================================================
 
@@ -10487,10 +11449,12 @@ class Connection:
         messages = []
         while b"\n" in self.incoming:
             line, self.incoming = self.incoming.split(b"\n", 1)
+            if len(line) > MAX_LINE:
+                continue  # far too long to be one of ours: skip it
             try:
                 message = json.loads(line)
-            except ValueError:
-                continue  # a broken line: skip it
+            except (ValueError, RecursionError):
+                continue  # a broken line, or nested too deep to read: skip it
             if isinstance(message, dict):
                 messages.append(message)
         return messages
@@ -10577,6 +11541,8 @@ Names follow what main.py looks for:
   "sea_calm_1" are the calm sea of the good ending.
 - decor as "decor_<picture>", shared by every piece that names it in story.py
   (as big as the piece: the crab statue is 2 x 2 tiles), and the "portal";
+- the seagulls flying over the deck before the storm as "seagull_0" to "seagull_2"
+  (wings up, level, down), flying left (flipped, they fly right);
 A picture missing here is drawn as a colored rectangle by main.py.
 """
 
@@ -12032,6 +12998,62 @@ SPRITES = {
         "................................",
         "................................",
     ],
+    # A seagull over the deck before the storm (see weather.py), flying left: wings up, level
+    # (also when it glides), down. Flipped, it flies right.
+    "seagull_0": [  # wings up
+        "................",
+        "................",
+        "................",
+        "..d..........d..",
+        "..lw........wl..",
+        "...lw......wl...",
+        "....lw....wl....",
+        ".....lw..wl.....",
+        "......lwwl......",
+        "......lwwl......",
+        ".....owwwl......",
+        ".......ll.......",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
+    "seagull_1": [  # wings level, bent at the wrist: the M of a gull, also when it glides
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "...ww......ww...",
+        "..wllw....wllw..",
+        ".wl..lw..wl..lw.",
+        "dl....lwwl....ld",
+        ".....owwwl......",
+        ".......ll.......",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
+    "seagull_2": [  # wings down
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "......lwwl......",
+        ".....owwwl......",
+        "....lw.ll.wl....",
+        "...lw......wl...",
+        "..d..........d..",
+        "................",
+        "................",
+    ],
     "decor_lantern": [
         ".......kk.......",
         "......kddk......",
@@ -12579,7 +13601,8 @@ Each effect is a list of layers played together, each a voice with its own:
   `highpass` thins it: the noise of a footstep in a puddle is not the noise of glass.
 
 The loops (LOOPS) are made the same way and fade into themselves at their seam, so they
-can play forever: the sea on the deck, water dripping, the hum of a machine. They play on
+can play forever: the sea on the deck, water dripping, the hum of a machine, the rain and
+the wind of the storm (see weather.py). They play on
 channels of their own (loop, update_loops), whose volume moves a little every frame, so
 that they fade in and out cleanly when the player changes room.
 
@@ -12601,8 +13624,8 @@ RENDER_RATE = 22050  # the sounds are made at most at this rate, then held to th
 NOISE_SEED = 1      # where the register of the noise starts: the same noise every time
 LOOP_FADE = 0.25    # seconds at the end of a loop that fade into its start: no click at the seam
 LOOP_FADE_FRAMES = 30  # frames a loop takes to fade in or out (half a second)
-LOOP_CHANNELS = 8   # mixer channels kept for the loops: two for each loop slot, to cross-fade
-LOOP_SLOTS = ("bed", "hum", "chase", "spare")  # what can loop at the same time
+LOOP_SLOTS = ("bed", "hum", "chase", "rain", "wind")  # what can loop at the same time
+LOOP_CHANNELS = 2 * len(LOOP_SLOTS)  # mixer channels kept for the loops: two for each loop slot, to cross-fade
 
 DUTIES = {"pulse12": 0.125, "pulse25": 0.25, "square": 0.5}
 TRIANGLE = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
@@ -12753,6 +13776,21 @@ def chase(eighth, near=False):
             voices.append(hit("pulse25", 659 if index % 2 == 0 else 622, eighth * 0.4, when + eighth / 2, 0.22))
     return (len(CHASE_BASS) * eighth, voices)
 
+# The thunder of the storm (see weather.py). Far away: no crack, only a low rumble that swells and rolls.
+EFFECTS["thunder_far"] = [
+    layer("noise", 1500, 1.4, volume=0.9, lowpass=500, lowpass_to=120, attack=0.25, decay=1.15, sustain=0.0,
+          tremolo=(5, 0.5)),
+    layer("triangle", 46, 1.3, 0.1, 0.6, to=36, attack=0.2, decay=1.1, sustain=0.0),
+]
+# Near: a dry crack that splits the air, then the rumble, louder and rougher.
+EFFECTS["thunder_near"] = [
+    hit("noise", 14000, 0.05, 0.0, 1.0, highpass=2500),
+    hit("metal", 6000, 0.08, 0.01, 0.4, highpass=3000),
+    layer("noise", 5000, 1.4, 0.03, 1.0, lowpass=3500, lowpass_to=180, attack=0.005, decay=1.35, sustain=0.0,
+          tremolo=(8, 0.45)),
+    layer("triangle", 55, 1.35, 0.04, to=33, decay=1.3, sustain=0.0),
+]
+EFFECTS["thunder_inside"] = muffled(EFFECTS["thunder_near"], 350)  # heard from inside the ship: deep and dull
 
 LOOPS = {
     # The sea on the deck: deep surf that swells and falls twice in four seconds, and the hiss of foam
@@ -12774,6 +13812,19 @@ LOOPS = {
 LOOPS["sea_far"] = (LOOPS["sea"][0], muffled(LOOPS["sea"][1], 250))  # the sea from inside the ship
 LOOPS["chase"] = chase(60 / 140 / 2)               # the crab is after you: 140 beats a minute...
 LOOPS["chase_near"] = chase(60 / 180 / 2, near=True)  # ...and when it is close, 180
+# The rain: a hiss that breathes, a low patter under it, and single drops ticking on the wood.
+LOOPS["rain"] = (2.0, [layer("noise", 11000, 2.0, volume=0.55, highpass=1800, lowpass=6000, attack=0.0, release=0.0,
+                             tremolo=(1.5, 0.2)),
+                       layer("noise", 3000, 2.0, volume=0.35, lowpass=900, attack=0.0, release=0.0)]
+                 + scattered("noise", 14, 0.0, 1.7, 6000, 12000, 0.012, 0.35, 13, highpass=3000))
+LOOPS["rain_far"] = (LOOPS["rain"][0], muffled(LOOPS["rain"][1], 700))  # the rain on the deck, from below it
+# The wind: a deep blowing that swells once in four seconds, a thin hiss, and a howl that wavers.
+LOOPS["wind"] = (4.0, [layer("noise", 2500, 4.0, volume=0.7, lowpass=380, attack=0.0, release=0.0, tremolo=(0.25, 0.6)),
+                       layer("noise", 9000, 4.0, volume=0.18, highpass=2500, lowpass=5000, attack=0.0, release=0.0,
+                             tremolo=(0.5, 0.8)),
+                       layer("triangle", 420, 4.0, volume=0.12, attack=0.0, release=0.0, vibrato=(0.5, 1.5),
+                             tremolo=(0.25, 0.7))])
+LOOPS["wind_far"] = (LOOPS["wind"][0], muffled(LOOPS["wind"][1], 300))  # the wind, through the walls of the ship
 
 _loaded = {}    # effect or loop name -> pygame Sound, once load() has run with audio
 _loops = {}     # slot -> list of the loops playing in it (see loop)
@@ -13038,6 +14089,14 @@ def no_opening_lightning(monkeypatch):
     Its own tests turn it back on.
     """
     monkeypatch.setattr(main, "LIGHTNING_FRAMES", 0)
+
+
+@pytest.fixture(autouse=True)
+def no_weather(monkeypatch):
+    """The tests check exact colours, sounds and random numbers, so the storm (which darkens the
+    rooms, rains and flashes at moments of its own) is off. Its own tests turn it back on.
+    """
+    monkeypatch.setitem(effects.FX, "weather", False)
 
 
 @pytest.fixture(autouse=True)
@@ -15173,6 +16232,23 @@ def test_the_place_of_a_dropped_item_is_checked_on_restore():
     assert engine.restore_state(both) is None  # in hand and on the floor
 
 
+
+def test_an_action_from_another_computer_is_checked_before_it_is_played():
+    state = engine.new_game(two_players=True)
+    for target in [thing["id"] for thing in engine.things_here(state)]:
+        for action in engine.actions_for(state, target):
+            assert engine.is_valid_action(action), action  # everything the game itself offers
+    assert engine.is_valid_action({"verb": "ability"}) and engine.is_valid_action({"verb": "drop", "at": [1, 2]})
+    assert engine.is_valid_action({"verb": "give", "item": "wand"})
+    wrong = [None, [], "pick_up", {}, {"verb": "fly"}, {"verb": ["pick_up"]}, {"verb": "pick_up"},
+             {"verb": "pick_up", "target": "nowhere"}, {"verb": "pick_up", "target": ["wand"]},
+             {"verb": "pick_up", "target": 3}, {"verb": "give", "item": "dragon"}, {"verb": "give"},
+             {"verb": "use_item", "item": "wand"}, {"verb": "use_item", "item": "wand", "target": {}},
+             {"verb": "examine", "target": None}]
+    for action in wrong:
+        assert not engine.is_valid_action(action), action
+
+
 ================================================================================
 # FILE: plot_twist/test_save.py
 ================================================================================
@@ -15275,6 +16351,13 @@ def test_another_path_can_be_given(tmp_path):
     assert save.load_game() is None
 
 
+
+def test_a_save_file_nested_too_deep_is_not_a_save(tmp_path):
+    path = tmp_path / "savegame.json"
+    path.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
+    assert save.load_game(str(path)) is None  # and the game does not crash on it
+
+
 ================================================================================
 # FILE: plot_twist/test_main.py
 ================================================================================
@@ -15287,6 +16370,7 @@ save file in a temporary folder.
 """
 
 import collections
+import copy
 import socket
 import time
 
@@ -19843,6 +20927,95 @@ def test_lightning_flashes_a_little_more_often_once_the_key_is_fused(app, monkey
     assert main.STORM_EVERY_LATE < main.STORM_EVERY
 
 
+
+# --- Nothing that comes from the other computer is trusted ---
+
+
+class Listening:
+    """A connection that keeps what the game sends, and receives nothing."""
+    closed = False
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, message):
+        self.sent.append(message)
+
+    def poll(self):
+        return []
+
+    def close(self):
+        self.closed = True
+
+
+def on_the_network(app, role):
+    two_playing(app, FIRST_HALF)
+    app["net"] = {"role": role, "host": None, "conn": Listening(), "pending": {}, "next_id": 0,
+                  "sent_state": None, "address": "127.0.0.1"}
+    return app["net"]["conn"]
+
+
+HOSTILE = [
+    {"t": "do", "id": 1, "action": {"verb": "examine", "target": [], "item": None}},
+    {"t": "do", "id": 1, "action": {"verb": "fly", "target": "wand"}},
+    {"t": "do", "id": 1, "action": {"verb": "enter", "target": "wand"}},  # a real id, but not a door
+    {"t": "do", "id": [1], "action": {"verb": "ability"}},
+    {"t": "do", "id": 1},
+    {"t": "sync", "player": {"pos": None, "facing": [0, 1], "moving": False, "walk": 0}},
+    {"t": "sync", "player": {"pos": [1e308, 1], "facing": [0, 1], "moving": False, "walk": 0}},
+    {"t": "sync", "player": {"pos": [10, 10], "facing": [5, 5], "moving": False, "walk": 0}},
+    {"t": "sync", "player": {"pos": [10, 10], "facing": [0, 1], "moving": "yes", "walk": -1}},
+    {"t": "sync", "player": {"pos": [10, 10], "facing": [0, 1], "moving": False, "walk": 0, "dash": 99}},
+    {"t": "sync", "player": "everything"},
+    {"t": "picked", "character": ["wizard"]},
+    {"t": "picked", "character": "dragon"},
+    {"t": "pick"},
+    {"t": "pick", "taken": {"x": 1}},
+    {"t": "done", "id": [], "state": None, "outcome": {}},
+    {"t": "done", "id": 1, "state": None, "outcome": "fine"},
+    {"t": "start", "state": "a game", "text": 7},
+    {"t": "sync", "crab": {"room": "space", "pos": [1, 1]}, "downed": {"1": "soon", "9": 4}, "hidden": []},
+    {"t": "sync", "crab": {"room": "deck", "pos": [1, 1], "facing": [0, 1], "moving": True,
+                           "walk": -3, "wait": 0, "away": 0, "stun": 0}},
+    {"t": 12},
+    {},
+]
+
+
+def test_a_hostile_or_broken_message_crashes_nothing_and_changes_nothing(app):
+    for role in ("host", "client"):
+        for message in HOSTILE:
+            conn = on_the_network(app, role)
+            before = copy.deepcopy(app["state"])
+            other = dict(app["players"][1 - app["me"]])
+            main.handle_message(app, message)
+            if app["state"] is None:  # a game that is not one: the computer that joined goes back to the menu
+                assert role == "client" and message["t"] == "start" and app["scene"] == "menu"
+                assert app["notice"] == story.MESSAGES["partner_left"]
+                continue
+            for _ in range(2):
+                main.update(app, 0, 0)
+            main.draw(app, pygame.Surface((main.WIDTH, main.HEIGHT)))
+            assert app["state"]["flags"] == before["flags"] and app["state"]["inventory"] == before["inventory"], message
+            if message.get("t") == "sync":
+                assert app["players"][1 - app["me"]]["pos"] == other["pos"], message  # its position ignored
+            done = [sent for sent in conn.sent if sent.get("t") == "done"]
+            if role == "host" and message.get("t") == "do":
+                assert done and done[-1]["outcome"]["ok"] is False, message  # an action refused, not played
+            assert app["crab"] is None or main.clean_crab(app["crab"]) is not None
+
+
+def test_a_well_formed_message_still_goes_through(app):
+    conn = on_the_network(app, "host")
+    partner = app["players"][1]
+    main.handle_message(app, {"t": "sync", "player": {"pos": [40, 50], "facing": [1, 0], "moving": True,
+                                                       "walk": 3, "dash": 0}})
+    assert partner["pos"] == (40, 50) and partner["facing"] == (1, 0)
+    main.handle_message(app, {"t": "do", "id": 4, "action": {"verb": "examine", "target": "deck_barrel_1",
+                                                             "item": None}})
+    assert conn.sent[-1]["t"] == "done" and conn.sent[-1]["id"] == 4 and conn.sent[-1]["outcome"]["ok"]
+
+
 ================================================================================
 # FILE: plot_twist/test_effects.py
 ================================================================================
@@ -21023,6 +22196,752 @@ def test_each_pose_is_painted_once():
     first = crab.picture(crab.pose(legs=2, claws=0.75, eyes="hunt"))
     assert crab.picture(crab.pose(legs=2, claws=0.75, eyes="hunt")) is first
     assert crab.picture(crab.pose(legs=2, claws=0.75, eyes="calm")) is not first
+
+
+================================================================================
+# FILE: plot_twist/test_weather.py
+================================================================================
+
+"""Tests for weather.py and the storm in main.py: one storm that grows with the three puzzles.
+
+conftest.py switches the storm off for the other tests; these turn it back on.
+"""
+
+import pygame
+import pytest
+
+import effects
+import engine
+import main
+import sounds
+import sprites
+import story
+import test_main as game
+import weather
+
+VIEW_SIZE = main.VIEW.size
+
+
+@pytest.fixture(autouse=True)
+def storm_on(monkeypatch):
+    monkeypatch.setitem(effects.FX, "weather", True)
+
+
+@pytest.fixture
+def app():
+    pygame.font.init()
+    return main.new_app(main.load_fonts())
+
+
+def at_level(level, seed=weather.SEED):
+    """A weather already at this level."""
+    storm = weather.new_weather(seed)
+    weather.set_goal(storm, level)
+    return storm
+
+
+def run(storm, frames):
+    """Move the weather on, frame by frame; returns [(frame, thunder)] for each thunder heard."""
+    heard = []
+    for frame in range(frames):
+        thunder = weather.update(storm, VIEW_SIZE)
+        if thunder is not None:
+            heard.append((frame, thunder))
+    return heard
+
+
+def strikes(storm, frames):
+    """The frames at which lightning struck, and the thunders heard, over `frames` frames."""
+    struck = []
+    heard = []
+    for frame in range(frames):
+        thunder = weather.update(storm, VIEW_SIZE)
+        if storm["flash"] == 0:
+            struck.append(frame)
+        if thunder is not None:
+            heard.append(frame)
+    return struck, heard
+
+
+def average(surface, area=None):
+    return pygame.transform.average_color(surface, area or surface.get_rect())[:3]
+
+
+# --- The level follows the progress -----------------------------------------------------------
+
+
+def test_the_storm_waits_in_the_calm_until_the_first_puzzle_begins():
+    assert weather.storm_level(0, 3, 0.0, started=False) == 0.0
+    assert weather.storm_level(0, 3, 0.0, started=True) == weather.START
+
+
+def test_each_puzzle_takes_the_storm_further_and_it_never_goes_back():
+    levels = []
+    for solved in range(3):
+        for share in (0.0, 0.25, 0.5, 0.75, 1.0):
+            levels.append(weather.storm_level(solved, 3, share, started=True))
+    levels.append(weather.storm_level(3, 3, 0.0, started=True))
+    assert levels == sorted(levels)
+    assert levels[-1] == 1.0
+
+
+def test_solving_a_puzzle_is_a_step_forward():
+    for solved in range(2):
+        before = weather.storm_level(solved, 3, 1.0, started=True)
+        after = weather.storm_level(solved + 1, 3, 0.0, started=True)
+        assert after - before == pytest.approx(weather.SOLVE_STEP)
+
+
+def test_the_last_puzzle_starts_below_the_worst_and_reaches_it_just_before_its_end():
+    start = weather.storm_level(2, 3, 0.0, started=True)
+    assert start == pytest.approx(2 / 3) and start < 1.0
+    assert weather.storm_level(2, 3, 0.5, started=True) < 1.0  # still growing during the last puzzle
+    assert weather.storm_level(2, 3, 1.0, started=True) == 1.0  # only its last step left: the peak
+
+
+def test_the_rain_and_the_thunder_start_with_the_second_puzzle():
+    end_of_first = weather.storm_level(0, 3, 1.0, started=True)
+    start_of_second = weather.storm_level(1, 3, 0.0, started=True)
+    assert weather.rain_amount(end_of_first) == 0 and end_of_first < weather.THUNDER_FROM
+    assert weather.rain_amount(start_of_second) > 0 and start_of_second >= weather.THUNDER_FROM
+    assert weather.rain_amount(1.0) == 1.0
+
+
+def test_the_first_goal_is_taken_at_once_then_the_level_moves_slowly_and_only_up():
+    storm = weather.new_weather()
+    weather.set_goal(storm, 0.5)
+    assert storm["level"] == 0.5  # a saved game resumes in its own weather
+    weather.set_goal(storm, 0.9)
+    previous = storm["level"]
+    for _ in range(30):
+        weather.update(storm, VIEW_SIZE)
+        assert 0 < storm["level"] - previous <= weather.LEVEL_SPEED + 1e-9
+        previous = storm["level"]
+    weather.set_goal(storm, 0.2)
+    assert storm["goal"] == 0.9  # a puzzle that starts over does not calm the storm
+    run(storm, round(0.5 / weather.LEVEL_SPEED))
+    assert storm["level"] == 0.9
+
+
+def test_a_reset_brings_back_the_calm_but_keeps_soft_lightning():
+    storm = at_level(1.0)
+    storm["soft"] = True
+    run(storm, 50)
+    weather.reset(storm)
+    assert storm["level"] == 0 and storm["fresh"] and storm["drops"] == [] and storm["soft"]
+
+
+# --- Lightning and thunder --------------------------------------------------------------------
+
+
+def test_no_lightning_and_no_thunder_in_the_calm():
+    storm = at_level(0.0)
+    struck, heard = strikes(storm, 4000)
+    assert struck == [] and heard == []
+
+
+def test_far_lightning_flashes_silently_while_the_first_puzzle_is_played():
+    storm = at_level(0.2)
+    struck, heard = strikes(storm, 8000)
+    assert len(struck) >= 2 and heard == []
+
+
+def test_lightning_strikes_at_irregular_moments_more_often_as_the_storm_grows():
+    few, _ = strikes(at_level(0.35), 6000)
+    many, _ = strikes(at_level(1.0), 6000)
+    assert len(many) > 2 * len(few) > 0
+    gaps = [later - earlier for earlier, later in zip(many, many[1:])]
+    assert len(set(gaps)) > len(gaps) // 2  # never like clockwork
+
+
+def test_each_thunder_follows_its_flash_sooner_as_the_storm_comes_near():
+    def delays(level):
+        storm = at_level(level, seed=3)
+        struck, heard = strikes(storm, 6000)
+        pairs = []
+        for frame in heard:
+            pairs.append(frame - max(strike for strike in struck if strike <= frame))
+        assert pairs and all(delay >= 3 for delay in pairs)  # the light first, then the sound
+        return sum(pairs) / len(pairs)
+
+    assert delays(1.0) < delays(0.4)
+
+
+def test_the_thunder_is_near_and_loud_only_in_the_worst_of_the_storm():
+    far = [thunder for _, thunder in run(at_level(0.4), 6000)]
+    near = [thunder for _, thunder in run(at_level(1.0), 6000)]
+    assert {thunder["name"] for thunder in far} == {"thunder_far"}
+    assert "thunder_near" in {thunder["name"] for thunder in near}
+    assert max(thunder["volume"] for thunder in near) > max(thunder["volume"] for thunder in far)
+    for thunder in far + near:
+        assert thunder["name"] in sounds.EFFECTS and 0 < thunder["volume"] <= 1
+
+
+def test_a_flash_is_short_and_never_too_bright():
+    storm = at_level(1.0)
+    longest = 0
+    lit = 0
+    for _ in range(6000):
+        weather.update(storm, VIEW_SIZE)
+        strength = weather.flash_strength(storm)
+        assert 0 <= strength <= 1
+        lit = lit + 1 if strength > 0 else 0
+        longest = max(longest, lit)
+    assert 0 < longest <= 4  # a flicker lasts a few frames
+
+
+def test_soft_lightning_is_paler_flickers_once_and_never_shakes():
+    storm = at_level(1.0)
+    storm["soft"] = True
+    flickers = 0
+    for _ in range(6000):
+        before = weather.flash_strength(storm)
+        weather.update(storm, VIEW_SIZE)
+        now = weather.flash_strength(storm)
+        assert now <= weather.SOFT_FLASH
+        assert storm["shake"] == 0
+        if now > 0 and before == 0:
+            flickers += 1
+        if storm["flash"] == weather.FLASH_LENGTH:
+            assert flickers == 1  # one flicker for each strike
+            flickers = 0
+
+
+def test_the_strongest_thunder_shakes_the_ship_only_in_the_worst_of_the_storm():
+    calm = at_level(0.5)
+    for _ in range(6000):
+        weather.update(calm, VIEW_SIZE)
+        assert calm["shake"] == 0
+    storm = at_level(1.0)
+    shaken = False
+    for frame in range(6000):
+        weather.update(storm, VIEW_SIZE)
+        offset = weather.shake(storm, frame, weather.SHAKE_POWER)
+        assert abs(offset[0]) <= weather.SHAKE_POWER and abs(offset[1]) <= weather.SHAKE_POWER
+        shaken = shaken or storm["shake"] > 0
+    assert shaken
+
+
+# --- Rain, wind and clouds --------------------------------------------------------------------
+
+
+def test_the_rain_thickens_a_few_drops_at_a_time():
+    storm = at_level(0.0)
+    weather.set_goal(storm, 1.0)
+    previous = 0
+    for _ in range(round(1 / weather.LEVEL_SPEED) + 200):
+        weather.update(storm, VIEW_SIZE)
+        assert len(storm["drops"]) - previous <= weather.DROPS_PER_FRAME
+        previous = len(storm["drops"])
+    assert len(storm["drops"]) == weather.MAX_DROPS
+
+
+def test_the_wind_slants_the_rain_more_as_it_blows_harder():
+    def drift(level):
+        storm = at_level(level)
+        run(storm, 200)
+        drop = storm["drops"][0]
+        x = drop["x"]
+        weather.update(storm, VIEW_SIZE)
+        return drop["x"] - x
+
+    assert drift(1.0) < drift(0.45) < 0  # the drops fall to the left, more so in the strong wind
+
+
+def test_the_waves_of_the_sea_move_faster_in_the_storm():
+    calm, storm = at_level(0.0), at_level(1.0)
+    run(calm, 600)
+    run(storm, 600)
+    assert storm["waves"] > 1.5 * calm["waves"]
+
+
+def test_the_clouds_gather_and_darken_as_the_storm_grows():
+    def shadow(level):
+        return average(weather.cloud_picture(level))
+
+    calm, middle, worst = shadow(0.0), shadow(0.5), shadow(1.0)
+    assert all(m < c for m, c in zip(middle, calm))
+    assert all(w < m for w, m in zip(worst, middle))
+
+
+def test_the_clouds_repeat_with_no_seam():
+    width, height = weather.CLOUD_SIZE
+    for x, y in ((0, 5), (13, 40), (50, 71)):
+        assert weather.periodic_noise(x, y, 24, 1) == pytest.approx(weather.periodic_noise(x + width, y + height, 24, 1))
+
+
+# --- Drawing ------------------------------------------------------------------------------------
+
+
+def drawn(level, outdoor=True, exposure=1.0, frames=120):
+    storm = at_level(level)
+    run(storm, frames)
+    storm["flash"] = -1  # no lightning in the picture: only the weather itself
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    screen.fill((200, 160, 120))
+    weather.draw(screen, main.VIEW, storm, outdoor, exposure, (0, 0))
+    return screen
+
+
+def test_the_deck_darkens_as_the_storm_grows_but_stays_readable():
+    calm, middle, worst = (average(drawn(level), main.VIEW) for level in (0.0, 0.5, 1.0))
+    assert sum(worst) < sum(middle) < sum(calm)
+    assert max(worst) > 100  # still well lit enough to see everything
+
+
+def test_inside_the_ship_the_storm_is_milder_and_the_mine_feels_nothing():
+    outside = average(drawn(1.0), main.VIEW)
+    inside = average(drawn(1.0, outdoor=False, exposure=main.weather_exposure("hold")), main.VIEW)
+    mine = drawn(1.0, outdoor=False, exposure=main.weather_exposure("mine"))
+    assert sum(inside) > sum(outside)
+    assert average(mine) == (200, 160, 120)
+
+
+def test_the_storm_never_covers_the_bar_at_the_top():
+    screen = drawn(1.0)
+    for x in range(0, main.WIDTH, 7):
+        for y in range(0, main.HUD_HEIGHT):
+            assert tuple(screen.get_at((x, y)))[:3] == (200, 160, 120)
+
+
+def test_a_flash_brightens_the_deck_more_than_the_rooms_inside():
+    def flashed(outdoor, exposure):
+        storm = at_level(1.0)
+        storm["flash"] = 0
+        storm["power"] = 1.0
+        screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+        screen.fill((100, 100, 100))
+        weather.draw(screen, main.VIEW, storm, outdoor, exposure, (0, 0))
+        dark = pygame.Surface((main.WIDTH, main.HEIGHT))
+        dark.fill((100, 100, 100))
+        storm["flash"] = -1
+        weather.draw(dark, main.VIEW, storm, outdoor, exposure, (0, 0))
+        return sum(average(screen, main.VIEW)) - sum(average(dark, main.VIEW))
+
+    assert flashed(True, 1.0) > flashed(False, main.WEATHER_INSIDE) > 0
+
+
+def test_puddles_form_on_the_deck_only_in_the_heavy_rain():
+    surface = pygame.Surface((64, 64))
+    spots = [pygame.Rect(16, 16, 16, 16)]
+    surface.fill((165, 115, 65))
+    weather.draw_puddles(surface, spots, weather.PUDDLE_FROM - 0.01, 0)
+    assert average(surface) == (165, 115, 65)
+    weather.draw_puddles(surface, spots, 1.0, 0)
+    assert tuple(surface.get_at(spots[0].center))[:3] == weather.PUDDLE_COLOR
+
+
+# --- The storm in the game ----------------------------------------------------------------------
+
+
+def target_after(actions):
+    return main.storm_target(game.play(actions))
+
+
+def test_the_storm_follows_the_three_puzzles_of_the_ship_from_the_calm_to_its_worst():
+    recipe = story.POTION_PUZZLES["remedy"]["recipe"]
+    pours = [game.act("use_item", "cauldron", tincture) for tincture in recipe]
+    stages = [
+        [],                                                      # the opening: the calm
+        game.IN_THE_CABIN,                                       # the first puzzle begins
+        game.IN_THE_CABIN + [game.act("activate", "generator_a")],
+        game.CIRCUIT_COMPLETE,                                   # the first puzzle solved
+        game.IN_THE_HOLD,
+        game.IN_THE_HOLD + [game.act("step_on", tile) for tile in game.TILE_SEQUENCE[:5]],
+        game.TILES_SOLVED,                                       # the second puzzle solved
+        game.TINCTURES_FOUND,
+        game.TINCTURES_FOUND + pours[:1],
+        game.TINCTURES_FOUND + pours[:2],
+        game.TINCTURES_FOUND + pours[:3],                        # only the last tincture is left
+        game.TINCTURES_FOUND + pours,                            # the third puzzle solved
+        game.KEY_FUSED,
+    ]
+    levels = [target_after(actions) for actions in stages]
+    assert levels == sorted(levels)
+    assert levels[0] == 0.0 and levels[1] == weather.START
+    assert weather.rain_amount(levels[2]) == 0                      # the first puzzle: no rain yet
+    assert levels[3] >= 1 / 3 and weather.rain_amount(levels[3]) > 0  # the second: the rain begins
+    assert 2 / 3 <= levels[6] < levels[7] < levels[8] < levels[9] < 1.0  # the third: it keeps growing...
+    assert levels[10] == 1.0                                        # ...to its worst just before the end
+    assert levels[11] == levels[12] == 1.0                          # and it stays there
+
+
+def test_a_puzzle_that_starts_over_does_not_calm_the_storm(app):
+    game.playing(app, game.IN_THE_CABIN + [game.act("activate", "generator_a")])
+    main.update(app, 0, 0)
+    high = app["weather"]["level"]
+    app["state"] = game.play(game.IN_THE_CABIN)  # the generators back as they were, as when walking in again
+    for _ in range(30):
+        main.update(app, 0, 0)
+    assert app["weather"]["level"] == high
+
+
+def test_solving_a_puzzle_moves_the_storm_on_smoothly(app):
+    game.playing(app, game.IN_THE_CABIN)
+    main.update(app, 0, 0)
+    assert app["weather"]["level"] == weather.START
+    app["state"] = game.play(game.CIRCUIT_COMPLETE)
+    main.update(app, 0, 0)
+    assert app["weather"]["level"] == pytest.approx(weather.START + weather.LEVEL_SPEED)  # no jump
+    for _ in range(round(1 / weather.LEVEL_SPEED)):
+        main.update(app, 0, 0)
+    assert app["weather"]["level"] == pytest.approx(main.storm_target(app["state"]))
+
+
+def test_a_new_game_starts_in_the_calm_and_a_resumed_one_in_its_own_storm(app):
+    game.playing(app, game.TILES_SOLVED)
+    main.update(app, 0, 0)
+    assert app["weather"]["level"] == pytest.approx(main.storm_target(app["state"]))
+    main.open_main_menu(app)
+    main.update(app, 0, 0)
+    assert app["weather"]["fresh"] and app["weather"]["level"] == 0
+    game.start_new_game(app)
+    main.update(app, 0, 0)
+    assert app["weather"]["level"] == 0.0 and app["lightning_due"] is False  # the opening bolt has struck
+
+
+def test_the_thunder_is_heard_outside_and_muffled_inside(app, monkeypatch):
+    heard = []
+    monkeypatch.setattr(sounds, "play", lambda name, volume=1.0, pan=0.0: heard.append((name, volume)))
+    for room, expected in (("deck", {"thunder_far", "thunder_near"}), ("hold", {"thunder_inside"})):
+        heard.clear()
+        state = game.play(game.TINCTURES_FOUND)
+        state["room"] = room
+        game.playing(app, game.TINCTURES_FOUND)
+        app["state"] = state
+        main.place_at_entry(app)
+        app["weather"] = at_level(1.0)
+        for _ in range(3000):
+            main.update(app, 0, 0)
+        thunders = {name for name, _ in heard if name.startswith("thunder")}
+        assert thunders and thunders <= expected
+
+
+def test_no_storm_reaches_the_mine(app, monkeypatch):
+    heard = []
+    monkeypatch.setattr(sounds, "play", lambda name, volume=1.0, pan=0.0: heard.append(name))
+    state = game.play(game.TINCTURES_FOUND)
+    state["room"] = "mine"
+    app["state"] = state
+    main.set_scene(app, "play")
+    main.place_at_entry(app)
+    app["weather"] = at_level(1.0)
+    for _ in range(3000):
+        main.update(app, 0, 0)
+    assert not [name for name in heard if name.startswith("thunder")]
+    assert main.weather_sounds(app) == (None, None)
+    assert main.thunder_shake("mine") == 0
+
+
+def test_the_rain_and_the_wind_are_heard_louder_on_the_deck_than_inside(app):
+    game.playing(app, game.TINCTURES_FOUND)
+    app["weather"] = at_level(1.0)
+    main.update(app, 0, 0)
+    app["state"]["room"] = "deck"
+    (rain, rain_volume), (wind, wind_volume) = main.weather_sounds(app)
+    assert (rain, wind) == ("rain", "wind") and rain_volume > 0 and wind_volume > 0
+    app["state"]["room"] = "infirmary"
+    (rain_far, rain_far_volume), (wind_far, wind_far_volume) = main.weather_sounds(app)
+    assert (rain_far, wind_far) == ("rain_far", "wind_far")
+    assert rain_far_volume < rain_volume and wind_far_volume < wind_volume
+    for name in ("rain", "rain_far", "wind", "wind_far"):
+        assert name in sounds.LOOPS
+
+
+def test_in_the_calm_there_is_no_rain_to_hear(app):
+    game.playing(app, [])
+    main.update(app, 0, 0)
+    rain, wind = main.weather_sounds(app)
+    assert rain is None and wind[0] == "wind" and wind[1] < 0.1  # a breath of wind
+
+
+def test_the_ceiling_leaks_in_the_heavy_rain(app):
+    game.playing(app, game.TINCTURES_FOUND)
+    main.update(app, 0, 0)
+    app["weather"] = at_level(0.0)
+    calm_hold = main.drip_chance(app, "hold")
+    assert calm_hold == 1 / main.DRIP_EVERY and main.drip_chance(app, "cabin") == 0
+    app["weather"] = at_level(1.0)
+    assert main.drip_chance(app, "hold") > calm_hold and main.drip_chance(app, "cabin") > 0
+    assert main.drip_chance(app, "mine") == 1 / main.DRIP_EVERY  # deep in the rock, as always
+
+
+def test_without_the_storm_everything_is_as_before(app, monkeypatch):
+    monkeypatch.setitem(effects.FX, "weather", False)
+    assert main.drip_chance(app, "hold") == 1 / main.DRIP_EVERY and main.drip_chance(app, "cabin") == 0
+    assert main.lantern_wind(app, "deck_lantern") == 1.0
+    app["frame"] = main.WAVE_FRAMES * 5
+    assert main.wave_frame(app) == 5 % main.SEA_PICTURES
+
+
+def test_the_lantern_on_the_deck_swings_more_in_the_wind(app):
+    game.playing(app, [])
+    app["weather"] = at_level(1.0)
+    run(app["weather"], 10)
+    assert main.lantern_wind(app, "deck_lantern") > 1.5
+    assert main.lantern_wind(app, "cabin_lantern") == 1.0  # inside, it only swings with the ship
+
+
+def test_the_puddles_lie_on_free_floor_of_the_deck():
+    spots = main.puddle_spots("deck")
+    assert spots
+    taken = [main.thing_rect(name) for name, info in story.OBJECTS.items() if info["room"] == "deck"]
+    taken += [main.thing_rect(name) for name, info in story.ITEMS.items() if info["room"] == "deck"]
+    taken += [main.door_rect(door) for door in main.doors_in("deck")]
+    floor = main.floor_rect("deck")
+    for spot in spots:
+        assert spot.collidelist(taken) == -1 and floor.contains(spot)
+
+
+def test_every_room_can_be_drawn_in_every_weather(app):
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    game.playing(app, game.TINCTURES_FOUND)
+    for level in (0.0, 0.5, 1.0):
+        for room in story.ROOMS:
+            state = game.play(game.TINCTURES_FOUND)
+            state["room"] = room
+            app["state"] = state
+            main.place_at_entry(app)
+            app["weather"] = at_level(level)
+            run(app["weather"], 90)
+            app["weather"]["flash"] = 0
+            app["weather"]["power"] = 1.0
+            main.draw_play_screen(app, screen)
+
+
+def test_f10_turns_soft_lightning_on_and_off(app):
+    assert main.SOFT_FLASHES_KEY == pygame.K_F10 and "F10" in story.MESSAGES["window_title"]
+    main.toggle_soft_flashes(app)
+    assert app["weather"]["soft"] and app["banner"] == story.MESSAGES["soft_flashes_on"]
+    main.toggle_soft_flashes(app)
+    assert not app["weather"]["soft"] and app["banner"] == story.MESSAGES["soft_flashes_off"]
+
+
+def test_soft_lightning_also_softens_the_opening_bolt(app, monkeypatch):
+    monkeypatch.setattr(main, "LIGHTNING_FRAMES", 60)
+
+    def brightness(soft):
+        app["weather"]["soft"] = soft
+        app["lightning"] = main.LIGHTNING_FRAMES  # its first frame: the white flash
+        screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+        screen.fill((0, 0, 0))
+        main.draw_lightning(app, screen)
+        return sum(average(screen, pygame.Rect(0, 0, 20, 20)))
+
+    assert 0 < brightness(True) < brightness(False)
+
+
+def test_the_ending_has_no_storm_sounds(app):
+    game.playing(app, game.TO_THE_CRAB_ENDING)
+    main.update(app, 0, 0)
+    assert engine.is_over(app["state"])
+    assert main.weather_sounds(app) == (None, None)
+
+
+# --- The seagulls ---------------------------------------------------------------------------------
+
+
+SKY = main.deck_sky()
+
+
+def flights(storm, frames):
+    """The flights that took off over `frames` frames: (frame, heading, how many, line) each."""
+    taken = []
+    for frame in range(frames):
+        before = len(storm["gulls"])
+        flight = storm["flight"]
+        weather.update(storm, VIEW_SIZE, SKY)
+        if storm["flight"] != flight:
+            new = storm["gulls"][before:] if len(storm["gulls"]) > before else storm["gulls"][-1:]
+            taken.append((frame, new[0]["heading"], len(new), new[0]["line"]))
+    return taken
+
+
+def test_seagulls_fly_over_the_deck_in_a_pattern_that_repeats():
+    taken = flights(at_level(0.0), weather.GULL_FIRST + weather.GULL_EVERY * (2 * len(weather.GULL_FLIGHTS) - 1))
+    frames = [frame for frame, _, _, _ in taken]
+    assert frames[0] == weather.GULL_FIRST - 1
+    assert all(later - earlier == weather.GULL_EVERY for earlier, later in zip(frames, frames[1:]))  # like clockwork
+    pattern = [(heading, count) for _, heading, count, _ in taken]
+    expected = [(heading, count) for _, heading, count in weather.GULL_FLIGHTS]
+    assert pattern == expected * 2
+    lines = [line for _, _, _, line in taken]
+    assert lines[:len(expected)] == lines[len(expected):]  # the same lines every time
+    assert flights(at_level(0.0, seed=99), 2000) == flights(at_level(0.0), 2000)  # whatever the luck
+
+
+def test_a_flight_flies_in_a_v_behind_its_leader():
+    storm = at_level(0.0)
+    storm["next_flight"] = 1
+    weather.update(storm, VIEW_SIZE, SKY)
+    leader, *others = storm["gulls"]
+    for other in others:
+        assert (other["x"] - leader["x"]) * leader["heading"] < 0  # behind
+        assert other["line"] != leader["line"]                      # above or below
+
+
+def test_seagulls_cross_the_whole_deck_and_then_are_gone():
+    storm = at_level(0.0)
+    storm["next_flight"] = 1
+    weather.update(storm, VIEW_SIZE, SKY)
+    storm["next_flight"] = 10 ** 6  # no other flight
+    leader = storm["gulls"][0]
+    start = leader["x"]
+    for _ in range(1000):
+        weather.update(storm, VIEW_SIZE, SKY)
+        for gull in storm["gulls"]:
+            assert SKY.top - weather.GULL_SIZE <= gull["y"] <= SKY.bottom
+    assert abs(leader["x"] - start) > SKY.width and storm["gulls"] == []  # all of the flight, across and away
+
+
+def test_no_new_seagull_comes_once_it_rains_and_the_last_ones_fly_away():
+    storm = at_level(weather.START)
+    while not storm["gulls"]:
+        weather.update(storm, VIEW_SIZE, SKY)
+    weather.set_goal(storm, weather.storm_level(1, 3, 0.0, started=True))  # the first puzzle is solved
+    while weather.rain_amount(storm["level"]) == 0:
+        weather.update(storm, VIEW_SIZE, SKY)
+    flying = list(storm["gulls"])
+    for _ in range(2000):
+        weather.update(storm, VIEW_SIZE, SKY)
+        for gull in storm["gulls"]:
+            assert gull in flying  # no new one
+    assert storm["gulls"] == []  # the last ones are gone
+
+
+def test_a_seagull_flaps_then_glides():
+    pictures = [weather.gull_wings({"age": age}) for age in range(0, 120, weather.GULL_FLAP)]
+    assert {0, 1, 2} <= set(pictures)
+    glide = pictures[len(weather.GULL_WINGS):len(weather.GULL_WINGS) + weather.GULL_GLIDE]
+    assert glide == [1] * weather.GULL_GLIDE
+
+
+def test_the_seagull_pictures_fly_left_and_flip_to_fly_right():
+    for wings in range(3):
+        left = sprites.image("seagull_" + str(wings))
+        right = sprites.image("seagull_" + str(wings), flip=True)
+        assert left.get_size() == (weather.GULL_SIZE, weather.GULL_SIZE)
+        beak = [x for x in range(16) for y in range(16) if tuple(left.get_at((x, y)))[:3] == sprites.PALETTE["o"]]
+        assert beak and max(beak) < 8  # the head on the left
+        assert tuple(right.get_at((15 - beak[0], 10)))[:3] == sprites.PALETTE["o"]
+
+
+def gull_at(x, y):
+    return {"x": x, "y": y, "line": y, "heading": -1, "age": 0}
+
+
+def white_pixels(screen):
+    return {(x, y) for x in range(main.WIDTH) for y in range(main.VIEW.top, main.HEIGHT)
+            if tuple(screen.get_at((x, y)))[:3] == sprites.PALETTE["w"]}
+
+
+def test_the_seagulls_are_drawn_on_the_deck_only():
+    storm = at_level(0.0)
+    storm["gulls"] = [gull_at(100, main.HUD_HEIGHT + 60)]
+    outside = pygame.Surface((main.WIDTH, main.HEIGHT))
+    outside.fill((40, 60, 120))
+    weather.draw(outside, main.VIEW, storm, True, 1.0, (0, 0))
+    inside = pygame.Surface((main.WIDTH, main.HEIGHT))
+    inside.fill((40, 60, 120))
+    weather.draw(inside, main.VIEW, storm, False, main.WEATHER_INSIDE, (0, 0))
+    assert white_pixels(outside)  # a white seagull over the deck
+    assert not white_pixels(inside)
+
+
+def test_the_seagulls_stay_on_their_way_when_the_view_scrolls():
+    storm = at_level(0.0)
+    storm["gulls"] = [gull_at(100, main.HUD_HEIGHT + 60)]
+
+    def seen(camera):
+        screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+        screen.fill((40, 60, 120))
+        weather.draw(screen, main.VIEW, storm, True, 1.0, camera)
+        return white_pixels(screen)
+
+    still = seen((0, 0))
+    scrolled = seen((0, 40))  # the player has walked down the deck: the view is 40 pixels lower
+    assert scrolled == {(x, y - 40) for x, y in still if y - 40 >= main.VIEW.top}  # 40 pixels higher on screen
+    assert seen((0, 150)) == set()  # far enough down, they are out of the view
+
+
+def test_in_the_game_the_seagulls_fly_over_the_deck_not_the_screen(app):
+    game.playing(app, [])
+    main.update(app, 0, 0)
+    storm = app["weather"]
+    storm["next_flight"] = 1
+    main.update(app, 0, 0)
+    assert storm["gulls"] and all(SKY.left - 3 * 16 <= gull["x"] <= SKY.right + 3 * 16 for gull in storm["gulls"])
+    lines = [gull["line"] for gull in storm["gulls"]]
+    game.p1(app)["pos"] = main.spawn_at_entry("deck")
+    for _ in range(30):
+        main.update(app, 0, 1)  # the player walks down: the gulls keep their lines in the room
+    assert [gull["line"] for gull in storm["gulls"]] == lines
+
+
+================================================================================
+# FILE: plot_twist/test_net.py
+================================================================================
+
+"""Tests for the connection between two computers: messages in, messages out, and lines that are not messages."""
+
+import net
+
+
+def pair():
+    """Two connected ends over TCP on this computer, like a host and the computer that joined it."""
+    host = net.Host(0)
+    joined = net.connect("127.0.0.1", host.port)
+    accepted = None
+    for _ in range(200):
+        accepted = host.accept()
+        if accepted is not None:
+            break
+    host.close()
+    return joined, accepted
+
+
+def arrived(connection, tries=50):
+    messages = []
+    for _ in range(tries):
+        messages += connection.poll()
+        if messages:
+            break
+    return messages
+
+
+def test_a_message_arrives_whole():
+    one, other = pair()
+    one.send({"t": "sync", "player": {"pos": [1, 2]}})
+    assert arrived(other) == [{"t": "sync", "player": {"pos": [1, 2]}}]
+    one.close()
+    other.close()
+
+
+def test_broken_or_hostile_lines_are_skipped_and_the_connection_goes_on():
+    one, other = pair()
+    deep = b"[" * 100_000 + b"]" * 100_000  # deeper than Python can read: it must not crash the game
+    for line in (b"not json", b"[1, 2]", b'"text"', deep, b"{" + b" " * (net.MAX_LINE + 10) + b"}"):
+        one.sock.sendall(line + b"\n")
+    one.send({"t": "ok"})
+    messages = []
+    for _ in range(200):
+        messages += other.poll()
+        if {"t": "ok"} in messages:
+            break
+    assert messages == [{"t": "ok"}] and not other.closed  # only the real message; still connected
+    one.close()
+    other.close()
+
+
+def test_a_line_that_never_ends_closes_the_connection():
+    one, other = pair()
+    one.sock.sendall(b"x" * (net.MAX_LINE + 70_000))
+    for _ in range(200):
+        other.poll()
+        if other.closed:
+            break
+    assert other.closed
+    one.close()
 
 
 ================================================================================

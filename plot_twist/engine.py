@@ -797,6 +797,32 @@ def perform(state, action, player=1):
     return seen_by(new, player), outcome
 
 
+VERBS = ("pick_up", "enter", "use_item", "give", "ability", "drop", "examine", "activate", "step_on",
+         "leave_zone", "travel")
+
+
+def is_valid_action(action):
+    """True for an action in the shape perform() expects, with ids the story knows: what comes from
+    another computer is checked with this before it is played (perform() raises on anything else)."""
+    if not isinstance(action, dict) or not isinstance(action.get("verb"), str) or action["verb"] not in VERBS:
+        return False
+    verb = action["verb"]
+    if verb in ("ability", "drop"):
+        return True  # no target; drop() checks the tile itself
+    if verb in ("use_item", "give") and not _is_id(action.get("item"), story.ITEMS):
+        return False
+    if verb == "give":
+        return True
+    target = action.get("target")
+    if not isinstance(target, str):
+        return False
+    try:
+        _kind(target)
+    except ValueError:
+        return False
+    return True
+
+
 def _perform(state, action, player):
     """perform(), on the game as the player sees it."""
     verb = action["verb"]

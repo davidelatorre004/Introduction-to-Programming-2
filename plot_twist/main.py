@@ -2437,14 +2437,14 @@ def crab_info(app):
 
 
 def take_crab_info(app, info):
-    """Copy what the host said about the crab and the players down."""
-    crab = info.get("crab")
-    if isinstance(crab, dict):
+    """Copy what the host said about the crab and the players down (checked: see handle_message)."""
+    crab = clean_crab(info.get("crab"))
+    if crab is not None:
         crab = dict(crab, pos=tuple(crab["pos"]), facing=tuple(crab["facing"]))
     app["crab"] = crab
-    app["downed"] = {int(number): frames for number, frames in info.get("downed", {}).items()}
-    app["revive"] = {int(number): frames for number, frames in info.get("revive", {}).items()}
-    app["hidden"] = {int(number): frames for number, frames in info.get("hidden", {}).items()}
+    app["downed"] = {int(number): frames for number, frames in clean_timers(info.get("downed")).items()}
+    app["revive"] = {int(number): frames for number, frames in clean_timers(info.get("revive")).items()}
+    app["hidden"] = {int(number): frames for number, frames in clean_timers(info.get("hidden")).items()}
 
 
 def can_move(app):
@@ -3060,19 +3060,87 @@ def start_for_two(app):
     begin_game(app, state, opening_text)
 
 
+# What comes from the other computer is never trusted: each message is checked before it is used,
+# and anything malformed or out of range is ignored (an action is refused). A broken or hostile
+# computer on the network cannot crash this one, nor put the game in a state it could not reach.
+
+MAX_FRAMES = 10 ** 7     # the largest count of frames a message may carry (a timer, a walk)
+MAX_PIXELS = 10 ** 4     # positions are within this many pixels of the corner of a room
+
+
+def is_number(value):
+    """True for a finite int or float (not a bool, not NaN or infinity)."""
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def is_count(value, top=MAX_FRAMES):
+    """True for a whole number from 0 to `top` (not a bool)."""
+    return type(value) is int and 0 <= value <= top
+
+
+def is_position(value):
+    """True for [x, y] in pixels, both finite and within MAX_PIXELS."""
+    return (isinstance(value, (list, tuple)) and len(value) == 2
+            and all(is_number(number) and abs(number) <= MAX_PIXELS for number in value))
+
+
+def is_facing(value):
+    """True for one of the four directions a player or the crab can face."""
+    return isinstance(value, (list, tuple)) and tuple(value) in TOWARD.values()
+
+
+def is_character(value):
+    return isinstance(value, str) and value in story.CHARACTERS
+
+
+def clean_player_info(info):
+    """A player's info from the other computer (see player_info) if it is well formed, else None."""
+    if not isinstance(info, dict) or not is_position(info.get("pos")) or not is_facing(info.get("facing")):
+        return None
+    if not isinstance(info.get("moving"), bool) or not is_count(info.get("walk")):
+        return None
+    if not is_count(info.get("dash", 0), DASH_FRAMES):
+        return None
+    return info
+
+
+def clean_timers(value):
+    """Timers for each player (number -> frames, the numbers as text) if well formed, else {}."""
+    if not isinstance(value, dict):
+        return {}
+    return {key: frames for key, frames in value.items() if key in ("1", "2") and is_count(frames)}
+
+
+def clean_crab(crab):
+    """The crab as the host sent it, if well formed; else None (no crab to draw)."""
+    if not isinstance(crab, dict) or not isinstance(crab.get("room"), str) or crab["room"] not in story.ROOMS:
+        return None
+    if not is_position(crab.get("pos")) or not is_facing(crab.get("facing")) or not isinstance(crab.get("moving"), bool):
+        return None
+    if not all(is_count(crab.get(key)) for key in ("walk", "wait", "away", "stun")):
+        return None
+    return crab
+
+
+def is_outcome(outcome):
+    """True for an outcome in the shape the engine gives: ok, event and text."""
+    return (isinstance(outcome, dict) and isinstance(outcome.get("ok"), bool)
+            and isinstance(outcome.get("event"), str) and isinstance(outcome.get("text"), str))
+
+
 def handle_message(app, message):
-    """One message from the other computer."""
+    """One message from the other computer, checked before it is used (see above)."""
     kind = message.get("t")
     connection = app["net"]
-    if kind == "pick" and connection["role"] == "client" and (message.get("taken") in story.CHARACTERS
+    if kind == "pick" and connection["role"] == "client" and (is_character(message.get("taken"))
                                                                  or message.get("taken") is None):
         if app["scene"] != "character":
             open_choice_for_two(app)  # the host is there: time to choose
-        take_character(app, message["taken"])
+        take_character(app, message.get("taken"))
         return
     if kind == "picked" and connection["role"] == "host" and app["lobby"] is not None:
         character = message.get("character")
-        if character not in story.CHARACTERS or character == app["picked"]:
+        if not is_character(character) or character == app["picked"]:
             send(app, {"t": "pick", "taken": app["picked"]})  # not that one: choose again
             return
         take_character(app, character)
@@ -3085,11 +3153,13 @@ def handle_message(app, message):
             open_main_menu(app)
             return
         app["me"] = 1
-        begin_game(app, state, message.get("text"))
+        text = message.get("text")
+        begin_game(app, state, text if isinstance(text, str) else None)
     elif kind == "sync" and len(app["players"]) == 2:
         other = app["players"][1 - app["me"]]
-        if isinstance(message.get("player"), dict):
-            take_player_info(other, message["player"])
+        info = clean_player_info(message.get("player"))
+        if info is not None:
+            take_player_info(other, info)
         if connection["role"] == "client" and "state" in message:
             state = engine.restore_state(message["state"])
             if state is not None:
@@ -3099,18 +3169,28 @@ def handle_message(app, message):
         else:
             app["partner_reviving"] = bool(message.get("reviving"))
     elif kind == "do" and connection["role"] == "host" and app["state"] is not None:
-        # The other player asks for an action: the host plays it as player 2.
-        state, outcome = engine.perform(app["state"], message["action"], 2)
+        # The other player asks for an action: the host plays it as player 2, if it is one.
+        action = message.get("action")
+        refused = (app["state"], {"ok": False, "event": "nothing_happens", "text": story.MESSAGES["nothing_happens"]})
+        if not is_count(message.get("id")) or not engine.is_valid_action(action):
+            state, outcome = refused
+        else:
+            try:
+                state, outcome = engine.perform(app["state"], action, 2)
+            except ValueError:
+                state, outcome = refused  # a real id, but nothing this verb acts on
         if outcome["ok"]:
             app["state"] = state
             save_progress(app)
-            if message["action"].get("verb") == "ability":
+            if action.get("verb") == "ability":
                 apply_ability(app, 2)
             heart_helps(app, outcome, 2)
         send(app, {"t": "done", "id": message.get("id"), "state": app["state"], "outcome": outcome})
         connection["sent_state"] = app["state"]
     elif kind == "done" and connection["role"] == "client":
-        waiting = connection["pending"].pop(message.get("id"), None)
+        if not is_count(message.get("id")) or not is_outcome(message.get("outcome")):
+            return
+        waiting = connection["pending"].pop(message["id"], None)
         state = engine.restore_state(message.get("state"))
         if waiting is None or state is None:
             return
