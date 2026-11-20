@@ -21,7 +21,8 @@ Each effect is a list of layers played together, each a voice with its own:
   `highpass` thins it: the noise of a footstep in a puddle is not the noise of glass.
 
 The loops (LOOPS) are made the same way and fade into themselves at their seam, so they
-can play forever: the sea on the deck, water dripping, the hum of a machine. They play on
+can play forever: the sea on the deck, water dripping, the hum of a machine, the rain and
+the wind of the storm (see weather.py). They play on
 channels of their own (loop, update_loops), whose volume moves a little every frame, so
 that they fade in and out cleanly when the player changes room.
 
@@ -43,8 +44,8 @@ RENDER_RATE = 22050  # the sounds are made at most at this rate, then held to th
 NOISE_SEED = 1      # where the register of the noise starts: the same noise every time
 LOOP_FADE = 0.25    # seconds at the end of a loop that fade into its start: no click at the seam
 LOOP_FADE_FRAMES = 30  # frames a loop takes to fade in or out (half a second)
-LOOP_CHANNELS = 8   # mixer channels kept for the loops: two for each loop slot, to cross-fade
-LOOP_SLOTS = ("bed", "hum", "chase", "spare")  # what can loop at the same time
+LOOP_SLOTS = ("bed", "hum", "chase", "rain", "wind")  # what can loop at the same time
+LOOP_CHANNELS = 2 * len(LOOP_SLOTS)  # mixer channels kept for the loops: two for each loop slot, to cross-fade
 
 DUTIES = {"pulse12": 0.125, "pulse25": 0.25, "square": 0.5}
 TRIANGLE = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
@@ -195,6 +196,21 @@ def chase(eighth, near=False):
             voices.append(hit("pulse25", 659 if index % 2 == 0 else 622, eighth * 0.4, when + eighth / 2, 0.22))
     return (len(CHASE_BASS) * eighth, voices)
 
+# The thunder of the storm (see weather.py). Far away: no crack, only a low rumble that swells and rolls.
+EFFECTS["thunder_far"] = [
+    layer("noise", 1500, 1.4, volume=0.9, lowpass=500, lowpass_to=120, attack=0.25, decay=1.15, sustain=0.0,
+          tremolo=(5, 0.5)),
+    layer("triangle", 46, 1.3, 0.1, 0.6, to=36, attack=0.2, decay=1.1, sustain=0.0),
+]
+# Near: a dry crack that splits the air, then the rumble, louder and rougher.
+EFFECTS["thunder_near"] = [
+    hit("noise", 14000, 0.05, 0.0, 1.0, highpass=2500),
+    hit("metal", 6000, 0.08, 0.01, 0.4, highpass=3000),
+    layer("noise", 5000, 1.4, 0.03, 1.0, lowpass=3500, lowpass_to=180, attack=0.005, decay=1.35, sustain=0.0,
+          tremolo=(8, 0.45)),
+    layer("triangle", 55, 1.35, 0.04, to=33, decay=1.3, sustain=0.0),
+]
+EFFECTS["thunder_inside"] = muffled(EFFECTS["thunder_near"], 350)  # heard from inside the ship: deep and dull
 
 LOOPS = {
     # The sea on the deck: deep surf that swells and falls twice in four seconds, and the hiss of foam
@@ -216,6 +232,19 @@ LOOPS = {
 LOOPS["sea_far"] = (LOOPS["sea"][0], muffled(LOOPS["sea"][1], 250))  # the sea from inside the ship
 LOOPS["chase"] = chase(60 / 140 / 2)               # the crab is after you: 140 beats a minute...
 LOOPS["chase_near"] = chase(60 / 180 / 2, near=True)  # ...and when it is close, 180
+# The rain: a hiss that breathes, a low patter under it, and single drops ticking on the wood.
+LOOPS["rain"] = (2.0, [layer("noise", 11000, 2.0, volume=0.55, highpass=1800, lowpass=6000, attack=0.0, release=0.0,
+                             tremolo=(1.5, 0.2)),
+                       layer("noise", 3000, 2.0, volume=0.35, lowpass=900, attack=0.0, release=0.0)]
+                 + scattered("noise", 14, 0.0, 1.7, 6000, 12000, 0.012, 0.35, 13, highpass=3000))
+LOOPS["rain_far"] = (LOOPS["rain"][0], muffled(LOOPS["rain"][1], 700))  # the rain on the deck, from below it
+# The wind: a deep blowing that swells once in four seconds, a thin hiss, and a howl that wavers.
+LOOPS["wind"] = (4.0, [layer("noise", 2500, 4.0, volume=0.7, lowpass=380, attack=0.0, release=0.0, tremolo=(0.25, 0.6)),
+                       layer("noise", 9000, 4.0, volume=0.18, highpass=2500, lowpass=5000, attack=0.0, release=0.0,
+                             tremolo=(0.5, 0.8)),
+                       layer("triangle", 420, 4.0, volume=0.12, attack=0.0, release=0.0, vibrato=(0.5, 1.5),
+                             tremolo=(0.25, 0.7))])
+LOOPS["wind_far"] = (LOOPS["wind"][0], muffled(LOOPS["wind"][1], 300))  # the wind, through the walls of the ship
 
 _loaded = {}    # effect or loop name -> pygame Sound, once load() has run with audio
 _loops = {}     # slot -> list of the loops playing in it (see loop)

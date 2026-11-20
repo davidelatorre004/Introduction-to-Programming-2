@@ -19,6 +19,8 @@ Names follow what main.py looks for:
   "sea_calm_1" are the calm sea of the good ending.
 - decor as "decor_<picture>", shared by every piece that names it in story.py
   (as big as the piece: the crab statue is 2 x 2 tiles), and the "portal";
+- the seagulls flying over the deck before the storm as "seagull_0" to "seagull_2"
+  (wings up, level, down), flying left (flipped, they fly right);
 A picture missing here is drawn as a colored rectangle by main.py.
 """
 
@@ -1473,6 +1475,62 @@ SPRITES = {
         "................................",
         "................................",
         "................................",
+    ],
+    # A seagull over the deck before the storm (see weather.py), flying left: wings up, level
+    # (also when it glides), down. Flipped, it flies right.
+    "seagull_0": [  # wings up
+        "................",
+        "................",
+        "................",
+        "..d..........d..",
+        "..lw........wl..",
+        "...lw......wl...",
+        "....lw....wl....",
+        ".....lw..wl.....",
+        "......lwwl......",
+        "......lwwl......",
+        ".....owwwl......",
+        ".......ll.......",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
+    "seagull_1": [  # wings level, bent at the wrist: the M of a gull, also when it glides
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "...ww......ww...",
+        "..wllw....wllw..",
+        ".wl..lw..wl..lw.",
+        "dl....lwwl....ld",
+        ".....owwwl......",
+        ".......ll.......",
+        "................",
+        "................",
+        "................",
+        "................",
+    ],
+    "seagull_2": [  # wings down
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "................",
+        "......lwwl......",
+        ".....owwwl......",
+        "....lw.ll.wl....",
+        "...lw......wl...",
+        "..d..........d..",
+        "................",
+        "................",
     ],
     "decor_lantern": [
         ".......kk.......",

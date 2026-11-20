@@ -44,6 +44,7 @@ FX = {
     "scenery": True,        # floors and walls with details, walls with depth, shading and shadows of the furniture
     "ambient": True,        # small things that move: steam, drops from the ceiling, flames, a glint on puddles
     "atmosphere": True,     # the colour of the light in each room, and soft lights around what shines
+    "weather": True,        # the storm that grows with the puzzles: clouds, wind, rain, lightning, thunder (weather.py)
 }
 
 # --- Timing and sizes (frames are 1/60 of a second) --------------------------------------

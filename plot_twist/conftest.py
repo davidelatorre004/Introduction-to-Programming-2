@@ -28,6 +28,14 @@ def no_opening_lightning(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_weather(monkeypatch):
+    """The tests check exact colours, sounds and random numbers, so the storm (which darkens the
+    rooms, rains and flashes at moments of its own) is off. Its own tests turn it back on.
+    """
+    monkeypatch.setitem(effects.FX, "weather", False)
+
+
+@pytest.fixture(autouse=True)
 def no_atmosphere(monkeypatch):
     """The tests check the exact colours of what is drawn, so the colour of the light of each room
     (which shifts them a little) is off. Its own tests turn it back on.

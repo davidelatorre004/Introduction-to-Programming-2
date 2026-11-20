@@ -32,6 +32,7 @@ import scenery
 import sounds
 import sprites
 import story
+import weather
 from pixel_font import PixelFont
 
 # --- Sizes -----------------------------------------------------------------------
@@ -667,6 +668,7 @@ def new_app(fonts):
         "fade": 0,               # frames left before the room is out of the dark
         "flash_frames": 0,       # frames left of the tiles blinking red after a mistake
         "fx": effects.new_fx(),  # the visual effects: particles, dissolves, the warp (see effects.py)
+        "weather": weather.new_weather(),  # the storm that grows with the puzzles (see weather.py)
         "inventory_scroll": 0,   # how many rows the list of items is scrolled down
         "inventory_player": 1,   # whose items the inventory screen shows: who opened it
         "actor": 1,              # who pressed E last: the player the chosen action is for
@@ -1480,6 +1482,7 @@ def update(app, dx, dy, act=False):
     update_ability_effects(app)
     update_crumble(app)
     update_effects(app)
+    update_weather(app)
     update_audio(app)
     update_crab_looks(app)
     if app["scene"] == "shatter":
@@ -2302,8 +2305,13 @@ def update_crumble(app):
 
 
 def room_shake(app):
-    """How far the room is pushed aside in this frame: the ship shaking while the statue crumbles."""
-    return effects.shake_offset(app["frame"], app["crumble"], CRUMBLE_FRAMES, CRUMBLE_SHAKE)
+    """How far the room is pushed aside in this frame: the ship shaking while the statue crumbles,
+    or under the strongest thunder of the storm."""
+    dx, dy = effects.shake_offset(app["frame"], app["crumble"], CRUMBLE_FRAMES, CRUMBLE_SHAKE)
+    if effects.FX["weather"] and app["state"] is not None:
+        tx, ty = weather.shake(app["weather"], app["frame"], thunder_shake(view(app)["room"]))
+        dx, dy = dx + tx, dy + ty
+    return (dx, dy)
 
 
 def draw_trembling_statue(app, screen):
@@ -3227,6 +3235,9 @@ def update_audio(app):
     sounds.loop("bed", *(bed or (None,)))
     sounds.loop("hum", *(hum or (None,)))
     sounds.loop("chase", music, CHASE_VOLUME)
+    rain, wind = weather_sounds(app)
+    sounds.loop("rain", *(rain or (None,)))
+    sounds.loop("wind", *(wind or (None,)))
     sounds.update_loops()
     if app["state"] is not None:
         footsteps(app)
@@ -3419,7 +3430,8 @@ def update_effects(app):
                     color = cauldron_color(state)
                     x, y = liquid_center(thing["id"])
                     effects.spawn(fx, x + rng.randint(-4, 4), y, 1, [lighter(color)], speed=0.1, life=36, up=0.35)
-        if effects.FX["ambient"] and story.ROOMS[room].get("damp") and rng.random() < 1 / DRIP_EVERY:
+        chance = drip_chance(app, room)  # a drop from the ceiling: more of them in the rain
+        if effects.FX["ambient"] and chance > 0 and rng.random() < chance:
             ceiling = floor_rect(room)  # a drop from the foot of the back wall, falling onto the floor
             x = rng.randint(ceiling.left + 2, ceiling.right - 3)
             effects.add_drip(fx, x, ceiling.top, ceiling.top + rng.randint(10, 46))
@@ -3643,6 +3655,231 @@ def draw_darkness(app, surface, state, things):
     surface.blit(layer, (0, 0))
 
 
+# --- The weather: one storm that grows with the puzzles (see weather.py) -----------------------
+#
+# The level of the storm follows the puzzles of story.py (the circuits, the floor puzzles and
+# the potion puzzles): how many are solved, and how far the player has got in the others. The
+# opening bolt is its first sign; the calm lasts until the player walks into the room of a
+# puzzle. On the deck the whole storm is seen and heard: the clouds, the wind, the rain, the
+# bolts and the puddles. Inside the ship it is the darker light, the flashes through the
+# portholes, the rain and the wind muffled by the deck above, the thunder, and the ceiling
+# leaking in the heavy rain. The mine is deep in the rock: nothing of the storm reaches it.
+# Each computer of a game for two has its own storm, from the same progress.
+
+WEATHER_INSIDE = 0.35        # how much of the weather reaches a room inside the ship
+ROOM_WEATHER = {"mine": 0.0}  # rooms where it is different: none at all in the mine
+RAIN_VOLUME = 0.5            # the rain on the deck, at its heaviest
+WIND_VOLUME = 0.45           # the wind on the deck, at its strongest
+WEATHER_INSIDE_VOLUME = 0.6  # rain, wind and thunder heard from inside the ship (muffled, too)
+LEAK_FROM = 0.5              # rain heavier than this leaks through the deck into the rooms below
+LANTERN_WIND = 1.2           # how much more a lantern on the deck swings in the strongest wind
+PUDDLE_SHARE = 0.07          # how many tiles of the deck get a puddle in the rain, of the free ones
+
+_puddles = {}                # room -> the tiles where its puddles form, found once
+
+
+def puzzle_progress(state):
+    """How far the player is with the puzzles: (solved, total, share), where `share` (from 0 to 1)
+    is how far the player has got in the puzzle they are furthest on, of those not solved yet.
+
+    A circuit counts the generators turned on since its start; a floor puzzle the tiles lit, phase
+    after phase; a potion the ingredients found and poured in. Each one reaches 1 when only its
+    last step is left, so the storm is at its worst just before the last puzzle is solved.
+    """
+    flags = state["flags"]
+    solved = 0
+    total = 0
+    share = 0.0
+    for circuit in story.CIRCUITS.values():
+        total += 1
+        if flags[circuit["solved_flag"]]:
+            solved += 1
+            continue
+        on_at_start = 0
+        on_now = 0
+        for switch in circuit["switches"]:
+            if story.FLAGS[switch]:
+                on_at_start += 1
+            if flags[switch]:
+                on_now += 1
+        left = len(circuit["switches"]) - 1 - on_at_start  # the last generator solves it
+        if left > 0:
+            share = max(share, (on_now - on_at_start) / left)
+    for puzzle in story.FLOOR_PUZZLES.values():
+        total += 1
+        if flags[puzzle["solved_flag"]]:
+            solved += 1
+            continue
+        steps = 0
+        done = flags[puzzle["step_flag"]]
+        for number, phase in enumerate(puzzle["phases"], start=1):
+            steps += len(phase["steps"])
+            if number < flags[puzzle["phase_flag"]]:
+                done += len(phase["steps"])  # the phases already played
+        if steps > 1:
+            share = max(share, done / (steps - 1))
+    for potion in story.POTION_PUZZLES.values():
+        total += 1
+        if flags[potion["solved_flag"]]:
+            solved += 1
+            continue
+        found = 0
+        for item in potion["recipe"]:
+            if engine.has_item(state, item) or flags["dropped_" + item] is not None:
+                found += 1
+        units = 2 * len(potion["recipe"])  # each ingredient is found, then poured in
+        share = max(share, (found + flags[potion["step_flag"]]) / (units - 1))
+    return solved, total, max(0.0, min(1.0, share))
+
+
+def puzzle_rooms():
+    """The rooms where the puzzles are: walking into one of them, the storm begins to come."""
+    rooms = []
+    for table in (story.CIRCUITS, story.FLOOR_PUZZLES, story.POTION_PUZZLES):
+        for puzzle in table.values():
+            rooms.append(puzzle["room"])
+    return rooms
+
+
+def storm_target(state):
+    """Where the progress of the player puts the storm, from 0 (the calm) to 1 (its worst)."""
+    solved, total, share = puzzle_progress(state)
+    started = False
+    for room in puzzle_rooms():
+        if state["flags"].get("visited_" + room):
+            started = True
+    return weather.storm_level(solved, total, share, started)
+
+
+def weather_exposure(room):
+    """How much of the weather reaches a room: all of it on the deck, less inside the ship."""
+    if story.ROOMS[room]["outdoor"]:
+        return 1.0
+    return ROOM_WEATHER.get(room, WEATHER_INSIDE)
+
+
+def thunder_shake(room):
+    """How many pixels the strongest thunder shakes the room at most: more on the deck, none in the mine."""
+    exposure = weather_exposure(room)
+    if exposure <= 0:
+        return 0
+    return weather.SHAKE_POWER if exposure >= 1 else 1
+
+
+def deck_sky():
+    """Where the seagulls fly: the whole outdoor room (the deck and the sea around it), in pixels
+    of the room. None if no room is outdoors."""
+    for room, info in story.ROOMS.items():
+        if info["outdoor"]:
+            columns, rows = room_size(room)
+            return tile_rect(0, 0, columns, rows)
+    return None
+
+
+def update_weather(app):
+    """Once a frame: the storm moves toward where the progress puts it, and its thunder is heard.
+    Outside a game the weather goes back to the calm, ready for the next one."""
+    if not effects.FX["weather"]:
+        return
+    storm = app["weather"]
+    state = app["state"]
+    if state is None:
+        if not storm["fresh"]:
+            weather.reset(storm)
+        weather.update(storm, VIEW.size, deck_sky())  # the sea of the title screen still moves
+        return
+    weather.set_goal(storm, storm_target(state))
+    thunder = weather.update(storm, VIEW.size, deck_sky())
+    if thunder is None or engine.is_over(state) or app["scene"] in ("ending", "shatter"):
+        return
+    room = view(app)["room"]
+    if weather_exposure(room) <= 0:
+        return
+    if story.ROOMS[room]["outdoor"]:
+        sounds.play(thunder["name"], thunder["volume"])
+    else:
+        sounds.play("thunder_inside", thunder["volume"] * WEATHER_INSIDE_VOLUME)
+
+
+def weather_sounds(app):
+    """What the rain and the wind loop now: (name, volume) each, or None."""
+    state = app["state"]
+    if not effects.FX["weather"] or state is None or engine.is_over(state) or app["scene"] in ("ending", "shatter"):
+        return None, None
+    room = view(app)["room"]
+    if weather_exposure(room) <= 0:
+        return None, None
+    storm = app["weather"]
+    rain = weather.rain_amount(storm["level"]) * RAIN_VOLUME
+    wind = min(1.0, storm["wind"]) * WIND_VOLUME
+    if story.ROOMS[room]["outdoor"]:
+        return ("rain", rain) if rain > 0 else None, ("wind", wind)
+    rain *= WEATHER_INSIDE_VOLUME
+    wind *= WEATHER_INSIDE_VOLUME
+    return ("rain_far", rain) if rain > 0 else None, ("wind_far", wind)
+
+
+def draw_weather(app, screen, room, corner):
+    """The storm over the part of the room on screen (`corner` is where the camera looks)."""
+    if not effects.FX["weather"] or app["state"] is None:
+        return
+    columns, rows = room_size(room)
+    area = pygame.Rect(-corner[0], HUD_HEIGHT - corner[1], columns * TILE, rows * TILE).clip(VIEW)
+    outdoor = story.ROOMS[room]["outdoor"]
+    weather.draw(screen, area, app["weather"], outdoor, weather_exposure(room), corner)
+
+
+def drip_chance(app, room):
+    """How likely a drop is to fall from the ceiling in this frame: in the damp rooms, more so in
+    the rain; in the other rooms inside the ship, only once the rain is heavy enough to leak in."""
+    damp = story.ROOMS[room].get("damp")
+    usual = 1 / DRIP_EVERY if damp else 0.0
+    if not effects.FX["weather"] or story.ROOMS[room]["outdoor"] or weather_exposure(room) <= 0:
+        return usual
+    rain = weather.rain_amount(app["weather"]["level"])
+    if damp:
+        return (1 + 2 * rain) / DRIP_EVERY
+    if rain > LEAK_FROM:
+        return (rain - LEAK_FROM) / DRIP_EVERY
+    return 0.0
+
+
+def lantern_wind(app, lantern):
+    """How much more a lantern swings: in the wind on the deck, more as it blows harder."""
+    if not effects.FX["weather"] or not story.ROOMS[story.OBJECTS[lantern]["room"]]["outdoor"]:
+        return 1.0
+    return 1 + LANTERN_WIND * app["weather"]["wind"]
+
+
+def puddle_spots(room):
+    """The tiles of a room where puddles form in the rain: a few free tiles of its floor, never
+    under a thing, an item or in a doorway. Always the same ones."""
+    if room not in _puddles:
+        taken = [door_rect(door) for door in doors_in(room)]
+        for name, info in story.OBJECTS.items():
+            if info["room"] == room:
+                taken.append(thing_rect(name))
+        for name, info in story.ITEMS.items():
+            if info["room"] == room:
+                taken.append(thing_rect(name))
+        spots = []
+        columns, rows = room_size(room)
+        for col in range(1, columns - 1):
+            for row in range(1, rows - 1):
+                tile = tile_rect(col, row)
+                if scenery.hash01(col, row, 41) < PUDDLE_SHARE and tile.collidelist(taken) == -1:
+                    spots.append(tile)
+        _puddles[room] = spots
+    return _puddles[room]
+
+
+def toggle_soft_flashes(app):
+    """F10: soft lightning (pale flashes, one flicker, no shaking), or back to the full storm."""
+    storm = app["weather"]
+    storm["soft"] = not storm["soft"]
+    show_banner(app, story.MESSAGES["soft_flashes_on" if storm["soft"] else "soft_flashes_off"])
+
+
 # --- Atmosphere: the colour of the light, and soft lights -----------------------------------
 #
 # Every room has the colour of its light, multiplied into it (effects.lightmap): cold and
@@ -3722,7 +3959,8 @@ def ambient_of(room):
 
 def draw_atmosphere(app, surface, state, things):
     """Multiply the room by the colour of its light, warmer or more violet around some things;
-    on the deck, now and then, distant lightning brightens everything for an instant."""
+    on the deck, now and then, distant lightning brightens everything for an instant (when the
+    storm of weather.py is off: otherwise its lightning does that)."""
     if not effects.FX["atmosphere"]:
         return
     room = state["room"]
@@ -3733,7 +3971,7 @@ def draw_atmosphere(app, surface, state, things):
             effects.tint(layer, light_center(app, thing), tint[0], tint[1])
     surface.blit(layer, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
     every = STORM_EVERY_LATE if engine.key_fused(state) else STORM_EVERY
-    if story.ROOMS[room]["outdoor"] and app["frame"] % every in STORM_FRAMES:
+    if not effects.FX["weather"] and story.ROOMS[room]["outdoor"] and app["frame"] % every in STORM_FRAMES:
         surface.fill(STORM_FLASH, special_flags=pygame.BLEND_RGB_ADD)
 
 
@@ -3845,7 +4083,7 @@ def draw_lights(app, surface, things):
 def lantern_swing(app, lantern):
     """How a lantern swings now: an angle in degrees, and how far its light moves sideways."""
     rect = thing_rect(lantern)
-    angle = effects.LANTERN_SWING * math.sin(app["frame"] * 0.05 + rect.left * 0.13)
+    angle = effects.LANTERN_SWING * lantern_wind(app, lantern) * math.sin(app["frame"] * 0.05 + rect.left * 0.13)
     return angle, round(angle / effects.LANTERN_SWING * 2)
 
 
@@ -3954,7 +4192,9 @@ def draw_menu(app, screen, top):
 
 
 def wave_frame(app):
-    """Which picture of the moving tiles (the stormy sea) to show now."""
+    """Which picture of the moving tiles (the stormy sea) to show now: faster as the storm grows."""
+    if effects.FX["weather"]:
+        return weather.wave_frame(app["weather"], WAVE_FRAMES, SEA_PICTURES)
     return (app["frame"] // WAVE_FRAMES) % SEA_PICTURES
 
 
@@ -4402,6 +4642,8 @@ def draw_room(app, screen):
                     screen.blit(picture, tile_rect(col, row))
     if story.ROOMS[room]["outdoor"]:
         draw_railing(screen, room)
+        if effects.FX["weather"]:
+            weather.draw_puddles(screen, puddle_spots(room), app["weather"]["level"], app["frame"])
     if story.ROOMS[room].get("view") == "sea":
         draw_sea_view(app, screen, room)
     things = engine.things_here(state)
@@ -4782,7 +5024,10 @@ def draw_lightning(app, screen):
     for start in (0, 30):
         if start <= age < start + 5:  # the flash: white, fading fast
             veil = pygame.Surface(whole.size, pygame.SRCALPHA)
-            veil.fill((255, 255, 255, 230 - 45 * (age - start)))
+            white = 230 - 45 * (age - start)
+            if app["weather"]["soft"]:
+                white = round(white * weather.SOFT_FLASH)  # soft lightning (F10): a much paler flash
+            veil.fill((255, 255, 255, white))
             screen.blit(veil, (0, 0))
 
 
@@ -4803,6 +5048,7 @@ def draw_play_screen(app, screen, overlays=True):
     screen.set_clip(VIEW)
     screen.blit(whole, (-x + shake_x, -y + shake_y))
     screen.set_clip(None)
+    draw_weather(app, screen, room, (x, y))  # the storm: over the room, under the bar and the texts
     if app["fade"] > 0:
         # Just through a door: the room comes out of the dark.
         shade(screen, VIEW, 255 * app["fade"] // FADE_FRAMES)
@@ -5267,6 +5513,7 @@ def draw(app, screen):
 
 
 FULLSCREEN_KEY = pygame.K_F11
+SOFT_FLASHES_KEY = pygame.K_F10  # soft lightning: for players who are bothered by flashing lights
 
 
 def picture_area(window_size):
@@ -5314,6 +5561,8 @@ def main():
             elif event.type == pygame.KEYDOWN and event.key == FULLSCREEN_KEY:
                 fullscreen = not fullscreen  # F11: the whole screen, and back to the window
                 window = open_window(fullscreen)
+            elif event.type == pygame.KEYDOWN and event.key == SOFT_FLASHES_KEY:
+                toggle_soft_flashes(app)  # F10: softer lightning, and back
             elif event.type == pygame.KEYDOWN:
                 handle_key(app, event.key)
         pressed = pygame.key.get_pressed()

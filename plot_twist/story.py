@@ -1773,7 +1773,7 @@ MESSAGES = {
     "label_activate": "Activate: {name}",
     # The window title and the menus.
     "title": "Plot Twist",
-    "window_title": "Plot Twist · F11: full screen",
+    "window_title": "Plot Twist · F11: full screen · F10: soft lightning",
     "subtitle": "A mystery in the middle of the sea",
     "menu_new_game": "New game",
     "menu_resume": "Resume",
@@ -1860,6 +1860,9 @@ MESSAGES = {
     "clues_none": "No clues yet.",
     # Shown if the save file cannot be written (for example, the disk is full).
     "save_failed": "The game cannot be saved: progress from here on could be lost.",
+    # F10 turns the flashes of the lightning soft, and back.
+    "soft_flashes_on": "Soft lightning: on",
+    "soft_flashes_off": "Soft lightning: off",
 }
 
 
