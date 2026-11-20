@@ -240,7 +240,7 @@ def thing_rect(thing):
     info = story.OBJECTS[thing]
     col, row = info["pos"]
     width, height = info.get("size", (1, 1))
-    return tile_rect(col, row, width, height)
+    return tile_rect(col, row, width, height).move(info.get("shift", (0, 0)))  # "shift": pixels off the grid
 
 
 def wall_rects(room):
@@ -250,7 +250,7 @@ def wall_rects(room):
     """
     columns, rows = room_size(room)
     sides = {
-        "N": tile_rect(0, 0, columns, 1),
+        "N": tile_rect(0, 0, columns, VIEW_ROWS if story.ROOMS[room].get("view") else 1),
         "S": tile_rect(0, rows - 1, columns, 1),
         "W": tile_rect(0, 0, 1, rows),
         "E": tile_rect(columns - 1, 0, 1, rows),
@@ -383,6 +383,10 @@ def spawn_in_front_of(door):
     else:
         rect.midright = (opening.left - SPAWN_GAP, opening.centery)
     return (rect.x, rect.y)
+
+
+PORTAL_EXIT = (0, 1)     # the way a player comes out of a portal: down, away from it (they appear below it)
+PORTAL_STEP_OUT = 10     # frames they walk out by themselves; then the key they held is ignored until let go
 
 
 def spawn_by_portal(portal):
@@ -693,6 +697,8 @@ def new_app(fonts):
         "crab_claws": 0.25,      # how open its claws are on this screen: they move toward the pose, a little a frame
         "crab_lunging": False,   # it is about to lunge (see crab_telegraph)
         "chase_left": 0,         # frames the music of a chase goes on before it fades (see chase_music)
+        "portal_out": 0,         # frames left of walking out of a portal by oneself (see finish_portal)
+        "portal_lock": None,     # the direction held when that ended: ignored until it changes
         "act_held": False,       # E is held down on this keyboard (to help a player up)
         "partner_reviving": False,  # E is held down on the other computer, as it said
         "seen": {},              # what this computer has already told about the crab (see crab_news)
@@ -1159,7 +1165,9 @@ def finish_portal(app, action, before, state, outcome):
     player = local_player(app)
     player["pos"] = spawn_by_portal(story.OBJECTS[action["target"]]["to"])
     player["touching"] = None
+    player["facing"] = PORTAL_EXIT  # out of the portal, turned away from it
     settle_on_floor(app, player)
+    app["portal_out"] = PORTAL_STEP_OUT
     if effects.FX["portals"]:
         app["fx"]["warp"] = effects.WARP_FRAMES  # a purple warp instead of the dark fade
     else:
@@ -1508,6 +1516,16 @@ def update(app, dx, dy, act=False):
     if local_player(app)["dash"] > 0:
         dash_step(app)  # dashing: the keys wait
         return
+    if app["portal_out"] > 0:  # just out of a portal: a few steps away from it, whatever is held
+        app["portal_out"] -= 1
+        move_player(app, local_player(app), *PORTAL_EXIT)
+        app["portal_lock"] = (dx, dy) if app["portal_out"] == 0 and (dx, dy) != (0, 0) else None
+        return
+    if app["portal_lock"] is not None:
+        if (dx, dy) == app["portal_lock"]:
+            dx = dy = 0  # still the key held going in: it does not take them back in
+        else:
+            app["portal_lock"] = None
     move_player(app, local_player(app), dx, dy)
 
 
@@ -2713,8 +2731,8 @@ def dashing(app, number):
 
 
 def abilities_used(state):
-    """Which player has used their ability: number -> True or False."""
-    return {number: state["flags"]["ability_used_" + str(number)] for number in (1, 2)}
+    """How many times each player has used their ability: number -> a count."""
+    return {number: state["flags"]["ability_count_" + str(number)] for number in (1, 2)}
 
 
 def ability_news(app):
@@ -2725,8 +2743,8 @@ def ability_news(app):
         return
     used = abilities_used(state)
     for number, now in used.items():
-        if not now or app["seen"].get("abilities", {}).get(number, False) or number > len(app["players"]):
-            continue
+        if now <= app["seen"].get("abilities", {}).get(number, 0) or number > len(app["players"]):
+            continue  # not used again since the last frame
         character = engine.character_of(state, number)
         if engine.player_room(state, number) != view(app)["room"]:
             continue  # elsewhere on the ship: nothing to see here
@@ -2848,10 +2866,58 @@ def ability_hint(app):
     return (story.MESSAGES["hint_ability"].format(label=label), COLORS["highlight"])
 
 
+BOLT = ["..kkk",   # one of Flash's dashes, in the bottom left corner: a lightning bolt
+        ".kyyk",
+        ".kyk.",
+        "kyykk",
+        "kyyyk",
+        ".kyk.",
+        ".kk..",
+        "kk..."]
+BOLT_GAP = 7         # from one bolt to the next
+BOLT_OFF = (16, 14, 20)       # a bolt already used: black...
+BOLT_OFF_EDGE = (128, 126, 140)  # ...with a pale edge, to be seen on the dark sea too
+
+
+def dash_bolts(app):
+    """Flash's dashes in a game for two, for the player on this computer: (left, all), or None for
+    another character, alone, or out of the game."""
+    state = app["state"]
+    number = my_number(app)
+    if not state["flags"]["two_players"] or engine.is_out(state, number) \
+            or engine.ability_uses(state, number) <= 1:
+        return None
+    return engine.abilities_left(state, number), engine.ability_uses(state, number)
+
+
+def draw_bolt(screen, left, top, lit):
+    """One bolt: yellow while that dash is still there, black once it is used."""
+    for y, row in enumerate(BOLT):
+        for x, letter in enumerate(row):
+            if letter == ".":
+                continue
+            if lit:
+                color = COLORS["highlight"] if letter == "y" else COLORS["black"]
+            else:
+                color = BOLT_OFF if letter == "y" else BOLT_OFF_EDGE
+            screen.set_at((left + x, top + y), color)
+
+
 def draw_ability_hint(app, screen):
+    """The bottom left corner: what Space does, while it does something; for Flash, a bolt for each
+    of the three dashes, yellow while it is there and black once used."""
     hint = ability_hint(app)
+    bolts = dash_bolts(app)
+    x = 4
+    if bolts is not None:
+        left, total = bolts
+        top = HEIGHT - 12
+        for index in range(total):
+            draw_bolt(screen, x, top, index < left)
+            x += BOLT_GAP
+        x += 3
     if hint is not None:
-        draw_text(screen, app["fonts"]["text"], hint[0], hint[1], (4, HEIGHT - 12), "left", True)
+        draw_text(screen, app["fonts"]["text"], hint[0], hint[1], (x, HEIGHT - 12), "left", True)
 
 
 # --- Two computers: hosting, joining, and keeping the two games in step ---------------------
@@ -3625,7 +3691,8 @@ SOFT_LIGHTS = {
 DOOR_LIGHT = 18                  # the light that comes in through an open door: its radius...
 DOOR_LIGHT_OUTSIDE = (24, 30, 44)  # ...cold from the storm outside
 DOOR_LIGHT_INSIDE = (36, 28, 14)   # ...warm from another room
-STORM_EVERY = 470                # frames between two flashes of distant lightning on the deck
+STORM_EVERY = 470                # frames between two flashes of distant lightning on the deck...
+STORM_EVERY_LATE = 390           # ...a little more often once the key is fused: the last part of the game
 STORM_FLASH = (12, 16, 26)       # added to the deck while it lasts
 STORM_FRAMES = (0, 1, 4, 5)      # a flash in two flickers
 
@@ -3665,7 +3732,8 @@ def draw_atmosphere(app, surface, state, things):
         if tint is not None:
             effects.tint(layer, light_center(app, thing), tint[0], tint[1])
     surface.blit(layer, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
-    if story.ROOMS[room]["outdoor"] and app["frame"] % STORM_EVERY in STORM_FRAMES:
+    every = STORM_EVERY_LATE if engine.key_fused(state) else STORM_EVERY
+    if story.ROOMS[room]["outdoor"] and app["frame"] % every in STORM_FRAMES:
         surface.fill(STORM_FLASH, special_flags=pygame.BLEND_RGB_ADD)
 
 
@@ -4115,6 +4183,59 @@ def draw_player(app, screen, player):
         pygame.draw.rect(screen, COLORS["black"], eye)
 
 
+VIEW_ROWS = 2          # the rows at the top of a room open on the sea (story.ROOMS "view")
+BOW_HALF = 56          # half the width of the bow where it meets the railing
+BOW_TIP = 3            # how far below the top of the view the tip of the bow is
+VIEW_RAIL = 5          # the height of the railing at the bottom of the view
+BALUSTER_EVERY = 8     # pixels from one post of the railing to the next
+
+
+def bow_shape(band):
+    """The bow of the ship seen from the helm: a point of deck from the railing to the waves."""
+    middle = band.centerx
+    return [(middle - BOW_HALF, band.bottom), (middle, band.top + BOW_TIP), (middle + BOW_HALF, band.bottom)]
+
+
+def draw_sea_view(app, screen, room):
+    """The top of the helm, open on the sea: the stormy waves, the bow of the ship cutting through
+    them with foam along its sides, and a railing in front, casting its shadow on the floor."""
+    columns, _ = room_size(room)
+    band = tile_rect(0, 0, columns, VIEW_ROWS)
+    draw_sea(app, screen, band)
+    if not effects.FX["scenery"]:
+        pygame.draw.polygon(screen, PALETTE_WOOD[1], bow_shape(band))
+        pygame.draw.rect(screen, PALETTE_WOOD[2], (band.left, band.bottom - VIEW_RAIL, band.width, VIEW_RAIL))
+        return
+    left, tip, right = bow_shape(band)
+    for side, (x, y) in ((-1, left), (1, right)):  # foam where the bow meets the waves, moving
+        for step in range(0, BOW_HALF, 3):
+            share = step / BOW_HALF
+            fx = round(tip[0] + (x - tip[0]) * share) + side * (1 + (app["frame"] // 6 + step) % 3)
+            fy = round(tip[1] + (y - tip[1]) * share)
+            screen.set_at((fx, fy), COLORS["foam"])
+    pygame.draw.polygon(screen, PALETTE_WOOD[1], [left, tip, right])
+    for offset in range(-BOW_HALF + 8, BOW_HALF, 8):  # the planks run to the tip
+        top_y = tip[1] + (band.bottom - tip[1]) * abs(offset) / BOW_HALF
+        pygame.draw.line(screen, PALETTE_WOOD[2], (tip[0] + offset * 0.15, top_y + 4), (tip[0] + offset, band.bottom), 1)
+    pygame.draw.line(screen, PALETTE_WOOD[2], tip, (tip[0], band.bottom), 1)
+    for side, end in ((-1, left), (1, right)):  # the gunwales: dark outside, a pale edge inside
+        pygame.draw.line(screen, COLORS["black"], (tip[0], tip[1] - 1), (end[0] + side, end[1]), 2)
+        pygame.draw.line(screen, PALETTE_WOOD[0], (tip[0] - side, tip[1] + 2), (end[0] - side * 2, end[1]), 1)
+    pygame.draw.line(screen, PALETTE_WOOD[2], (tip[0], tip[1] - 3), (tip[0], tip[1]), 1)  # the bowsprit
+    rail = pygame.Rect(band.left, band.bottom - VIEW_RAIL, band.width, VIEW_RAIL)
+    for x in range(band.left + 4, band.right, BALUSTER_EVERY):  # the posts, then the rail on them
+        pygame.draw.rect(screen, COLORS["black"], (x - 1, rail.top - 7, 4, 8))
+        pygame.draw.rect(screen, PALETTE_WOOD[0], (x, rail.top - 6, 2, 7))
+    pygame.draw.rect(screen, COLORS["black"], rail)
+    pygame.draw.rect(screen, PALETTE_WOOD[1], rail.inflate(0, -2))
+    pygame.draw.line(screen, PALETTE_WOOD[0], (rail.left, rail.top + 1), (rail.right, rail.top + 1), 1)
+    reach = scenery.WALL_SHADOW
+    scenery.contact_shadow(screen, pygame.Rect(band.left, band.bottom, band.width, reach[1]), "top", reach[1])
+
+
+PALETTE_WOOD = (sprites.PALETTE["b"], sprites.PALETTE["B"], sprites.PALETTE["n"])  # light, mid, dark
+
+
 def draw_railing_shadow(screen, room):
     """The shadow the railing casts on the deck, under its top rail and beside its left one."""
     columns, rows = room_size(room)
@@ -4281,6 +4402,8 @@ def draw_room(app, screen):
                     screen.blit(picture, tile_rect(col, row))
     if story.ROOMS[room]["outdoor"]:
         draw_railing(screen, room)
+    if story.ROOMS[room].get("view") == "sea":
+        draw_sea_view(app, screen, room)
     things = engine.things_here(state)
     if effects.FX["portals"]:
         for thing in things:

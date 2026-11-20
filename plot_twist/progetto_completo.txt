@@ -28,8 +28,8 @@ CHARACTERS = {
               "ability": "Vanish: the crab cannot see you for 5 seconds.",
               "power": {"label": "Vanish", "text": "You vanish: the crab cannot see you"}},
     "flash": {"sprite": "flash", "name": "Flash",
-              "ability": "Dash: a lightning sprint of 8 tiles, through doors too.",
-              "power": {"label": "Dash", "text": "A lightning dash!"}},
+              "ability": "Dash: a lightning sprint of 8 tiles, through doors too. Three times a game.",
+              "power": {"label": "Dash", "text": "A lightning dash!", "uses": 3}},
 }
 
 # How the crab hunts in a game for two, chosen by the player who hosts it ("text" is what the
@@ -55,6 +55,10 @@ FLAGS = {
     # In a game for two, each player's ability (Space) works once: True once it is used.
     "ability_used_1": False,
     "ability_used_2": False,
+    # How many times each player has used their ability: Flash can dash three times, the others
+    # use theirs once ("uses" in CHARACTERS). Once they are all used, "ability_used_" is True.
+    "ability_count_1": 0,
+    "ability_count_2": 0,
     # A game for two players: player 2 is the other character.
     "two_players": False,
     # In a game for two, how the crab hunts (one of DIFFICULTIES). Games saved before
@@ -196,16 +200,19 @@ ROOMS = {
         "floor": "wood",
         "name": "Helm",
         "description": (
-            "The ship's wheel turns slowly on its own. Through the windows, only fog. "
+            "The ship's wheel turns slowly on its own. Ahead, the bow of the ship cuts through the waves. "
             "On the floor, a faint ring of purple light."
         ),
         "outdoor": False,
         "entry": (11, 8),
+        # Its top wall is open on the sea: two rows of waves and the bow of the ship, behind a
+        # railing. Nobody can go out there: they are as solid as a wall.
+        "view": "sea",
     },
     "east_room": {
         "floor": "wood",
         "name": "Empty room",
-        "description": "An empty room. Marks on the floor show where furniture used to stand.",
+        "description": "A room lined all round with bookshelves of dark wood, veined with red. In the middle, nothing but the floor.",
         "outdoor": False,
         "entry": (2, 5),
     },
@@ -1085,19 +1092,19 @@ OBJECTS = {
         "done_text": None, "reactions": {},
     },
     "helm_wheel": {
-        "kind": "decor", "name": "Ship's wheel", "room": "helm", "pos": (13, 5),
+        "kind": "decor", "name": "Ship's wheel", "room": "helm", "pos": (7, 2), "shift": (8, 0),  # in the middle
         "picture": "decor_wheel", "solid": True,
         "look_text": "The wheel turns by itself, a little at a time. It will not obey you.",
         "done_text": None, "reactions": {},
     },
     "helm_table": {
-        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (13, 1),
+        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (13, 2),
         "picture": "decor_table", "solid": True,
         "look_text": "A compass whose needle spins and spins.",
         "done_text": None, "reactions": {},
     },
     "helm_shelf": {
-        "kind": "decor", "name": "Bookshelf", "room": "helm", "pos": (14, 1),
+        "kind": "decor", "name": "Bookshelf", "room": "helm", "pos": (14, 2),
         "picture": "decor_bookshelf", "solid": True,
         "look_text": "Signal flags, folded with care.",
         "done_text": None, "reactions": {},
@@ -1506,7 +1513,7 @@ OBJECTS = {
         "done_text": None, "reactions": {},
     },
     "helm_table_2": {
-        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (1, 1),
+        "kind": "decor", "name": "Chart table", "room": "helm", "pos": (1, 2),
         "picture": "decor_table", "solid": True,
         "look_text": "Charts of a coast nobody on board has ever seen.",
         "done_text": None, "reactions": {},
@@ -1596,6 +1603,21 @@ OBJECTS = {
         "done_text": None, "reactions": {},
     },
 }
+
+# The bookshelves all round the empty room to the right of the cabin, against its walls:
+# every tile of its edge but those in front of the door to the cabin (on the left).
+_EAST_COLUMNS, _EAST_ROWS = 16, 12
+_EAST_DOOR_ROWS = (4, 5, 6, 7)  # the door is on rows 5 and 6: a tile more on each side, to walk in
+for _col in range(1, _EAST_COLUMNS - 1):
+    for _row in range(1, _EAST_ROWS - 1):
+        _edge = _col in (1, _EAST_COLUMNS - 2) or _row in (1, _EAST_ROWS - 2)
+        if _edge and not (_col == 1 and _row in _EAST_DOOR_ROWS):
+            OBJECTS[f"east_shelf_{_col}_{_row}"] = {
+                "kind": "decor", "name": "Bookshelf", "room": "east_room", "pos": (_col, _row),
+                "picture": "decor_bookshelf_red", "solid": True,
+                "look_text": "Dark wood, veined with red, and books with red spines. Not one has a title.",
+                "done_text": None, "reactions": {},
+            }
 
 # Circuits of generators. When every switch of a circuit is on at the same time,
 # the circuit is complete: "solved_flag" becomes true and "solved_text" is shown.
@@ -1779,6 +1801,8 @@ MESSAGES = {
     "lobby_difficulty": "Crab: {difficulty}",
     "abilities_for_two": "Abilities only work in a game for two.",
     "ability_used": "You have already used your ability.",
+    "dashes_left": "A lightning dash! {left} left",
+    "dashes_none": "A lightning dash! That was the last one",
     "hint_ability": "Space: {label}",
     "hint_nurse": "Nurse: quick help",
     "ability_wasted": "Nothing happens: the crab is still a statue",
@@ -2109,19 +2133,32 @@ def crab_catches_everyone(state):
     return _accept(new, "ending", story.MESSAGES["crab_ending"])
 
 
+def ability_uses(state, player=1):
+    """How many times `player`'s character can use its ability in a game: three dashes for Flash,
+    once for the others, never for one whose ability is always on (the nurse)."""
+    power = story.CHARACTERS[character_of(state, player)]["power"]
+    return 0 if power is None else power.get("uses", 1)
+
+
+def abilities_left(state, player=1):
+    """How many more times `player` can use their ability in this game (0 once it is used up)."""
+    if state["flags"]["ability_used_" + str(player)]:
+        return 0
+    return max(ability_uses(state, player) - state["flags"]["ability_count_" + str(player)], 0)
+
+
 def can_use_ability(state, player=1):
-    """True if `player` still has the ability used with Space: in a game for two, once, and not for
-    a character whose ability is always on. Not after an ending, nor once out of the game."""
+    """True if `player` still has the ability used with Space: in a game for two, as many times as
+    their character can (once, three times for Flash), and not for a character whose ability is
+    always on. Not after an ending, nor once out of the game."""
     if not state["flags"]["two_players"] or is_over(state) or is_out(state, player):
         return False
-    if story.CHARACTERS[character_of(state, player)]["power"] is None:
-        return False
-    return not state["flags"]["ability_used_" + str(player)]
+    return abilities_left(state, player) > 0
 
 
 def use_ability(state, player=1):
-    """`player` uses their ability: it is used up for the whole game. What it does on screen
-    (stunning the crab, vanishing, dashing) is main.py's part."""
+    """`player` uses their ability once: once it has been used as many times as it can, it is used up
+    for the whole game. What it does on screen (stunning the crab, vanishing, dashing) is main.py's part."""
     if not state["flags"]["two_players"]:
         return _refuse(state, "nothing_happens", story.MESSAGES["abilities_for_two"])
     if not can_use_ability(state, player):
@@ -2129,8 +2166,15 @@ def use_ability(state, player=1):
             return _refuse(state, "ability_used", story.MESSAGES["ability_used"])
         return _refuse(state, "nothing_happens", story.MESSAGES["nothing_happens"])
     new = copy.deepcopy(state)
-    new["flags"]["ability_used_" + str(player)] = True
-    return _accept(new, "ability", story.CHARACTERS[character_of(state, player)]["power"]["text"])
+    count = new["flags"]["ability_count_" + str(player)] + 1
+    new["flags"]["ability_count_" + str(player)] = count
+    if count >= ability_uses(state, player):
+        new["flags"]["ability_used_" + str(player)] = True
+    text = story.CHARACTERS[character_of(state, player)]["power"]["text"]
+    if ability_uses(state, player) > 1:
+        left = abilities_left(new, player)
+        text = story.MESSAGES["dashes_left"].format(left=left) if left else story.MESSAGES["dashes_none"]
+    return _accept(new, "ability", text)
 
 
 def item_place(state, item):
@@ -3071,6 +3115,9 @@ def _allowed_values(flag):
             values.append(True)
     if flag in ("ability_used_1", "ability_used_2"):
         values.append(True)
+    if flag in ("ability_count_1", "ability_count_2"):
+        values += list(range(1, max(info["power"].get("uses", 1) if info["power"] else 0
+                                    for info in story.CHARACTERS.values()) + 1))
     if flag == "partner_character":
         values += list(story.CHARACTERS)
     if flag == "character":
@@ -3402,7 +3449,7 @@ def thing_rect(thing):
     info = story.OBJECTS[thing]
     col, row = info["pos"]
     width, height = info.get("size", (1, 1))
-    return tile_rect(col, row, width, height)
+    return tile_rect(col, row, width, height).move(info.get("shift", (0, 0)))  # "shift": pixels off the grid
 
 
 def wall_rects(room):
@@ -3412,7 +3459,7 @@ def wall_rects(room):
     """
     columns, rows = room_size(room)
     sides = {
-        "N": tile_rect(0, 0, columns, 1),
+        "N": tile_rect(0, 0, columns, VIEW_ROWS if story.ROOMS[room].get("view") else 1),
         "S": tile_rect(0, rows - 1, columns, 1),
         "W": tile_rect(0, 0, 1, rows),
         "E": tile_rect(columns - 1, 0, 1, rows),
@@ -3545,6 +3592,10 @@ def spawn_in_front_of(door):
     else:
         rect.midright = (opening.left - SPAWN_GAP, opening.centery)
     return (rect.x, rect.y)
+
+
+PORTAL_EXIT = (0, 1)     # the way a player comes out of a portal: down, away from it (they appear below it)
+PORTAL_STEP_OUT = 10     # frames they walk out by themselves; then the key they held is ignored until let go
 
 
 def spawn_by_portal(portal):
@@ -3855,6 +3906,8 @@ def new_app(fonts):
         "crab_claws": 0.25,      # how open its claws are on this screen: they move toward the pose, a little a frame
         "crab_lunging": False,   # it is about to lunge (see crab_telegraph)
         "chase_left": 0,         # frames the music of a chase goes on before it fades (see chase_music)
+        "portal_out": 0,         # frames left of walking out of a portal by oneself (see finish_portal)
+        "portal_lock": None,     # the direction held when that ended: ignored until it changes
         "act_held": False,       # E is held down on this keyboard (to help a player up)
         "partner_reviving": False,  # E is held down on the other computer, as it said
         "seen": {},              # what this computer has already told about the crab (see crab_news)
@@ -4321,7 +4374,9 @@ def finish_portal(app, action, before, state, outcome):
     player = local_player(app)
     player["pos"] = spawn_by_portal(story.OBJECTS[action["target"]]["to"])
     player["touching"] = None
+    player["facing"] = PORTAL_EXIT  # out of the portal, turned away from it
     settle_on_floor(app, player)
+    app["portal_out"] = PORTAL_STEP_OUT
     if effects.FX["portals"]:
         app["fx"]["warp"] = effects.WARP_FRAMES  # a purple warp instead of the dark fade
     else:
@@ -4670,6 +4725,16 @@ def update(app, dx, dy, act=False):
     if local_player(app)["dash"] > 0:
         dash_step(app)  # dashing: the keys wait
         return
+    if app["portal_out"] > 0:  # just out of a portal: a few steps away from it, whatever is held
+        app["portal_out"] -= 1
+        move_player(app, local_player(app), *PORTAL_EXIT)
+        app["portal_lock"] = (dx, dy) if app["portal_out"] == 0 and (dx, dy) != (0, 0) else None
+        return
+    if app["portal_lock"] is not None:
+        if (dx, dy) == app["portal_lock"]:
+            dx = dy = 0  # still the key held going in: it does not take them back in
+        else:
+            app["portal_lock"] = None
     move_player(app, local_player(app), dx, dy)
 
 
@@ -5875,8 +5940,8 @@ def dashing(app, number):
 
 
 def abilities_used(state):
-    """Which player has used their ability: number -> True or False."""
-    return {number: state["flags"]["ability_used_" + str(number)] for number in (1, 2)}
+    """How many times each player has used their ability: number -> a count."""
+    return {number: state["flags"]["ability_count_" + str(number)] for number in (1, 2)}
 
 
 def ability_news(app):
@@ -5887,8 +5952,8 @@ def ability_news(app):
         return
     used = abilities_used(state)
     for number, now in used.items():
-        if not now or app["seen"].get("abilities", {}).get(number, False) or number > len(app["players"]):
-            continue
+        if now <= app["seen"].get("abilities", {}).get(number, 0) or number > len(app["players"]):
+            continue  # not used again since the last frame
         character = engine.character_of(state, number)
         if engine.player_room(state, number) != view(app)["room"]:
             continue  # elsewhere on the ship: nothing to see here
@@ -6010,10 +6075,58 @@ def ability_hint(app):
     return (story.MESSAGES["hint_ability"].format(label=label), COLORS["highlight"])
 
 
+BOLT = ["..kkk",   # one of Flash's dashes, in the bottom left corner: a lightning bolt
+        ".kyyk",
+        ".kyk.",
+        "kyykk",
+        "kyyyk",
+        ".kyk.",
+        ".kk..",
+        "kk..."]
+BOLT_GAP = 7         # from one bolt to the next
+BOLT_OFF = (16, 14, 20)       # a bolt already used: black...
+BOLT_OFF_EDGE = (128, 126, 140)  # ...with a pale edge, to be seen on the dark sea too
+
+
+def dash_bolts(app):
+    """Flash's dashes in a game for two, for the player on this computer: (left, all), or None for
+    another character, alone, or out of the game."""
+    state = app["state"]
+    number = my_number(app)
+    if not state["flags"]["two_players"] or engine.is_out(state, number) \
+            or engine.ability_uses(state, number) <= 1:
+        return None
+    return engine.abilities_left(state, number), engine.ability_uses(state, number)
+
+
+def draw_bolt(screen, left, top, lit):
+    """One bolt: yellow while that dash is still there, black once it is used."""
+    for y, row in enumerate(BOLT):
+        for x, letter in enumerate(row):
+            if letter == ".":
+                continue
+            if lit:
+                color = COLORS["highlight"] if letter == "y" else COLORS["black"]
+            else:
+                color = BOLT_OFF if letter == "y" else BOLT_OFF_EDGE
+            screen.set_at((left + x, top + y), color)
+
+
 def draw_ability_hint(app, screen):
+    """The bottom left corner: what Space does, while it does something; for Flash, a bolt for each
+    of the three dashes, yellow while it is there and black once used."""
     hint = ability_hint(app)
+    bolts = dash_bolts(app)
+    x = 4
+    if bolts is not None:
+        left, total = bolts
+        top = HEIGHT - 12
+        for index in range(total):
+            draw_bolt(screen, x, top, index < left)
+            x += BOLT_GAP
+        x += 3
     if hint is not None:
-        draw_text(screen, app["fonts"]["text"], hint[0], hint[1], (4, HEIGHT - 12), "left", True)
+        draw_text(screen, app["fonts"]["text"], hint[0], hint[1], (x, HEIGHT - 12), "left", True)
 
 
 # --- Two computers: hosting, joining, and keeping the two games in step ---------------------
@@ -6787,7 +6900,8 @@ SOFT_LIGHTS = {
 DOOR_LIGHT = 18                  # the light that comes in through an open door: its radius...
 DOOR_LIGHT_OUTSIDE = (24, 30, 44)  # ...cold from the storm outside
 DOOR_LIGHT_INSIDE = (36, 28, 14)   # ...warm from another room
-STORM_EVERY = 470                # frames between two flashes of distant lightning on the deck
+STORM_EVERY = 470                # frames between two flashes of distant lightning on the deck...
+STORM_EVERY_LATE = 390           # ...a little more often once the key is fused: the last part of the game
 STORM_FLASH = (12, 16, 26)       # added to the deck while it lasts
 STORM_FRAMES = (0, 1, 4, 5)      # a flash in two flickers
 
@@ -6827,7 +6941,8 @@ def draw_atmosphere(app, surface, state, things):
         if tint is not None:
             effects.tint(layer, light_center(app, thing), tint[0], tint[1])
     surface.blit(layer, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
-    if story.ROOMS[room]["outdoor"] and app["frame"] % STORM_EVERY in STORM_FRAMES:
+    every = STORM_EVERY_LATE if engine.key_fused(state) else STORM_EVERY
+    if story.ROOMS[room]["outdoor"] and app["frame"] % every in STORM_FRAMES:
         surface.fill(STORM_FLASH, special_flags=pygame.BLEND_RGB_ADD)
 
 
@@ -7277,6 +7392,59 @@ def draw_player(app, screen, player):
         pygame.draw.rect(screen, COLORS["black"], eye)
 
 
+VIEW_ROWS = 2          # the rows at the top of a room open on the sea (story.ROOMS "view")
+BOW_HALF = 56          # half the width of the bow where it meets the railing
+BOW_TIP = 3            # how far below the top of the view the tip of the bow is
+VIEW_RAIL = 5          # the height of the railing at the bottom of the view
+BALUSTER_EVERY = 8     # pixels from one post of the railing to the next
+
+
+def bow_shape(band):
+    """The bow of the ship seen from the helm: a point of deck from the railing to the waves."""
+    middle = band.centerx
+    return [(middle - BOW_HALF, band.bottom), (middle, band.top + BOW_TIP), (middle + BOW_HALF, band.bottom)]
+
+
+def draw_sea_view(app, screen, room):
+    """The top of the helm, open on the sea: the stormy waves, the bow of the ship cutting through
+    them with foam along its sides, and a railing in front, casting its shadow on the floor."""
+    columns, _ = room_size(room)
+    band = tile_rect(0, 0, columns, VIEW_ROWS)
+    draw_sea(app, screen, band)
+    if not effects.FX["scenery"]:
+        pygame.draw.polygon(screen, PALETTE_WOOD[1], bow_shape(band))
+        pygame.draw.rect(screen, PALETTE_WOOD[2], (band.left, band.bottom - VIEW_RAIL, band.width, VIEW_RAIL))
+        return
+    left, tip, right = bow_shape(band)
+    for side, (x, y) in ((-1, left), (1, right)):  # foam where the bow meets the waves, moving
+        for step in range(0, BOW_HALF, 3):
+            share = step / BOW_HALF
+            fx = round(tip[0] + (x - tip[0]) * share) + side * (1 + (app["frame"] // 6 + step) % 3)
+            fy = round(tip[1] + (y - tip[1]) * share)
+            screen.set_at((fx, fy), COLORS["foam"])
+    pygame.draw.polygon(screen, PALETTE_WOOD[1], [left, tip, right])
+    for offset in range(-BOW_HALF + 8, BOW_HALF, 8):  # the planks run to the tip
+        top_y = tip[1] + (band.bottom - tip[1]) * abs(offset) / BOW_HALF
+        pygame.draw.line(screen, PALETTE_WOOD[2], (tip[0] + offset * 0.15, top_y + 4), (tip[0] + offset, band.bottom), 1)
+    pygame.draw.line(screen, PALETTE_WOOD[2], tip, (tip[0], band.bottom), 1)
+    for side, end in ((-1, left), (1, right)):  # the gunwales: dark outside, a pale edge inside
+        pygame.draw.line(screen, COLORS["black"], (tip[0], tip[1] - 1), (end[0] + side, end[1]), 2)
+        pygame.draw.line(screen, PALETTE_WOOD[0], (tip[0] - side, tip[1] + 2), (end[0] - side * 2, end[1]), 1)
+    pygame.draw.line(screen, PALETTE_WOOD[2], (tip[0], tip[1] - 3), (tip[0], tip[1]), 1)  # the bowsprit
+    rail = pygame.Rect(band.left, band.bottom - VIEW_RAIL, band.width, VIEW_RAIL)
+    for x in range(band.left + 4, band.right, BALUSTER_EVERY):  # the posts, then the rail on them
+        pygame.draw.rect(screen, COLORS["black"], (x - 1, rail.top - 7, 4, 8))
+        pygame.draw.rect(screen, PALETTE_WOOD[0], (x, rail.top - 6, 2, 7))
+    pygame.draw.rect(screen, COLORS["black"], rail)
+    pygame.draw.rect(screen, PALETTE_WOOD[1], rail.inflate(0, -2))
+    pygame.draw.line(screen, PALETTE_WOOD[0], (rail.left, rail.top + 1), (rail.right, rail.top + 1), 1)
+    reach = scenery.WALL_SHADOW
+    scenery.contact_shadow(screen, pygame.Rect(band.left, band.bottom, band.width, reach[1]), "top", reach[1])
+
+
+PALETTE_WOOD = (sprites.PALETTE["b"], sprites.PALETTE["B"], sprites.PALETTE["n"])  # light, mid, dark
+
+
 def draw_railing_shadow(screen, room):
     """The shadow the railing casts on the deck, under its top rail and beside its left one."""
     columns, rows = room_size(room)
@@ -7443,6 +7611,8 @@ def draw_room(app, screen):
                     screen.blit(picture, tile_rect(col, row))
     if story.ROOMS[room]["outdoor"]:
         draw_railing(screen, room)
+    if story.ROOMS[room].get("view") == "sea":
+        draw_sea_view(app, screen, room)
     things = engine.things_here(state)
     if effects.FX["portals"]:
         for thing in things:
@@ -11417,6 +11587,25 @@ SPRITES = {
         "kkkkkkkkkkkkkkkk",
         "................",
     ],
+    # A bookshelf of dark wood with red veins running through it, its books mostly red and brown.
+    "decor_bookshelf_red": [
+        "kkkkkkkkkkkkkkkk",
+        "knnRRnnnnnRnnnRk",
+        "kRrrwRRyrrwPrrnk",
+        "knrrwRRyrrwPrrRk",
+        "kRrrwRRyrrwPrrnk",
+        "knrrwRRyrrwPrrnk",
+        "knRnnnRRnnnnRRnk",
+        "kRwrrRYYrPPrRwRk",
+        "knwrrRYYrPPrRwnk",
+        "knwrrRYYrPPrRwRk",
+        "kRwrrRYYrPPrRwnk",
+        "knnnRRnnnnnRnnnk",
+        "knRnnnRRnnnnRnnk",
+        "knnRnnnnnRRnnnnk",
+        "kkkkkkkkkkkkkkkk",
+        "................",
+    ],
     "decor_table": [
         "................",
         "................",
@@ -12041,7 +12230,10 @@ CHARACTER_LOOKS = {
               "patches": {"down": {9: ".y............y.", 10: "y..............y", 11: ".y............y.",
                                    15: ".....oooooo.....", 16: "...oo...........", 17: "........y.......",
                                    18: ".......yy.......", 19: ".......y........", 20: ".....yyyyyy....."},
-                          "up": {15: ".....oooooo.....", 16: "......oo........", 17: "......oo........",
+                          "up": {7: "y..............y", 8: "yy............yy",  # the wings, from behind too:
+                                 9: ".y............y.", 10: "yy............yy",  # a little bigger, as they
+                                 11: "y..............y", 12: "Y..............Y",  # stand out against the cowl
+                                 15: ".....oooooo.....", 16: "......oo........", 17: "......oo........",
                                  18: ".......o........", 20: ".....yyyyyy....."},
                           "right": {9: "...y............", 10: "..y.............", 11: "...y............",
                                     15: "....oooooo......", 17: "......y.........", 18: ".....yy.........",
@@ -14771,17 +14963,45 @@ def two_as(character, partner, steps=()):
 
 
 def test_an_ability_works_once_in_a_game_for_two_and_is_remembered():
-    state = two_as("wizard", "flash")
+    state = two_as("wizard", "ghost")
     assert engine.can_use_ability(state, 1) and engine.can_use_ability(state, 2)
     before = copy.deepcopy(state)
     used, outcome = engine.perform(state, ABILITY, 2)
     assert state == before
-    assert outcome == {"ok": True, "event": "ability", "text": story.CHARACTERS["flash"]["power"]["text"]}
+    assert outcome == {"ok": True, "event": "ability", "text": story.CHARACTERS["ghost"]["power"]["text"]}
     assert not engine.can_use_ability(used, 2) and engine.can_use_ability(used, 1)  # each their own
     assert reopen(used) == used  # used up for good, also after reopening the game
     again, outcome = engine.perform(used, ABILITY, 2)
     assert not outcome["ok"] and outcome["event"] == "ability_used" and again is used
     assert engine.perform(used, ABILITY, 1)[1]["ok"]
+
+
+def test_flash_can_dash_three_times_in_a_game():
+    state = two_as("wizard", "flash")
+    assert engine.ability_uses(state, 2) == 3 and engine.ability_uses(state, 1) == 1
+    texts = []
+    for left in (2, 1, 0):
+        state, outcome = engine.perform(state, ABILITY, 2)
+        assert outcome["ok"] and engine.abilities_left(state, 2) == left
+        assert state["flags"]["ability_used_2"] == (left == 0)  # used up only after the third
+        assert reopen(state) == state  # kept with the game
+        texts.append(outcome["text"])
+    assert texts == [story.MESSAGES["dashes_left"].format(left=2), story.MESSAGES["dashes_left"].format(left=1),
+                     story.MESSAGES["dashes_none"]]
+    again, outcome = engine.perform(state, ABILITY, 2)
+    assert not outcome["ok"] and outcome["event"] == "ability_used" and again is state
+    assert engine.abilities_left(state, 1) == 1  # the other player's are their own
+
+
+def test_the_dashes_used_go_through_the_save_and_nothing_else_does():
+    for count in (0, 1, 2, 3):
+        assert engine.restore_state(restorable(flags={"ability_count_2": count})) is not None
+    for wrong in (4, -1, "two", None):
+        assert engine.restore_state(restorable(flags={"ability_count_2": wrong})) is None, wrong
+    old = restorable(flags={"two_players": True, "partner_character": "flash", "ability_used_2": True})
+    assert engine.abilities_left(engine.restore_state(old), 2) == 0  # saved before: its one dash is gone
+    nurse = two_as("wizard", "nurse")
+    assert engine.ability_uses(nurse, 2) == 0 and engine.abilities_left(nurse, 2) == 0
 
 
 def test_alone_there_are_no_abilities():
@@ -14859,7 +15079,7 @@ def test_the_heart_is_wasted_when_nobody_is_out():
 
 
 def test_an_ability_already_used_does_not_come_back_with_the_heart():
-    state = engine.perform(two_as("wizard", "flash", GET_KEY), ABILITY, 2)[0]
+    state = engine.perform(two_as("wizard", "ghost", GET_KEY), ABILITY, 2)[0]
     state = in_the_mine(engine.knock_out(state, 2)[0], 1)
     after = engine.perform(state, act("pick_up", "heart"), 1)[0]
     assert not engine.is_out(after, 2) and not engine.can_use_ability(after, 2)
@@ -16278,8 +16498,14 @@ def test_walking_into_the_portal_leads_to_the_mine_and_back(app):
     assert p1(app)["pos"] == main.spawn_by_portal("mine_portal")
     assert app["banner"] == story.ROOMS["mine"]["name"]
     assert engine.restore_state(save.load_game())["room"] == "mine"  # saved at once
+    assert p1(app)["facing"] == main.PORTAL_EXIT  # turned away from the portal...
+    arrived = p1(app)["pos"]
+    for _ in range(main.PORTAL_STEP_OUT + 20):
+        main.update(app, 0, -1)  # ...walking out by itself, and the key still held does not take it back
+    assert app["state"]["room"] == "mine" and p1(app)["pos"][1] > arrived[1]
+    main.update(app, 0, 0)  # the key let go, and pressed again: now it goes back in
     walk_until(app, lambda x, y: app["state"]["room"] == "corridor_end", lambda x, y: (0, -1), limit=60)
-    assert p1(app)["pos"] == main.spawn_by_portal("corridor_portal")
+    assert p1(app)["pos"] == main.spawn_by_portal("corridor_portal") and p1(app)["facing"] == main.PORTAL_EXIT
 
 
 def test_arriving_by_a_portal_lands_on_free_floor():
@@ -16309,6 +16535,8 @@ def test_the_mine_portal_takes_the_player_to_the_helm_and_not_back(app, heard):
     assert heard == ["ding"]
     assert engine.restore_state(save.load_game())["room"] == "helm"
     saved = save.load_game()
+    for _ in range(main.PORTAL_STEP_OUT):
+        main.update(app, 0, 0)  # out of the ring by itself
     walk_until(app, lambda x, y: main.portal_touched(app["state"], p1(app)["pos"]) == "helm_portal",
                lambda x, y: (0, -1), limit=60)  # straight back into the ring
     for _ in range(30):
@@ -17341,8 +17569,12 @@ def test_flash_dashes_eight_tiles_the_way_they_face_in_a_few_frames(app, heard):
     for _ in range(main.AFTERIMAGE_FRAMES):
         main.update(app, 0, 0)
     assert app["afterimages"] == []
+    for _ in range(2):  # three dashes in all...
+        p1(app)["facing"] = (-1, 0)
+        press(app, pygame.K_SPACE)
+        dash_out(app)
     where = p1(app)["pos"]
-    press(app, pygame.K_SPACE)  # once only
+    press(app, pygame.K_SPACE)  # ...and no more
     dash_out(app)
     assert p1(app)["pos"] == where
 
@@ -19483,6 +19715,132 @@ def test_the_hard_crab_walks_straight_where_it_can():
     start.center = main.tile_rect(2, 2).center
     assert main.straight_way(start.topleft, main.tile_rect(2, 6).center, wall)
     assert not main.straight_way(start.topleft, main.tile_rect(8, 2).center, wall)
+
+
+# --- Flash: three dashes, three bolts in the corner, wings seen from behind ---
+
+
+def bolt_colours(app):
+    """The colour in the middle of each bolt in the bottom left corner."""
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+    return [tuple(screen.get_at((4 + index * main.BOLT_GAP + 2, main.HEIGHT - 12 + 4)))[:3] for index in range(3)]
+
+
+def test_flash_sees_a_bolt_for_each_dash_left_yellow_then_black(app):
+    flash_game(app)
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    assert main.dash_bolts(app) == (3, 3)
+    assert bolt_colours(app) == [main.COLORS["highlight"]] * 3
+    for left in (2, 1, 0):
+        p1(app)["facing"] = (1, 0) if left % 2 else (-1, 0)
+        press(app, pygame.K_SPACE)
+        dash_out(app)
+        assert main.dash_bolts(app) == (left, 3)
+        assert bolt_colours(app) == [main.COLORS["highlight"]] * left + [main.BOLT_OFF] * (3 - left)
+    assert main.ability_hint(app) is None  # all used: only the black bolts are left
+
+
+def test_only_flash_has_bolts_and_only_on_their_own_screen(app):
+    flash_game(app)
+    as_characters(app, "wizard", "flash")  # the other player is Flash
+    assert main.dash_bolts(app) is None
+    app["state"] = engine.new_game("flash")
+    assert main.dash_bolts(app) is None  # alone, no abilities
+
+
+def test_every_dash_bursts_into_sparks(app):
+    flash_game(app)
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    main.update(app, 0, 0)  # the first frame in the room clears the effects of the one before
+    bursts = 0
+    for side in ((1, 0), (-1, 0)):
+        app["fx"]["particles"].clear()
+        p1(app)["facing"] = side
+        press(app, pygame.K_SPACE)
+        main.update(app, 0, 0)
+        bursts += any(one["color"] in main.DASH_SPARKS for one in app["fx"]["particles"])
+    assert bursts == 2  # not only the first one
+
+
+def test_flash_keeps_the_lightning_wings_on_the_ears_from_behind():
+    for step in range(3):
+        rows = sprites.SPRITES[f"flash_up_{step}"]
+        wing = [(x, y) for y in range(6, 14) for x in (0, 1) if rows[y][x] in "yY"]
+        assert len(wing) >= 7  # bigger than the three pixels seen from the front
+        assert all(rows[y][15 - x] in "yY" for x, y in wing)  # the same on both ears
+
+
+# --- The empty room's bookshelves, the helm open on the sea, the late storm ---
+
+
+def test_bookshelves_of_red_veined_wood_line_the_empty_room_but_its_door(app):
+    shelves = {info["pos"] for info in story.OBJECTS.values()
+               if info["room"] == "east_room" and info.get("picture") == "decor_bookshelf_red"}
+    columns, rows = main.room_size("east_room")
+    edge = {(col, row) for col in range(1, columns - 1) for row in range(1, rows - 1)
+            if col in (1, columns - 2) or row in (1, rows - 2)}
+    door_col, door_row, _, height = main.door_tiles("east_room_to_cabin")
+    way_in = {(1, row) for row in range(door_row - 1, door_row + height + 1)}
+    assert shelves == edge - way_in
+    assert all(story.OBJECTS[name]["solid"] for name in story.OBJECTS if name.startswith("east_shelf"))
+    picture = sprites.SPRITES["decor_bookshelf_red"]
+    assert "R" in picture[1] and sum(row.count("R") for row in picture) > 20  # veined with red
+    state = engine.new_game()
+    state["room"] = "east_room"
+    assert main.is_free_floor(state, main.spawn_at_entry("east_room"))
+    anvil = main.thing_rect("anvil")
+    assert anvil.inflate(2 * main.TILE, 2 * main.TILE).collidelist(
+        [main.thing_rect(name) for name in story.OBJECTS if name.startswith("east_shelf")]) == -1  # room around it
+
+
+def test_the_helm_opens_on_the_sea_and_the_bow_behind_a_railing(app):
+    state = engine.new_game()
+    state["room"] = "helm"
+    columns, _ = main.room_size("helm")
+    view = main.tile_rect(0, 0, columns, main.VIEW_ROWS)
+    assert any(wall.contains(view) for wall in main.wall_rects("helm"))  # nobody walks out there
+    for name, info in story.OBJECTS.items():
+        if info["room"] == "helm":
+            assert info["pos"][1] >= main.VIEW_ROWS, name
+    for name, info in story.ITEMS.items():
+        if info["room"] == "helm":
+            assert info["pos"][1] >= main.VIEW_ROWS, name
+    screen = pygame.Surface(main.room_surface("helm").get_size())
+    main.draw_sea_view(app, screen, "helm")
+    sea = pygame.transform.average_color(screen, pygame.Rect(view.left, view.top, 40, 20))
+    assert sea[2] > sea[0] + 40  # the waves, at the side: blue
+    left, tip, right = main.bow_shape(view)
+    assert tip[0] == view.centerx and tip[1] < view.centery
+    middle = screen.get_at((tip[0] + 2, view.top + 16))[:3]
+    assert middle == sprites.PALETTE["B"]  # wood, in the middle above the railing: the bow
+
+
+def test_the_wheel_stands_at_the_top_in_the_middle_of_the_helm():
+    wheel = main.thing_rect("helm_wheel")
+    columns, _ = main.room_size("helm")
+    assert wheel.centerx == main.tile_rect(0, 0, columns, 1).centerx
+    assert wheel.top == main.tile_rect(0, main.VIEW_ROWS).top  # right below the railing
+
+
+def test_lightning_flashes_a_little_more_often_once_the_key_is_fused(app, monkeypatch):
+    monkeypatch.setitem(effects.FX, "atmosphere", True)
+    def flashes(actions):
+        two_playing(app, actions)
+        app["state"]["room"] = "deck"
+        app["state"]["flags"]["partner_room"] = "deck"
+        count = 0
+        for frame in range(0, 6000, 1):
+            if frame % main.STORM_EVERY_LATE in main.STORM_FRAMES or frame % main.STORM_EVERY in main.STORM_FRAMES:
+                app["frame"] = frame
+                calm = pygame.Surface((20, 20))
+                calm.fill((100, 100, 100))
+                main.draw_atmosphere(app, calm, main.view(app), [])
+                count += calm.get_at((5, 5))[2] > 120
+        return count
+    early, late = flashes(FIRST_HALF), flashes(KEY_FUSED)
+    assert early < late < early * 1.4  # more often, but only a little
+    assert main.STORM_EVERY_LATE < main.STORM_EVERY
 
 
 ================================================================================

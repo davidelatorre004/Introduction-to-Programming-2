@@ -1029,6 +1029,25 @@ SPRITES = {
         "kkkkkkkkkkkkkkkk",
         "................",
     ],
+    # A bookshelf of dark wood with red veins running through it, its books mostly red and brown.
+    "decor_bookshelf_red": [
+        "kkkkkkkkkkkkkkkk",
+        "knnRRnnnnnRnnnRk",
+        "kRrrwRRyrrwPrrnk",
+        "knrrwRRyrrwPrrRk",
+        "kRrrwRRyrrwPrrnk",
+        "knrrwRRyrrwPrrnk",
+        "knRnnnRRnnnnRRnk",
+        "kRwrrRYYrPPrRwRk",
+        "knwrrRYYrPPrRwnk",
+        "knwrrRYYrPPrRwRk",
+        "kRwrrRYYrPPrRwnk",
+        "knnnRRnnnnnRnnnk",
+        "knRnnnRRnnnnRnnk",
+        "knnRnnnnnRRnnnnk",
+        "kkkkkkkkkkkkkkkk",
+        "................",
+    ],
     "decor_table": [
         "................",
         "................",
@@ -1653,7 +1672,10 @@ CHARACTER_LOOKS = {
               "patches": {"down": {9: ".y............y.", 10: "y..............y", 11: ".y............y.",
                                    15: ".....oooooo.....", 16: "...oo...........", 17: "........y.......",
                                    18: ".......yy.......", 19: ".......y........", 20: ".....yyyyyy....."},
-                          "up": {15: ".....oooooo.....", 16: "......oo........", 17: "......oo........",
+                          "up": {7: "y..............y", 8: "yy............yy",  # the wings, from behind too:
+                                 9: ".y............y.", 10: "yy............yy",  # a little bigger, as they
+                                 11: "y..............y", 12: "Y..............Y",  # stand out against the cowl
+                                 15: ".....oooooo.....", 16: "......oo........", 17: "......oo........",
                                  18: ".......o........", 20: ".....yyyyyy....."},
                           "right": {9: "...y............", 10: "..y.............", 11: "...y............",
                                     15: "....oooooo......", 17: "......y.........", 18: ".....yy.........",

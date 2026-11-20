@@ -1217,8 +1217,14 @@ def test_walking_into_the_portal_leads_to_the_mine_and_back(app):
     assert p1(app)["pos"] == main.spawn_by_portal("mine_portal")
     assert app["banner"] == story.ROOMS["mine"]["name"]
     assert engine.restore_state(save.load_game())["room"] == "mine"  # saved at once
+    assert p1(app)["facing"] == main.PORTAL_EXIT  # turned away from the portal...
+    arrived = p1(app)["pos"]
+    for _ in range(main.PORTAL_STEP_OUT + 20):
+        main.update(app, 0, -1)  # ...walking out by itself, and the key still held does not take it back
+    assert app["state"]["room"] == "mine" and p1(app)["pos"][1] > arrived[1]
+    main.update(app, 0, 0)  # the key let go, and pressed again: now it goes back in
     walk_until(app, lambda x, y: app["state"]["room"] == "corridor_end", lambda x, y: (0, -1), limit=60)
-    assert p1(app)["pos"] == main.spawn_by_portal("corridor_portal")
+    assert p1(app)["pos"] == main.spawn_by_portal("corridor_portal") and p1(app)["facing"] == main.PORTAL_EXIT
 
 
 def test_arriving_by_a_portal_lands_on_free_floor():
@@ -1248,6 +1254,8 @@ def test_the_mine_portal_takes_the_player_to_the_helm_and_not_back(app, heard):
     assert heard == ["ding"]
     assert engine.restore_state(save.load_game())["room"] == "helm"
     saved = save.load_game()
+    for _ in range(main.PORTAL_STEP_OUT):
+        main.update(app, 0, 0)  # out of the ring by itself
     walk_until(app, lambda x, y: main.portal_touched(app["state"], p1(app)["pos"]) == "helm_portal",
                lambda x, y: (0, -1), limit=60)  # straight back into the ring
     for _ in range(30):
@@ -2280,8 +2288,12 @@ def test_flash_dashes_eight_tiles_the_way_they_face_in_a_few_frames(app, heard):
     for _ in range(main.AFTERIMAGE_FRAMES):
         main.update(app, 0, 0)
     assert app["afterimages"] == []
+    for _ in range(2):  # three dashes in all...
+        p1(app)["facing"] = (-1, 0)
+        press(app, pygame.K_SPACE)
+        dash_out(app)
     where = p1(app)["pos"]
-    press(app, pygame.K_SPACE)  # once only
+    press(app, pygame.K_SPACE)  # ...and no more
     dash_out(app)
     assert p1(app)["pos"] == where
 
@@ -4422,3 +4434,129 @@ def test_the_hard_crab_walks_straight_where_it_can():
     start.center = main.tile_rect(2, 2).center
     assert main.straight_way(start.topleft, main.tile_rect(2, 6).center, wall)
     assert not main.straight_way(start.topleft, main.tile_rect(8, 2).center, wall)
+
+
+# --- Flash: three dashes, three bolts in the corner, wings seen from behind ---
+
+
+def bolt_colours(app):
+    """The colour in the middle of each bolt in the bottom left corner."""
+    screen = pygame.Surface((main.WIDTH, main.HEIGHT))
+    main.draw(app, screen)
+    return [tuple(screen.get_at((4 + index * main.BOLT_GAP + 2, main.HEIGHT - 12 + 4)))[:3] for index in range(3)]
+
+
+def test_flash_sees_a_bolt_for_each_dash_left_yellow_then_black(app):
+    flash_game(app)
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    assert main.dash_bolts(app) == (3, 3)
+    assert bolt_colours(app) == [main.COLORS["highlight"]] * 3
+    for left in (2, 1, 0):
+        p1(app)["facing"] = (1, 0) if left % 2 else (-1, 0)
+        press(app, pygame.K_SPACE)
+        dash_out(app)
+        assert main.dash_bolts(app) == (left, 3)
+        assert bolt_colours(app) == [main.COLORS["highlight"]] * left + [main.BOLT_OFF] * (3 - left)
+    assert main.ability_hint(app) is None  # all used: only the black bolts are left
+
+
+def test_only_flash_has_bolts_and_only_on_their_own_screen(app):
+    flash_game(app)
+    as_characters(app, "wizard", "flash")  # the other player is Flash
+    assert main.dash_bolts(app) is None
+    app["state"] = engine.new_game("flash")
+    assert main.dash_bolts(app) is None  # alone, no abilities
+
+
+def test_every_dash_bursts_into_sparks(app):
+    flash_game(app)
+    p1(app)["pos"] = free_spot(app, 3, 6)
+    main.update(app, 0, 0)  # the first frame in the room clears the effects of the one before
+    bursts = 0
+    for side in ((1, 0), (-1, 0)):
+        app["fx"]["particles"].clear()
+        p1(app)["facing"] = side
+        press(app, pygame.K_SPACE)
+        main.update(app, 0, 0)
+        bursts += any(one["color"] in main.DASH_SPARKS for one in app["fx"]["particles"])
+    assert bursts == 2  # not only the first one
+
+
+def test_flash_keeps_the_lightning_wings_on_the_ears_from_behind():
+    for step in range(3):
+        rows = sprites.SPRITES[f"flash_up_{step}"]
+        wing = [(x, y) for y in range(6, 14) for x in (0, 1) if rows[y][x] in "yY"]
+        assert len(wing) >= 7  # bigger than the three pixels seen from the front
+        assert all(rows[y][15 - x] in "yY" for x, y in wing)  # the same on both ears
+
+
+# --- The empty room's bookshelves, the helm open on the sea, the late storm ---
+
+
+def test_bookshelves_of_red_veined_wood_line_the_empty_room_but_its_door(app):
+    shelves = {info["pos"] for info in story.OBJECTS.values()
+               if info["room"] == "east_room" and info.get("picture") == "decor_bookshelf_red"}
+    columns, rows = main.room_size("east_room")
+    edge = {(col, row) for col in range(1, columns - 1) for row in range(1, rows - 1)
+            if col in (1, columns - 2) or row in (1, rows - 2)}
+    door_col, door_row, _, height = main.door_tiles("east_room_to_cabin")
+    way_in = {(1, row) for row in range(door_row - 1, door_row + height + 1)}
+    assert shelves == edge - way_in
+    assert all(story.OBJECTS[name]["solid"] for name in story.OBJECTS if name.startswith("east_shelf"))
+    picture = sprites.SPRITES["decor_bookshelf_red"]
+    assert "R" in picture[1] and sum(row.count("R") for row in picture) > 20  # veined with red
+    state = engine.new_game()
+    state["room"] = "east_room"
+    assert main.is_free_floor(state, main.spawn_at_entry("east_room"))
+    anvil = main.thing_rect("anvil")
+    assert anvil.inflate(2 * main.TILE, 2 * main.TILE).collidelist(
+        [main.thing_rect(name) for name in story.OBJECTS if name.startswith("east_shelf")]) == -1  # room around it
+
+
+def test_the_helm_opens_on_the_sea_and_the_bow_behind_a_railing(app):
+    state = engine.new_game()
+    state["room"] = "helm"
+    columns, _ = main.room_size("helm")
+    view = main.tile_rect(0, 0, columns, main.VIEW_ROWS)
+    assert any(wall.contains(view) for wall in main.wall_rects("helm"))  # nobody walks out there
+    for name, info in story.OBJECTS.items():
+        if info["room"] == "helm":
+            assert info["pos"][1] >= main.VIEW_ROWS, name
+    for name, info in story.ITEMS.items():
+        if info["room"] == "helm":
+            assert info["pos"][1] >= main.VIEW_ROWS, name
+    screen = pygame.Surface(main.room_surface("helm").get_size())
+    main.draw_sea_view(app, screen, "helm")
+    sea = pygame.transform.average_color(screen, pygame.Rect(view.left, view.top, 40, 20))
+    assert sea[2] > sea[0] + 40  # the waves, at the side: blue
+    left, tip, right = main.bow_shape(view)
+    assert tip[0] == view.centerx and tip[1] < view.centery
+    middle = screen.get_at((tip[0] + 2, view.top + 16))[:3]
+    assert middle == sprites.PALETTE["B"]  # wood, in the middle above the railing: the bow
+
+
+def test_the_wheel_stands_at_the_top_in_the_middle_of_the_helm():
+    wheel = main.thing_rect("helm_wheel")
+    columns, _ = main.room_size("helm")
+    assert wheel.centerx == main.tile_rect(0, 0, columns, 1).centerx
+    assert wheel.top == main.tile_rect(0, main.VIEW_ROWS).top  # right below the railing
+
+
+def test_lightning_flashes_a_little_more_often_once_the_key_is_fused(app, monkeypatch):
+    monkeypatch.setitem(effects.FX, "atmosphere", True)
+    def flashes(actions):
+        two_playing(app, actions)
+        app["state"]["room"] = "deck"
+        app["state"]["flags"]["partner_room"] = "deck"
+        count = 0
+        for frame in range(0, 6000, 1):
+            if frame % main.STORM_EVERY_LATE in main.STORM_FRAMES or frame % main.STORM_EVERY in main.STORM_FRAMES:
+                app["frame"] = frame
+                calm = pygame.Surface((20, 20))
+                calm.fill((100, 100, 100))
+                main.draw_atmosphere(app, calm, main.view(app), [])
+                count += calm.get_at((5, 5))[2] > 120
+        return count
+    early, late = flashes(FIRST_HALF), flashes(KEY_FUSED)
+    assert early < late < early * 1.4  # more often, but only a little
+    assert main.STORM_EVERY_LATE < main.STORM_EVERY
